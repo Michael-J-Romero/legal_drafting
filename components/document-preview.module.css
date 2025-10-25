@@ -1,0 +1,184 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.title {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: #52606d;
+}
+
+.printButton {
+  align-self: flex-start;
+  padding: 0.75rem 1.25rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.printButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3);
+}
+
+.secondaryButton {
+  align-self: flex-start;
+  padding: 0.75rem 1.25rem;
+  border-radius: 999px;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: white;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.12);
+}
+
+.compile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.compileStatus {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #52606d;
+  max-width: 18rem;
+  text-align: right;
+}
+
+.previewScroller {
+  background: white;
+  border-radius: 1rem;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+  padding: 1.5rem;
+  overflow: auto;
+  max-height: 75vh;
+}
+
+.previewSurface {
+  background: white;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  counter-reset: fragment;
+}
+
+.fragment {
+  padding: 2rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+
+.fragment::before {
+  counter-increment: fragment;
+  content: 'Section ' counter(fragment);
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #9aa5b1;
+  margin-bottom: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.8rem;
+}
+
+.markdown h2 {
+  font-size: 1.5rem;
+}
+
+.markdown h3 {
+  font-size: 1.25rem;
+}
+
+.markdown p {
+  margin: 0.75rem 0;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.75rem 0 0.75rem 1.5rem;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid #d9e2ec;
+  padding: 0.5rem 0.75rem;
+}
+
+.markdown blockquote {
+  border-left: 4px solid #2563eb;
+  background: #eff6ff;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  color: #364152;
+}
+
+.pdfFallback {
+  padding: 1rem;
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 0.75rem;
+  border: 1px dashed rgba(37, 99, 235, 0.3);
+  color: #2563eb;
+  font-weight: 500;
+  text-align: center;
+}
