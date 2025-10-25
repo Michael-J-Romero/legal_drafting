@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -5,14 +7,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
-import './App.css';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url,
-).toString();
 
 let fragmentCounter = 0;
 
@@ -508,6 +504,10 @@ function HeadingFieldList({
 }
 
 export default function App() {
+  useEffect(() => {
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+  }, []);
+
   const [leftHeadingFields, setLeftHeadingFields] = useState([
     'Jane Q. Attorney (SBN 123456)',
     'Example Law Group LLP',
