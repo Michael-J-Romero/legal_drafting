@@ -1,6 +1,8 @@
 node_modules
 .DS_Store
 dist
+.next
+out
 npm-debug.log*
 .env
 .vscode
