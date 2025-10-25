@@ -16,19 +16,44 @@ import '/src/App.css';
   
 let fragmentCounter = 0;
 
+// Resolve a pdfjs module regardless of how it was bundled
+function resolvePdfjsModule(mod) {
+  if (!mod) return null;
+  if (mod.getDocument) return mod;
+  if (mod.default && mod.default.getDocument) return mod.default;
+  if (mod.default && mod.default.default && mod.default.default.getDocument) {
+    return mod.default.default;
+  }
+  return null;
+}
+
 // Load pdfjs from specific known entry points to avoid webpack context warnings
 async function loadPdfjs() {
-  try {
-    const mod = await import('pdfjs-dist/legacy/build/pdf');
-    return (mod && (mod.getDocument ? mod : mod.default)) || null;
-  } catch (e) {
+  const attempts = [
+    async () => import('pdfjs-dist/legacy/build/pdf.js'),
+    async () => import('pdfjs-dist/legacy/build/pdf.min.js'),
+    async () => import('pdfjs-dist/legacy/build/pdf'),
+    async () => import('pdfjs-dist/build/pdf.js'),
+    async () => import('pdfjs-dist/build/pdf.min.js'),
+    async () => import('pdfjs-dist/build/pdf'),
+  ];
+  const errors = [];
+  for (const attempt of attempts) {
     try {
-      const mod2 = await import('pdfjs-dist/build/pdf');
-      return (mod2 && (mod2.getDocument ? mod2 : mod2.default)) || null;
-    } catch (e2) {
-      return null;
+      const mod = await attempt();
+      const pdfjs = resolvePdfjsModule(mod);
+      if (pdfjs && pdfjs.getDocument) {
+        return pdfjs;
+      }
+      errors.push(new Error('Loaded pdfjs module is missing getDocument'));
+    } catch (error) {
+      errors.push(error);
     }
   }
+  if (errors.length) {
+    console.error('Failed to load pdfjs-dist. Falling back to iframe preview.', errors);
+  }
+  return null;
 }
 
 const LETTER_WIDTH = 612; // 8.5in * 72
@@ -172,6 +197,7 @@ function PdfPreview({ data }) {
           await page.render({ canvasContext: context, viewport }).promise;
         }
       } catch (err) {
+        console.error('Failed to render PDF preview. Falling back to native viewer.', err);
         // Fallback: embed browser PDF viewer via object URL
         try {
           objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
@@ -186,6 +212,7 @@ function PdfPreview({ data }) {
           wrapper.appendChild(iframe);
           container.appendChild(wrapper);
         } catch (fallbackErr) {
+          console.error('Failed to render PDF using iframe fallback.', fallbackErr);
           const fallback = document.createElement('div');
           fallback.className = 'page-surface pdf-placeholder';
           const msg = err && (err.message || String(err));
