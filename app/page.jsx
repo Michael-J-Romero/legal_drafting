@@ -8,8 +8,8 @@ import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
 import '../src/App.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.js',
