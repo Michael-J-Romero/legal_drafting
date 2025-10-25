@@ -1,0 +1,47 @@
+.fragment-page {
+  background: white;
+  padding: 32px;
+  margin: 24px auto;
+  max-width: 740px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+}
+
+.fragment-heading {
+  margin-top: 0;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.markdown {
+  color: #1f2933;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.25rem;
+}
+
+.pdf-fragment {
+  display: flex;
+  justify-content: center;
+}
+
+.pdf-fragment canvas {
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+}
