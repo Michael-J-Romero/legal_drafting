@@ -1,0 +1,32 @@
+{
+  "name": "legal_drafting",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.10",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.5.136",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "^9.0.3",
+    "react-pdf": "^9.1.0",
+    "react-to-print": "^2.15.1",
+    "remark-gfm": "^4.0.0",
+    "pagedjs": "^0.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.10",
+    "typescript": "^5.6.3"
+  }
+}
