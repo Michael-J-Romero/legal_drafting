@@ -1,0 +1,7 @@
+.body {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at top, #ffffff 0%, #f3f6fb 50%, #e5ecf8 100%);
+}

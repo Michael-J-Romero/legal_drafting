@@ -1,0 +1,96 @@
+.wrapper {
+  padding: 3rem clamp(1.5rem, 3vw, 4rem) 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(2rem, 2.6vw, 2.5rem);
+  color: #0f172a;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: #475569;
+  max-width: 40rem;
+}
+
+.actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.primaryAction {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.primaryAction:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.45);
+}
+
+.secondaryAction {
+  background: white;
+  color: #1e293b;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.secondaryAction:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.secondaryAction:not(:disabled):hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.previewContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  align-items: center;
+}
+
+.status {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+@media print {
+  .wrapper {
+    padding: 0;
+  }
+
+  .toolbar,
+  .status {
+    display: none;
+  }
+
+  .previewContainer {
+    gap: 0;
+    align-items: stretch;
+  }
+}

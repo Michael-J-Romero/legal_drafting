@@ -1,0 +1,39 @@
+.fragment {
+  padding: 2rem;
+  background: white;
+  margin: 0 auto 2rem;
+  width: 8.5in;
+  min-height: 11in;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+  border-radius: 0.375rem;
+  color: #1f2937;
+}
+
+.fragment :global(h1) {
+  font-size: 2.2rem;
+  margin-bottom: 0.8rem;
+}
+
+.fragment :global(h2) {
+  font-size: 1.8rem;
+  margin-bottom: 0.6rem;
+}
+
+.fragment :global(p) {
+  margin-bottom: 0.75rem;
+}
+
+@media print {
+  .fragment {
+    box-shadow: none;
+    border-radius: 0;
+    width: auto;
+    min-height: unset;
+    margin: 0;
+    page-break-after: always;
+  }
+
+  .fragment:last-of-type {
+    page-break-after: auto;
+  }
+}
