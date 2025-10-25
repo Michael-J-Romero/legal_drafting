@@ -71,12 +71,9 @@ function resolvePdfjsModule(mod) {
 async function loadPdfjs() {
   ensurePdfjsGlobals();
   const attempts = [
-    async () => import('pdfjs-dist/legacy/build/pdf.js'),
-    async () => import('pdfjs-dist/legacy/build/pdf.min.js'),
     async () => import('pdfjs-dist/legacy/build/pdf'),
-    async () => import('pdfjs-dist/build/pdf.js'),
-    async () => import('pdfjs-dist/build/pdf.min.js'),
     async () => import('pdfjs-dist/build/pdf'),
+    async () => import('pdfjs-dist'),
   ];
   const errors = [];
   for (const attempt of attempts) {
