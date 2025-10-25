@@ -5,3 +5,4 @@ npm-debug.log*
 .env
 .vscode
 .idea
+test
