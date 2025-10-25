@@ -1,0 +1,20 @@
+.pdf-fragment {
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  padding: 1rem 0;
+  margin: 0 auto;
+  max-width: 816px;
+  width: 100%;
+}
+
+.pdf-fragment canvas {
+  margin: 0 auto 1rem;
+  display: block;
+}
+
+.pdf-loading {
+  padding: 2rem;
+  text-align: center;
+  color: #4b5563;
+}

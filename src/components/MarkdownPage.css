@@ -1,0 +1,51 @@
+.markdown-page {
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  padding: 2rem;
+  margin: 0 auto;
+  max-width: 816px;
+  min-height: 1056px;
+  width: 100%;
+  color: #1f2937;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.markdown-page h1,
+.markdown-page h2,
+.markdown-page h3,
+.markdown-page h4 {
+  color: #111827;
+  margin-top: 1.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-page p {
+  margin: 0.75rem 0;
+}
+
+.markdown-page ul,
+.markdown-page ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-page table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.markdown-page table th,
+.markdown-page table td {
+  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.markdown-page blockquote {
+  margin: 1rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid #6366f1;
+  color: #374151;
+}

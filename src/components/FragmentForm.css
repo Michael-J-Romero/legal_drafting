@@ -1,0 +1,66 @@
+.fragment-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  max-width: 960px;
+  margin: 0 auto 2rem;
+}
+
+.fragment-form__markdown,
+.fragment-form__upload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fragment-form label {
+  font-weight: 600;
+  color: #111827;
+}
+
+.fragment-form textarea {
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  padding: 1rem;
+  font: inherit;
+  resize: vertical;
+  min-height: 180px;
+}
+
+.fragment-form__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fragment-form__actions button {
+  background: #111827;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.65rem 1.2rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fragment-form__actions button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+.fragment-form__divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.fragment-form__hint {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
