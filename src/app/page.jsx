@@ -7,7 +7,6 @@ import remarkGfm from 'remark-gfm';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
-import '/src/App.css';
 // Avoid static import of pdfjs to prevent SSR/bundler issues; we'll lazy-load the legacy build in effect
 // import { getDocument } from 'pdfjs-dist';
 // Removed @react-pdf-viewer styles to avoid pdfjs issues in SSR/client hydration
@@ -67,14 +66,10 @@ function resolvePdfjsModule(mod) {
   return null;
 }
 
-// Load pdfjs from specific known entry points to avoid webpack context warnings
+// Load pdfjs on demand; the package export resolves to the right build for the bundler
 async function loadPdfjs() {
   ensurePdfjsGlobals();
-  const attempts = [
-    async () => import('pdfjs-dist/legacy/build/pdf'),
-    async () => import('pdfjs-dist/build/pdf'),
-    async () => import('pdfjs-dist'),
-  ];
+  const attempts = [async () => import('pdfjs-dist')];
   const errors = [];
   for (const attempt of attempts) {
     try {
