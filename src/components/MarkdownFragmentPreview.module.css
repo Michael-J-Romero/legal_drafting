@@ -1,0 +1,31 @@
+.container {
+  background: white;
+  color: #1a1a1a;
+  padding: 2rem;
+  margin: 0 auto 2rem;
+  max-width: 8.5in;
+  min-height: 11in;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e0e0e0;
+}
+
+.container :global(h1) {
+  margin-top: 0;
+}
+
+.container :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.container :global(th),
+.container :global(td) {
+  border: 1px solid #c8c8c8;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.container :global(ul),
+.container :global(ol) {
+  padding-left: 1.25rem;
+}
