@@ -1,0 +1,111 @@
+.previewRoot {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.previewPage {
+  background: #ffffff;
+  border-radius: 1rem;
+  padding: 2rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  page-break-after: always;
+}
+
+.previewPage:last-of-type {
+  page-break-after: auto;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+}
+
+.sectionLabel {
+  font-weight: 700;
+}
+
+.sectionMeta {
+  font-weight: 500;
+}
+
+.previewPage :global(h1),
+.previewPage :global(h2),
+.previewPage :global(h3),
+.previewPage :global(h4),
+.previewPage :global(h5),
+.previewPage :global(h6) {
+  margin-top: 0;
+}
+
+.previewPage :global(p) {
+  line-height: 1.7;
+}
+
+.previewPage :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.previewPage :global(th),
+.previewPage :global(td) {
+  border: 1px solid #cbd5f5;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.previewPage :global(blockquote) {
+  border-left: 4px solid #2563eb;
+  padding-left: 1rem;
+  color: #334155;
+}
+
+.pdfContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.pdfPageWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.pageNumber {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-align: right;
+}
+
+.loading,
+.error {
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.error {
+  color: #dc2626;
+}
+
+@media print {
+  .previewPage {
+    box-shadow: none;
+    border-radius: 0;
+    margin: 0;
+  }
+
+  .previewRoot {
+    gap: 0;
+  }
+}
