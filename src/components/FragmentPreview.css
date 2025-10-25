@@ -1,0 +1,35 @@
+.fragment-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 2rem;
+  background: #e5e7eb;
+  border-radius: 12px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.fragment-wrapper {
+  display: flex;
+  justify-content: center;
+}
+
+@media print {
+  body {
+    background: white;
+  }
+
+  .fragment-preview {
+    background: transparent;
+    padding: 0;
+    gap: 0;
+  }
+
+  .fragment-wrapper {
+    page-break-after: always;
+  }
+
+  .fragment-wrapper:last-of-type {
+    page-break-after: auto;
+  }
+}
