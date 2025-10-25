@@ -1,1 +1,29 @@
-/.history
+# Dependencies
+/node_modules
+
+# Build output
+/.next
+/out
+
+# Production
+/dist
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local env files
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode
+.idea
+*.swp
+
+# Misc
+.DS_Store
+.next
+.history
