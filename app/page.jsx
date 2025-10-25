@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Document, Page, pdfjs } from 'react-pdf';
+import { Document, Page, pdfjs } from 'react-pdf/dist/esm/entry.webpack';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
