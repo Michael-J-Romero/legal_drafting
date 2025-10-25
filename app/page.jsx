@@ -1,24 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+'use client';
+
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
-import './App.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url,
-).toString();
 
 let fragmentCounter = 0;
 
 const LETTER_WIDTH = 612; // 8.5in * 72
 const LETTER_HEIGHT = 792; // 11in * 72
-const MARKDOWN_MARGIN = 56;
 const PAGE_PREVIEW_WIDTH = Math.round(8.5 * 96);
 const PLEADING_LEFT_MARGIN = 72;
 const PLEADING_RIGHT_MARGIN = 36;
@@ -445,19 +438,17 @@ function FragmentList({ fragments, onChangeContent, onMove, onRemove }) {
                 ↓
               </button>
               <button type="button" className="ghost" onClick={() => onRemove(fragment.id)}>
-                ✕
+                Remove
               </button>
             </div>
           </div>
-          {fragment.type === 'markdown' ? (
+          {fragment.type === 'markdown' && (
             <textarea
+              className="markdown-editor"
               value={fragment.content}
               onChange={(event) => onChangeContent(fragment.id, event.target.value)}
-              className="markdown-editor"
               rows={6}
             />
-          ) : (
-            <p className="pdf-summary">{fragment.name}</p>
           )}
         </div>
       ))}
@@ -465,56 +456,44 @@ function FragmentList({ fragments, onChangeContent, onMove, onRemove }) {
   );
 }
 
-function HeadingFieldList({
-  label,
-  fields,
-  onAdd,
-  onRemove,
-  onChange,
-  addLabel = 'Add line',
-}) {
+function HeadingFieldList({ label, fields, onAdd, onRemove, onChange }) {
   return (
     <div className="heading-field-section">
       <div className="heading-section-header">
         <span>{label}</span>
-        <button type="button" className="ghost small" onClick={onAdd}>
-          {addLabel}
+        <button type="button" className="ghost" onClick={onAdd}>
+          Add line
         </button>
       </div>
-      {fields.length ? (
-        fields.map((value, index) => (
-          <div className="heading-field-row" key={`${label}-${index}`}>
-            <input
-              type="text"
-              value={value}
-              onChange={(event) => onChange(index, event.target.value)}
-              className="heading-input"
-            />
-            <button
-              type="button"
-              className="ghost small danger"
-              onClick={() => onRemove(index)}
-              aria-label={`Remove ${label} line ${index + 1}`}
-            >
-              Remove
-            </button>
-          </div>
-        ))
-      ) : (
-        <p className="help-text">No lines yet.</p>
-      )}
+      {fields.map((value, index) => (
+        <div key={`${label}-${index}`} className="heading-field-row">
+          <input
+            type="text"
+            className="heading-input"
+            value={value}
+            onChange={(event) => onChange(index, event.target.value)}
+          />
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => onRemove(index)}
+            aria-label={`Remove ${label} line ${index + 1}`}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
 
-export default function App() {
+export default function HomePage() {
   const [leftHeadingFields, setLeftHeadingFields] = useState([
-    'Jane Q. Attorney (SBN 123456)',
-    'Example Law Group LLP',
-    '123 Main Street, Suite 400',
-    'Los Angeles, CA 90012',
-    'Tel: (555) 555-1212',
-    'Fax: (555) 555-3434',
+    'Law Offices of Jane Smith',
+    '123 Legal Avenue',
+    'Suite 400',
+    'Los Angeles, CA 90017',
+    'Tel: (555) 123-4567',
     'Email: attorney@example.com',
   ]);
   const [rightHeadingFields, setRightHeadingFields] = useState([
@@ -540,6 +519,10 @@ export default function App() {
 
   const previewRef = useRef(null);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+  }, []);
 
   const headingSettings = useMemo(
     () => ({
@@ -658,13 +641,13 @@ export default function App() {
   const previewFragments = useMemo(
     () =>
       fragments.map((fragment) => (
-        <React.Fragment key={fragment.id}>
+        <Fragment key={fragment.id}>
           {fragment.type === 'markdown' ? (
             <MarkdownPreview content={fragment.content} heading={headingSettings} />
           ) : (
             <PdfPreview data={fragment.data} />
           )}
-        </React.Fragment>
+        </Fragment>
       )),
     [fragments, headingSettings],
   );
@@ -674,8 +657,8 @@ export default function App() {
       <aside className="editor-panel">
         <h1>Document Builder</h1>
         <p className="lead">
-          Assemble Markdown notes and PDFs into a single, print-ready packet. Add new fragments
-          below and fine-tune their order.
+          Assemble Markdown notes and PDFs into a single, print-ready packet. Add new fragments below
+          and fine-tune their order.
         </p>
 
         <div className={`card heading-card${headingExpanded ? ' expanded' : ''}`}>
