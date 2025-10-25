@@ -5,14 +5,6 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
-import './App.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url,
-).toString();
 
 let fragmentCounter = 0;
 
@@ -507,7 +499,14 @@ function HeadingFieldList({
   );
 }
 
-export default function App() {
+export default function LegalDraftingApp() {
+  useEffect(() => {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.js',
+      import.meta.url,
+    ).toString();
+  }, []);
+
   const [leftHeadingFields, setLeftHeadingFields] = useState([
     'Jane Q. Attorney (SBN 123456)',
     'Example Law Group LLP',
