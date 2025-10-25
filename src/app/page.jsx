@@ -1,22 +1,35 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// ...existing code...
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Document, Page, pdfjs } from 'react-pdf';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import removeMarkdown from 'remove-markdown';
-import '../src/App.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
+import '/src/App.css';
+// Avoid static import of pdfjs to prevent SSR/bundler issues; we'll lazy-load the legacy build in effect
+// import { getDocument } from 'pdfjs-dist';
+// Removed @react-pdf-viewer styles to avoid pdfjs issues in SSR/client hydration
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url,
-).toString();
-
+// Remove react-pdf dynamic imports
+  
 let fragmentCounter = 0;
+
+// Load pdfjs from specific known entry points to avoid webpack context warnings
+async function loadPdfjs() {
+  try {
+    const mod = await import('pdfjs-dist/legacy/build/pdf');
+    return (mod && (mod.getDocument ? mod : mod.default)) || null;
+  } catch (e) {
+    try {
+      const mod2 = await import('pdfjs-dist/build/pdf');
+      return (mod2 && (mod2.getDocument ? mod2 : mod2.default)) || null;
+    } catch (e2) {
+      return null;
+    }
+  }
+}
 
 const LETTER_WIDTH = 612; // 8.5in * 72
 const LETTER_HEIGHT = 792; // 11in * 72
@@ -48,7 +61,7 @@ function MarkdownPreview({ content, heading }) {
   const normalizedLeft = leftFields.filter((value) => value.trim());
   const normalizedRight = rightFields.filter((value) => value.trim());
   const upperTitle = documentTitle.trim().toUpperCase();
-
+// return 3
   return (
     <div className="page-surface markdown-fragment">
       <div className="pleading-paper">
@@ -123,34 +136,74 @@ function MarkdownPreview({ content, heading }) {
     </div>
   );
 }
-
+// Lightweight PDF preview using pdf.js (no toolbar); no iframe fallback to avoid viewer UI
 function PdfPreview({ data }) {
-  const [numPages, setNumPages] = useState(null);
+  const containerRef = useRef(null);
+
   useEffect(() => {
-    setNumPages(null);
+    let cancelled = false;
+    let objectUrl = null;
+    async function renderPdf() {
+      if (!data || !containerRef.current) return;
+      const container = containerRef.current;
+      container.innerHTML = '';
+      try {
+        // Dynamically import pdfjs in a robust way to avoid SSR/bundler pitfalls
+        const pdfjs = await loadPdfjs();
+        if (!pdfjs || !pdfjs.getDocument) {
+          throw new Error('pdfjs failed to load getDocument');
+        }
+        const loadingTask = pdfjs.getDocument({ data: new Uint8Array(data), disableWorker: true });
+        const pdf = await loadingTask.promise;
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+          if (cancelled) break;
+          const page = await pdf.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          canvas.style.width = '8.5in';
+          canvas.style.height = '11in';
+          const pageWrapper = document.createElement('div');
+          pageWrapper.className = 'pdf-page';
+          pageWrapper.appendChild(canvas);
+          container.appendChild(pageWrapper);
+          await page.render({ canvasContext: context, viewport }).promise;
+        }
+      } catch (err) {
+        // Fallback: embed browser PDF viewer via object URL
+        try {
+          objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+          const iframe = document.createElement('iframe');
+          iframe.src = `${objectUrl}#toolbar=0&navpanes=0&statusbar=0&view=FitH`;
+          iframe.title = 'PDF preview';
+          iframe.style.width = '8.5in';
+          iframe.style.height = '11in';
+          iframe.style.border = 'none';
+          const wrapper = document.createElement('div');
+          wrapper.className = 'pdf-page';
+          wrapper.appendChild(iframe);
+          container.appendChild(wrapper);
+        } catch (fallbackErr) {
+          const fallback = document.createElement('div');
+          fallback.className = 'page-surface pdf-placeholder';
+          const msg = err && (err.message || String(err));
+          fallback.textContent = `Failed to render PDF${msg ? `: ${msg}` : ''}`;
+          container.appendChild(fallback);
+        }
+      }
+    }
+    renderPdf();
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        try { URL.revokeObjectURL(objectUrl); } catch (_) {}
+      }
+    };
   }, [data]);
 
-  return (
-    <Document
-      className="pdf-document"
-      file={{ data }}
-      onLoadSuccess={({ numPages: total }) => setNumPages(total)}
-      loading={<div className="page-surface pdf-placeholder">Loading PDF…</div>}
-      error={<div className="page-surface pdf-placeholder">Unable to load PDF.</div>}
-    >
-      {numPages &&
-        Array.from({ length: numPages }, (_, index) => (
-          <Page
-            className="page-surface pdf-page"
-            key={`page-${index}`}
-            pageNumber={index + 1}
-            renderAnnotationLayer
-            renderTextLayer
-            width={PAGE_PREVIEW_WIDTH}
-          />
-        ))}
-    </Document>
-  );
+  return <div ref={containerRef} className="pdf-document" />;
 }
 
 async function appendMarkdownFragment(pdfDoc, content, heading) {
@@ -511,24 +564,26 @@ function HeadingFieldList({
 
 export default function App() {
   const [leftHeadingFields, setLeftHeadingFields] = useState([
-    'Jane Q. Attorney (SBN 123456)',
-    'Example Law Group LLP',
-    '123 Main Street, Suite 400',
-    'Los Angeles, CA 90012',
-    'Tel: (555) 555-1212',
-    'Fax: (555) 555-3434',
-    'Email: attorney@example.com',
+    'Michael Romero',
+    '304 W Avenue 43,',
+    'Los Angeles, CA 90065',
+    '(909) 201-1181',
+    'mikeromero4@Yahoo.com',
+    'Plaintiff in Pro Per',
   ]);
   const [rightHeadingFields, setRightHeadingFields] = useState([
-    'SUPERIOR COURT OF CALIFORNIA',
-    'COUNTY OF LOS ANGELES',
-    'Case No.: __________',
-    'Hon. ____________________',
-    'Dept.: ___',
+    // 'SUPERIOR COURT OF THE STATE OF CALIFORNIA,',
+    'COUNTY OF SAN BERNARDINO',
+    'Case No. CIVRS2501874',
+    'Assigned Judge: Hon. Kory Mathewson',
+    '8303 Haven Avenue',
+    'Rancho Cucamonga, CA 91730',
+    'Dept R12',
   ]);
-  const [plaintiffName, setPlaintiffName] = useState('John Doe');
-  const [defendantName, setDefendantName] = useState('Acme Corporation');
-  const [documentTitle, setDocumentTitle] = useState('Notice of Motion and Motion');
+  // return 8
+  const [plaintiffName, setPlaintiffName] = useState('Michael James Romero');
+  const [defendantName, setDefendantName] = useState('Megan Nicole Bentley');
+  const [documentTitle, setDocumentTitle] = useState('');
   const [headingExpanded, setHeadingExpanded] = useState(true);
   const [markdownDraft, setMarkdownDraft] = useState('');
   const [fragments, setFragments] = useState(() => [
@@ -540,23 +595,40 @@ export default function App() {
     },
   ]);
 
-  const previewRef = useRef(null);
-  const inputRef = useRef(null);
+  // Load a default PDF from the public folder on first load
+  const defaultPdfLoadedRef = useRef(false);
+  useEffect(() => {
+    if (defaultPdfLoadedRef.current) return;
+    defaultPdfLoadedRef.current = true;
 
-  const headingSettings = useMemo(
-    () => ({
-      leftFields: leftHeadingFields,
-      rightFields: rightHeadingFields,
-      plaintiffName,
-      defendantName,
-      documentTitle,
-    }),
-    [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, documentTitle],
-  );
+    const defaultPdfName = 'ammended notice2.pdf';
+    const defaultPdfPath = '/pdfs/ammended%20notice2.pdf';
 
-  const handleAddLeftField = useCallback(() => {
-    setLeftHeadingFields((current) => [...current, '']);
-  }, []);
+    // If a fragment with this name already exists (e.g., after HMR), skip
+    const hasDefault = fragments.some(
+      (f) => f.type === 'pdf' && (f.name === defaultPdfName)
+    );
+    if (hasDefault) return;
+
+    fetch(defaultPdfPath)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to fetch default PDF: ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buffer) => {
+        setFragments((current) => [
+          { id: createFragmentId(), type: 'pdf', data: buffer, name: defaultPdfName },
+          ...current,
+        ]);
+      })
+      } catch (err) {
+        // Do NOT use iframe fallback (it shows a toolbar we cannot control). Show a friendly error instead.
+        const fallback = document.createElement('div');
+        fallback.className = 'page-surface pdf-placeholder';
+        const msg = err && (err.message || String(err));
+        fallback.textContent = `Failed to render PDF${msg ? `: ${msg}` : ''}`;
+        container.appendChild(fallback);
+      }
 
   const handleLeftFieldChange = useCallback((index, value) => {
     setLeftHeadingFields((current) =>
@@ -582,8 +654,9 @@ export default function App() {
     setRightHeadingFields((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }, []);
 
+  // react-to-print v3: use `contentRef` instead of the deprecated `content` callback
   const handlePrint = useReactToPrint({
-    content: () => previewRef.current,
+    contentRef: previewRef,
     documentTitle: 'legal-drafting-preview',
   });
 
@@ -788,14 +861,6 @@ export default function App() {
       </aside>
 
       <main className="preview-panel">
-        <div className="toolbar">
-          <button type="button" onClick={handlePrint} className="secondary">
-            Print or Save as PDF
-          </button>
-          <button type="button" onClick={handleCompilePdf} className="primary">
-            Download Combined PDF
-          </button>
-        </div>
         <div className="preview-scroll" ref={previewRef}>
           {previewFragments.length ? (
             previewFragments

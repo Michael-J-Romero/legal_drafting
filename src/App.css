@@ -286,20 +286,14 @@ button:not(:disabled):active {
 
 .preview-scroll {
   position: relative;
-  padding: 24px;
-  background: repeating-linear-gradient(
-    45deg,
-    rgba(226, 232, 240, 0.4),
-    rgba(226, 232, 240, 0.4) 12px,
-    rgba(241, 245, 249, 0.4) 12px,
-    rgba(241, 245, 249, 0.4) 24px
-  );
-  border-radius: 16px;
+  padding: 0;
+  background: #fff;
+  border-radius: 0;
   height: calc(100vh - 96px);
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
 }
 
 .page-surface {
@@ -308,7 +302,7 @@ button:not(:disabled):active {
   margin: 0 auto;
   background: #fff;
   border-radius: 12px;
-  padding: 48px;
+  /* padding: 48px; */
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   color: #111827;
   display: flex;
@@ -334,7 +328,7 @@ button:not(:disabled):active {
   width: 8.5in;
   min-height: 11in;
   margin: 0 auto;
-  padding: 1in 0.5in 1in 1in;
+  padding: .5in 0.5in .5in .5in;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   background: #fff;
   display: grid;
@@ -365,7 +359,7 @@ button:not(:disabled):active {
   align-items: start;
   font-size: 9pt;
   color: #1f2937;
-  border-right: 1px solid #1f2937;
+  border-right: 5px double #1f2937; 
   padding-right: 0.08in;
 }
 
@@ -383,8 +377,8 @@ button:not(:disabled):active {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.4in;
-  min-height: calc(((11in - 2in) / 28) * 7);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.25);
+  /* min-height: calc(((11in - 2in) / 28) * 7); */
+  /* border-bottom: 1px solid rgba(15, 23, 42, 0.25); */
   padding-bottom: 0.1in;
 }
 
@@ -414,9 +408,9 @@ button:not(:disabled):active {
 }
 
 .pleading-caption-box {
-  border: 1px solid #111827;
-  border-right-width: 3px;
-  border-bottom-width: 3px;
+  border: 0px solid #111827;
+  border-right-width: 1px;
+  border-bottom-width: 1px;
   padding: 0.3in 0.22in;
   display: flex;
   flex-direction: column;
@@ -563,11 +557,26 @@ button:not(:disabled):active {
 .pdf-document {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
+}
+
+.pdf-page {
+  width: 8.5in;
+  margin: 0 auto;
+  background: #fff;
+  page-break-after: always;
+}
+
+.pdf-page:last-child {
+  page-break-after: auto;
 }
 
 .pdf-page canvas {
-  border-radius: 12px;
+  display: block;
+  width: 8.5in;
+  height: 11in;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .pdf-placeholder {
@@ -620,5 +629,49 @@ button:not(:disabled):active {
 @media (min-width: 640px) {
   .heading-party-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Print clean, edge-to-edge pages */
+@media print {
+  @page {
+    size: 8.5in 11in;
+    margin: 0;
+  }
+
+  html, body {
+    background: #fff !important;
+  }
+
+  .app-shell {
+    display: block;
+    padding: 0;
+  }
+
+  .editor-panel, .toolbar {
+    display: none !important;
+  }
+
+  .preview-scroll {
+    padding: 0;
+    background: none;
+    height: auto;
+  }
+
+  .page-surface,
+  .pleading-paper,
+  .pdf-page {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto;
+    background: #fff !important;
+  }
+
+  .pdf-page {
+    page-break-after: always;
+  }
+
+  .pdf-page:last-child {
+    page-break-after: auto;
   }
 }
