@@ -136,7 +136,7 @@ function MarkdownPreview({ content, heading }) {
     </div>
   );
 }
-// Lightweight PDF preview using pdf.js (no toolbar); no iframe fallback to avoid viewer UI
+// Lightweight PDF preview using an iframe
 function PdfPreview({ data }) {
   const containerRef = useRef(null);
 
@@ -164,7 +164,7 @@ function PdfPreview({ data }) {
           canvas.width = Math.floor(viewport.width);
           canvas.height = Math.floor(viewport.height);
           canvas.style.width = '8.5in';
-          canvas.style.height = '11in';
+          canvas.style.height = 'auto';
           const pageWrapper = document.createElement('div');
           pageWrapper.className = 'pdf-page';
           pageWrapper.appendChild(canvas);
@@ -176,7 +176,7 @@ function PdfPreview({ data }) {
         try {
           objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
           const iframe = document.createElement('iframe');
-          iframe.src = `${objectUrl}#toolbar=0&navpanes=0&statusbar=0&view=FitH`;
+          iframe.src = objectUrl;
           iframe.title = 'PDF preview';
           iframe.style.width = '8.5in';
           iframe.style.height = '11in';
@@ -621,14 +621,28 @@ export default function App() {
           ...current,
         ]);
       })
-      } catch (err) {
-        // Do NOT use iframe fallback (it shows a toolbar we cannot control). Show a friendly error instead.
-        const fallback = document.createElement('div');
-        fallback.className = 'page-surface pdf-placeholder';
-        const msg = err && (err.message || String(err));
-        fallback.textContent = `Failed to render PDF${msg ? `: ${msg}` : ''}`;
-        container.appendChild(fallback);
-      }
+      .catch(() => {
+        // Silently ignore if the file isn't present; UI will still work
+      });
+  }, []);
+
+  const previewRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const headingSettings = useMemo(
+    () => ({
+      leftFields: leftHeadingFields,
+      rightFields: rightHeadingFields,
+      plaintiffName,
+      defendantName,
+      documentTitle,
+    }),
+    [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, documentTitle],
+  );
+
+  const handleAddLeftField = useCallback(() => {
+    setLeftHeadingFields((current) => [...current, '']);
+  }, []);
 
   const handleLeftFieldChange = useCallback((index, value) => {
     setLeftHeadingFields((current) =>
@@ -861,6 +875,14 @@ export default function App() {
       </aside>
 
       <main className="preview-panel">
+        <div className="toolbar">
+          <button type="button" onClick={handlePrint} className="secondary">
+            Print or Save as PDF
+          </button>
+          <button type="button" onClick={handleCompilePdf} className="primary">
+            Download Combined PDF
+          </button>
+        </div>
         <div className="preview-scroll" ref={previewRef}>
           {previewFragments.length ? (
             previewFragments
