@@ -1,0 +1,165 @@
+:root {
+  color-scheme: light;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #f5f5f5;
+  color: #222;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+main {
+  min-height: 100vh;
+  padding: 2rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.preview-shell {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 320px);
+  gap: 2rem;
+}
+
+@media (max-width: 1024px) {
+  .preview-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.preview-surface {
+  background: white;
+  padding: 2rem;
+  border-radius: 1rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.preview-surface section {
+  page-break-inside: avoid;
+}
+
+.preview-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.preview-sidebar .card {
+  background: white;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.05);
+}
+
+.preview-sidebar ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.preview-sidebar li + li {
+  margin-top: 0.5rem;
+}
+
+.markdown-fragment h1,
+.markdown-fragment h2,
+.markdown-fragment h3 {
+  margin-top: 1.5rem;
+}
+
+.markdown-fragment h1:first-child,
+.markdown-fragment h2:first-child,
+.markdown-fragment h3:first-child {
+  margin-top: 0;
+}
+
+.markdown-fragment p {
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.markdown-fragment table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-fragment th,
+.markdown-fragment td {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+}
+
+.print-button {
+  background: #1f2937;
+  color: white;
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.print-button:hover {
+  background: #111827;
+}
+
+.print-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pdf-fragment .react-pdf__Page {
+  margin-bottom: 2rem;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+
+.pdf-fragment header {
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.pdf-fragment header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.pdf-fragment header span {
+  font-size: 0.875rem;
+  color: #555;
+}
+
+@media print {
+  body {
+    background: white;
+  }
+
+  main,
+  .preview-shell,
+  .preview-sidebar,
+  .preview-surface {
+    display: block;
+    padding: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .preview-sidebar {
+    display: none;
+  }
+
+  .pdf-fragment .react-pdf__Page {
+    box-shadow: none;
+    margin: 0 auto 1rem;
+  }
+}
