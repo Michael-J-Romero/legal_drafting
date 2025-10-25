@@ -1,0 +1,92 @@
+:root {
+  color-scheme: light;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+  color: #1f2933;
+}
+
+main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.print-surface {
+  background: white;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
+  margin: 0 auto;
+  padding: 2rem;
+  width: 8.5in;
+  min-height: 11in;
+}
+
+.preview-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.preview-grid__sidebar {
+  max-width: 20rem;
+}
+
+.preview-grid__main {
+  flex: 1;
+}
+
+.fragment-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.markdown-fragment {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.markdown-fragment h1,
+.markdown-fragment h2,
+.markdown-fragment h3 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.markdown-fragment table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.markdown-fragment table th,
+.markdown-fragment table td {
+  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+}
+
+.pdf-fragment {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.pdf-fragment--placeholder {
+  padding: 1.5rem;
+  border: 2px dashed #cbd5e1;
+  background-color: #f8fafc;
+  text-align: center;
+  color: #475569;
+}
