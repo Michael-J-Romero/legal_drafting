@@ -579,6 +579,14 @@ button:not(:disabled):active {
   box-shadow: none;
 }
 
+.pdf-page iframe.pdf-fallback-frame {
+  display: block;
+  width: 8.5in;
+  height: 11in;
+  border: none;
+  background: #fff;
+}
+
 .pdf-placeholder {
   display: flex;
   align-items: center;
