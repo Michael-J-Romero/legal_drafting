@@ -176,8 +176,11 @@ function PdfPreview({ data }) {
         try {
           objectUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
           const iframe = document.createElement('iframe');
-          iframe.src = objectUrl;
+          const viewerUrl = `${objectUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=page-fit`;
+          iframe.src = viewerUrl;
           iframe.title = 'PDF preview';
+          iframe.className = 'pdf-fallback-frame';
+          iframe.setAttribute('loading', 'lazy');
           iframe.style.width = '8.5in';
           iframe.style.height = '11in';
           iframe.style.border = 'none';
