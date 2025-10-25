@@ -1,0 +1,149 @@
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem;
+  gap: 2rem;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 0.375rem;
+  background-color: #2563eb;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: background-color 0.2s ease-in-out;
+}
+
+button:hover {
+  background-color: #1d4ed8;
+}
+
+.preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  align-items: center;
+}
+
+.preview-page {
+  width: 8.5in;
+  min-height: 11in;
+  background-color: #fff;
+  padding: 1in;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
+}
+
+.preview-page + .preview-page {
+  page-break-before: always;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  main {
+    padding: 0;
+  }
+
+  .controls {
+    display: none;
+  }
+
+  .preview-wrapper {
+    gap: 0;
+  }
+
+  .preview-page {
+    box-shadow: none;
+    width: auto;
+    min-height: initial;
+    padding: 1in;
+    margin: 0 auto;
+    page-break-after: always;
+  }
+
+  .preview-page:last-of-type {
+    page-break-after: auto;
+  }
+}
+
+.markdown-content h1 {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-content h2 {
+  font-size: 1.5rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-content h3 {
+  font-size: 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-content p {
+  line-height: 1.6;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #2563eb;
+  padding-left: 1rem;
+  color: #4b5563;
+  margin: 1rem 0;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+  text-align: left;
+}
