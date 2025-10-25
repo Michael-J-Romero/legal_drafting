@@ -1,0 +1,22 @@
+.pdf-fragment {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.pdf-placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  border: 1px dashed #d1d5db;
+  border-radius: 12px;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+.pdf-error {
+  color: #b91c1c;
+  margin: 0;
+  font-size: 0.9rem;
+}
