@@ -1,0 +1,163 @@
+:root {
+  color-scheme: light;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f4f5f7;
+  color: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+}
+
+main {
+  width: min(960px, 100%);
+}
+
+button {
+  font: inherit;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.panel {
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+}
+
+.panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.panel__subtitle {
+  margin: 0.5rem 0 0;
+  color: #4b5563;
+  max-width: 48ch;
+}
+
+.panel__actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.panel__hint {
+  margin-top: 1.5rem;
+  color: #6b7280;
+}
+
+.button {
+  background: #2563eb;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.button:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.preview__title {
+  margin: 0;
+}
+
+.preview__canvas {
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05), 0 25px 50px rgba(15, 23, 42, 0.08);
+  display: flex;
+  justify-content: center;
+}
+
+.preview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+}
+
+.markdown-fragment {
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 15px 35px rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: white;
+}
+
+.markdown-fragment h1,
+.markdown-fragment h2,
+.markdown-fragment h3 {
+  margin-top: 0;
+}
+
+.markdown-fragment :last-child {
+  margin-bottom: 0;
+}
+
+.pdf-fragment {
+  border-radius: 12px;
+  background: #f9fafb;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 15px 35px rgba(15, 23, 42, 0.05);
+}
+
+.pdf-fragment__header {
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  font-weight: 600;
+  color: #334155;
+}
+
+.pdf-fragment__loading,
+.pdf-fragment__error,
+.pdf-fragment__placeholder {
+  padding: 1.5rem;
+  color: #475569;
+}
+
+.pdf-fragment canvas {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  margin: 1.5rem auto;
+}
+
+code {
+  background: rgba(148, 163, 184, 0.15);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
