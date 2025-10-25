@@ -1,4 +1,4 @@
-# Legal Drafting Preview
+# Legal Drafting Previeww
 
 A Vite + React playground that stitches Markdown fragments and PDF documents into a single, printable narrative. It powers a live print preview, lets you trigger the browser's native **Print / Save as PDF**, and can compile a merged PDF using [`pdf-lib`](https://pdf-lib.js.org/).
 
