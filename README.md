@@ -1,4 +1,4 @@
-# Legal Drafting Print Preview
+# Legal Drafting Print Previeww
 
 A React + Vite starter that stitches Markdown and PDF fragments into a live print preview. It demonstrates:
 
