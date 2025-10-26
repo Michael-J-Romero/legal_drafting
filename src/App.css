@@ -1,7 +1,7 @@
 .app-shell {
   display: grid;
   grid-template-columns: 480px 1fr;
-  height: 100vh;
+  height: 100vh; 
   padding: 24px;
   gap: 24px;
 }
