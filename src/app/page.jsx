@@ -55,6 +55,58 @@ pushPdfjsLog('env.init', {
   userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'n/a',
 });
 
+// --- Persistence & History helpers (IndexedDB for PDFs, localStorage for history) ---
+const LS_HISTORY_KEY = 'legalDraftingHistoryV1';
+
+function openPdfDb() {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof window === 'undefined' || !window.indexedDB) return resolve(null);
+      const request = window.indexedDB.open('legalDraftingDB', 1);
+      request.onupgradeneeded = (e) => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('pdfs')) {
+          db.createObjectStore('pdfs');
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('IndexedDB open error'));
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+async function idbSetPdf(id, data) {
+  try {
+    const db = await openPdfDb();
+    if (!db) return;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('pdfs', 'readwrite');
+      const store = tx.objectStore('pdfs');
+      store.put(data, id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('idb set error'));
+    });
+  } catch (_) {}
+}
+
+async function idbGetPdf(id) {
+  try {
+    const db = await openPdfDb();
+    if (!db) return null;
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('pdfs', 'readonly');
+      const store = tx.objectStore('pdfs');
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('idb get error'));
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 // Load pdfjs from the legacy CJS/UMD build to avoid ESM interop issues in Webpack/Next 13
 async function loadPdfjs() {
   const attempts = [
@@ -810,69 +862,77 @@ async function appendPdfFragment(pdfDoc, data) {
   copiedPages.forEach((page) => pdfDoc.addPage(page));
 }
 
-function FragmentList({ fragments, onChangeContent, onChangeTitle, onMove, onRemove, onOpenEditor }) {
+function FragmentList({
+  fragments,
+  onReorder,
+  onRemove,
+  onInsertBefore,
+  onInsertAfter,
+  onItemClick,
+}) {
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  const onDragStart = (e, fromIndex) => {
+    try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+    e.dataTransfer.setData('text/plain', String(fromIndex));
+  };
+  const onDragOver = (e) => {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+  };
+  const onDrop = (e, toIndex) => {
+    e.preventDefault();
+    const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (Number.isInteger(from) && from !== toIndex) onReorder(from, toIndex);
+  };
+
   return (
-    <div className="fragment-list">
-      {fragments.map((fragment, index) => (
-        <div key={fragment.id} className="fragment-item">
-          <div className="fragment-header">
-            <span className="fragment-index">{index + 1}.</span>
-            <span className="fragment-label">
-              {fragment.type === 'markdown' ? (fragment.title?.trim() || 'Untitled Markdown') : fragment.name || 'PDF'}
-            </span>
-            <div className="fragment-actions">
+    <div className="fragment-list sections-only">
+      {fragments.map((fragment, index) => {
+        const title = fragment.type === 'markdown'
+          ? (fragment.title?.trim() || 'Untitled Markdown')
+          : (fragment.name || 'PDF');
+        return (
+          <div
+            key={fragment.id}
+            className="fragment-row"
+            draggable
+            onDragStart={(e) => onDragStart(e, index)}
+            onDragOver={onDragOver}
+            onDrop={(e) => onDrop(e, index)}
+          >
+            <button type="button" className="drag-handle" title="Drag to reorder" aria-label="Drag handle">≡</button>
+            <button
+              type="button"
+              className="fragment-title-button"
+              onClick={() => onItemClick && onItemClick(fragment)}
+              title={title}
+            >
+              <span className="fragment-index">{index + 1}.</span>
+              <span className="fragment-title-text">{title}</span>
+            </button>
+            <div className="fragment-menu-wrap">
               <button
                 type="button"
-                className="ghost"
-                onClick={() => onMove(index, -1)}
-                disabled={index === 0}
+                className="menu-button"
+                aria-haspopup="menu"
+                aria-expanded={openMenuId === fragment.id}
+                onClick={() => setOpenMenuId((cur) => (cur === fragment.id ? null : fragment.id))}
+                title="More actions"
               >
-                ↑
+                •••
               </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => onMove(index, 1)}
-                disabled={index === fragments.length - 1}
-              >
-                ↓
-              </button>
-              {fragment.type === 'markdown' && (
-                <button
-                  type="button"
-                  className="ghost"
-                  title="Edit fullscreen"
-                  onClick={() => onOpenEditor && onOpenEditor(fragment.id)}
-                >
-                  ⤢
-                </button>
+              {openMenuId === fragment.id && (
+                <div className="fragment-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onInsertBefore && onInsertBefore(fragment.id); }}>Insert before</button>
+                  <button type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onInsertAfter && onInsertAfter(fragment.id); }}>Insert after</button>
+                  <button type="button" role="menuitem" className="danger" onClick={() => { setOpenMenuId(null); onRemove(fragment.id); }}>Delete</button>
+                </div>
               )}
-              <button type="button" className="ghost" onClick={() => onRemove(fragment.id)}>
-                ✕
-              </button>
             </div>
           </div>
-          {fragment.type === 'markdown' ? (
-            <>
-              <input
-                type="text"
-                className="heading-input"
-                placeholder="Entry title"
-                value={fragment.title || ''}
-                onChange={(e) => onChangeTitle && onChangeTitle(fragment.id, e.target.value)}
-              />
-              <textarea
-                value={fragment.content}
-                onChange={(event) => onChangeContent(fragment.id, event.target.value)}
-                className="markdown-editor"
-                rows={6}
-              />
-            </>
-          ) : (
-            <p className="pdf-summary">{fragment.name}</p>
-          )}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -920,6 +980,10 @@ function HeadingFieldList({
 }
 
 export default function App() {
+  // --- History state ---
+  const [historyPast, setHistoryPast] = useState([]); // array of snapshots
+  const [historyFuture, setHistoryFuture] = useState([]); // array of snapshots
+  const lastEditTsRef = useRef(0);
   const [docDate, setDocDate] = useState(() => {
     try {
       return new Date().toISOString().slice(0, 10);
@@ -961,7 +1025,6 @@ export default function App() {
   ]);
   const [fullscreenFragmentId, setFullscreenFragmentId] = useState(null);
   const [editingFragmentId, setEditingFragmentId] = useState(null);
-  const [isDraftEditorOpen, setIsDraftEditorOpen] = useState(false);
 
   // Load a default PDF from the public folder on first load
   const defaultPdfLoadedRef = useRef(false);
@@ -983,11 +1046,14 @@ export default function App() {
         if (!res.ok) throw new Error(`Failed to fetch default PDF: ${res.status}`);
         return res.arrayBuffer();
       })
-      .then((buffer) => {
+      .then(async (buffer) => {
+        const newId = createFragmentId();
+        await idbSetPdf(newId, buffer);
         setFragments((current) => [
-          { id: createFragmentId(), type: 'pdf', data: buffer, name: defaultPdfName },
+          { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
           ...current,
         ]);
+        schedulePersist();
       })
       .catch(() => {
         // Silently ignore if the file isn't present; UI will still work
@@ -1009,31 +1075,57 @@ export default function App() {
   );
 
   const handleAddLeftField = useCallback(() => {
-    setLeftHeadingFields((current) => [...current, '']);
+    pushHistorySnapshot();
+    setLeftHeadingFields((current) => {
+      const next = [...current, ''];
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleLeftFieldChange = useCallback((index, value) => {
-    setLeftHeadingFields((current) =>
-      current.map((item, itemIndex) => (itemIndex === index ? value : item)),
-    );
+    setLeftHeadingFields((current) => {
+      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
+      scheduleThrottledHistoryPush();
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleRemoveLeftField = useCallback((index) => {
-    setLeftHeadingFields((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    pushHistorySnapshot();
+    setLeftHeadingFields((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleAddRightField = useCallback(() => {
-    setRightHeadingFields((current) => [...current, '']);
+    pushHistorySnapshot();
+    setRightHeadingFields((current) => {
+      const next = [...current, ''];
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleRightFieldChange = useCallback((index, value) => {
-    setRightHeadingFields((current) =>
-      current.map((item, itemIndex) => (itemIndex === index ? value : item)),
-    );
+    setRightHeadingFields((current) => {
+      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
+      scheduleThrottledHistoryPush();
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleRemoveRightField = useCallback((index) => {
-    setRightHeadingFields((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    pushHistorySnapshot();
+    setRightHeadingFields((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   // react-to-print v3: use `contentRef` instead of the deprecated `content` callback
@@ -1042,63 +1134,144 @@ export default function App() {
     documentTitle: 'legal-drafting-preview',
   });
 
-  const handleMarkdownSubmit = useCallback(
-    (event) => {
-      event.preventDefault();
-      if (!markdownDraft.trim()) return;
-      setFragments((current) => [
+  const handleMarkdownSubmit = useCallback((event) => {
+    event.preventDefault();
+    if (!markdownDraft.trim()) return;
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const next = [
         ...current,
-        {
-          id: createFragmentId(),
-          type: 'markdown',
-          content: markdownDraft.trim(),
-          title: markdownTitleDraft.trim() || 'Untitled',
-        },
-      ]);
-      setMarkdownDraft('');
-      setMarkdownTitleDraft('');
-    },
-    [markdownDraft, markdownTitleDraft],
-  );
+        { id: createFragmentId(), type: 'markdown', content: markdownDraft.trim(), title: markdownTitleDraft.trim() || 'Untitled' },
+      ];
+      schedulePersist();
+      return next;
+    });
+    setMarkdownDraft('');
+    setMarkdownTitleDraft('');
+  }, [markdownDraft, markdownTitleDraft]);
 
   const handlePdfUpload = useCallback(async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const buffer = await file.arrayBuffer();
-    setFragments((current) => [
-      ...current,
-      { id: createFragmentId(), type: 'pdf', data: buffer, name: file.name },
-    ]);
+    const newId = createFragmentId();
+    await idbSetPdf(newId, buffer);
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const next = [...current, { id: newId, type: 'pdf', data: buffer, name: file.name }];
+      schedulePersist();
+      return next;
+    });
     if (inputRef.current) {
       inputRef.current.value = '';
     }
   }, []);
 
   const handleFragmentContentChange = useCallback((id, content) => {
-    setFragments((current) =>
-      current.map((fragment) => (fragment.id === id ? { ...fragment, content } : fragment)),
-    );
+    setFragments((current) => {
+      const next = current.map((fragment) => (fragment.id === id ? { ...fragment, content } : fragment));
+      scheduleThrottledHistoryPush();
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleFragmentTitleChange = useCallback((id, title) => {
-    setFragments((current) =>
-      current.map((fragment) => (fragment.id === id ? { ...fragment, title } : fragment)),
-    );
+    setFragments((current) => {
+      const next = current.map((fragment) => (fragment.id === id ? { ...fragment, title } : fragment));
+      scheduleThrottledHistoryPush();
+      schedulePersist();
+      return next;
+    });
   }, []);
 
-  const handleMoveFragment = useCallback((index, delta) => {
+  const handleReorderFragments = useCallback((fromIndex, toIndex) => {
+    pushHistorySnapshot();
     setFragments((current) => {
       const next = [...current];
-      const targetIndex = index + delta;
-      if (targetIndex < 0 || targetIndex >= next.length) return current;
-      const [moved] = next.splice(index, 1);
-      next.splice(targetIndex, 0, moved);
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      schedulePersist();
       return next;
     });
   }, []);
 
   const handleRemoveFragment = useCallback((id) => {
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const next = current.filter((fragment) => fragment.id !== id);
+      schedulePersist();
+      return next;
+    });
+  }, []);
+
+  const handleRemoveFragmentConfirmed = useCallback((id) => {
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm('Delete this section? This cannot be undone.');
+      if (!ok) return;
+    }
     setFragments((current) => current.filter((fragment) => fragment.id !== id));
+    if (editingFragmentId === id) setEditingFragmentId(null);
+  }, [editingFragmentId]);
+
+  const handleInsertBefore = useCallback((id) => {
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const idx = current.findIndex((f) => f.id === id);
+      if (idx < 0) return current;
+      const newFrag = {
+        id: createFragmentId(),
+        type: 'markdown',
+        title: 'Untitled',
+        content: '',
+      };
+      const next = [...current];
+      next.splice(idx, 0, newFrag);
+      // Open for editing
+      setEditingFragmentId(newFrag.id);
+      schedulePersist();
+      return next;
+    });
+  }, []);
+
+  const handleInsertAfter = useCallback((id) => {
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const idx = current.findIndex((f) => f.id === id);
+      if (idx < 0) return current;
+      const newFrag = {
+        id: createFragmentId(),
+        type: 'markdown',
+        title: 'Untitled',
+        content: '',
+      };
+      const next = [...current];
+      next.splice(idx + 1, 0, newFrag);
+      setEditingFragmentId(newFrag.id);
+      schedulePersist();
+      return next;
+    });
+  }, []);
+
+  const handleAddSectionEnd = useCallback(() => {
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const next = ([
+        ...current,
+        { id: createFragmentId(), type: 'markdown', title: 'Untitled', content: '' },
+      ]);
+      schedulePersist();
+      return next;
+    });
+  }, []);
+
+  const handleEditFragmentFields = useCallback((id, updates) => {
+    setFragments((current) => {
+      const next = current.map((f) => (f.id === id ? { ...f, ...updates } : f));
+      scheduleThrottledHistoryPush();
+      schedulePersist();
+      return next;
+    });
   }, []);
 
   const handleCompilePdf = useCallback(async () => {
@@ -1139,6 +1312,145 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [fragments, headingSettings, docDate]);
 
+  // --- History: snapshot helpers ---
+  const makeSnapshot = useCallback(() => ({
+    docDate,
+    leftHeadingFields,
+    rightHeadingFields,
+    plaintiffName,
+    defendantName,
+    courtTitle,
+    fragments: fragments.map((f) => (
+      f.type === 'pdf' ? { id: f.id, type: 'pdf', name: f.name } : { id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' }
+    )),
+  }), [docDate, leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle, fragments]);
+
+  const applySnapshot = useCallback(async (snap) => {
+    try {
+      setDocDate(snap.docDate || '');
+      setLeftHeadingFields(Array.isArray(snap.leftHeadingFields) ? snap.leftHeadingFields : []);
+      setRightHeadingFields(Array.isArray(snap.rightHeadingFields) ? snap.rightHeadingFields : []);
+      setPlaintiffName(snap.plaintiffName || '');
+      setDefendantName(snap.defendantName || '');
+      setCourtTitle(snap.courtTitle || '');
+      // Load PDFs' binary from IDB
+      const out = [];
+      for (const f of snap.fragments || []) {
+        if (f.type === 'pdf') {
+          const data = await idbGetPdf(f.id);
+          out.push({ id: f.id, type: 'pdf', name: f.name || 'PDF', data: data || null });
+        } else {
+          out.push({ id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' });
+        }
+      }
+      setFragments(out);
+    } catch (_) {}
+  }, []);
+
+  const persistHistory = useCallback((pastArr = historyPast, futureArr = historyFuture) => {
+    try {
+      const payload = {
+        past: pastArr,
+        present: makeSnapshot(),
+        future: futureArr,
+      };
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(payload));
+      }
+    } catch (_) {}
+  }, [historyPast, historyFuture, makeSnapshot]);
+
+  const pushHistorySnapshot = useCallback(() => {
+    setHistoryPast((cur) => {
+      const next = [...cur, makeSnapshot()];
+      // clear future when new action
+      setHistoryFuture([]);
+      // persist after the state mutation tick
+      setTimeout(() => persistHistory(next, []), 0);
+      return next;
+    });
+  }, [makeSnapshot, persistHistory]);
+
+  const schedulePersist = useCallback(() => {
+    // persist in next tick to include latest state
+    setTimeout(() => persistHistory(), 0);
+  }, [persistHistory]);
+
+  const scheduleThrottledHistoryPush = useCallback(() => {
+    const now = Date.now();
+    if (now - lastEditTsRef.current > 800) {
+      lastEditTsRef.current = now;
+      pushHistorySnapshot();
+    }
+  }, [pushHistorySnapshot]);
+
+  const handleUndo = useCallback(async () => {
+    setHistoryPast(async (cur) => {
+      if (!cur.length) return cur;
+      const prev = cur[cur.length - 1];
+      const rest = cur.slice(0, -1);
+      // move current to future
+      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
+      await applySnapshot(prev);
+      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
+      return rest;
+    });
+  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
+
+  const handleRedo = useCallback(async () => {
+    setHistoryFuture(async (cur) => {
+      if (!cur.length) return cur;
+      const nextSnap = cur[cur.length - 1];
+      const rest = cur.slice(0, -1);
+      // move current to past
+      setHistoryPast((p) => [...p, makeSnapshot()]);
+      await applySnapshot(nextSnap);
+      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
+      return rest;
+    });
+  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
+
+  // Load history on mount
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(LS_HISTORY_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const present = parsed && parsed.present ? parsed.present : null;
+      const pastArr = Array.isArray(parsed?.past) ? parsed.past : [];
+      const futureArr = Array.isArray(parsed?.future) ? parsed.future : [];
+      if (present) {
+        // prevent default PDF injection when restoring history
+        defaultPdfLoadedRef.current = true;
+        // Apply snapshot and set stacks
+        (async () => {
+          await applySnapshot(present);
+          setHistoryPast(pastArr);
+          setHistoryFuture(futureArr);
+        })();
+      }
+    } catch (_) {}
+  }, [applySnapshot]);
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const onKey = (e) => {
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod) return;
+      if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.key.toLowerCase() === 'y') || (e.key.toLowerCase() === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleUndo, handleRedo]);
+
   const previewFragments = useMemo(
     () =>
       fragments.map((fragment) => (
@@ -1169,10 +1481,10 @@ export default function App() {
     <div className="app-shell">
       <aside className="editor-panel">
         <h1>Document Builder</h1>
-        <p className="lead">
+        {/* <p className="lead">
           Assemble Markdown notes and PDFs into a single, print-ready packet. Add new fragments
           below and fine-tune their order.
-        </p>
+        </p> */}
 
         <div className="card">
           <label htmlFor="doc-date-input">Document date (applies to all sections)</label>
@@ -1253,63 +1565,32 @@ export default function App() {
           )}
         </div>
 
-        <form onSubmit={handleMarkdownSubmit} className="card">
-          <label className="heading-label" htmlFor="entry-title-input">Section title</label>
-          <input
-            id="entry-title-input"
-            type="text"
-            value={markdownTitleDraft}
-            onChange={(event) => setMarkdownTitleDraft(event.target.value)}
-            className="heading-input"
-            placeholder="e.g., Introduction"
-          />
-
-          <div className="label-row">
-            <label htmlFor="markdown-input">Markdown fragment</label>
-            <button
-              type="button"
-              className="ghost small"
-              onClick={() => setIsDraftEditorOpen(true)}
-              aria-label="Open fullscreen editor for draft"
-            >
-              Fullscreen
-            </button>
+        {/* Sections list or editor */}
+        {!editingFragmentId ? (
+          <div className="card">
+            <div className="card-header-row">
+              <span>Sections</span>
+              <button type="button" className="ghost small" onClick={handleAddSectionEnd} title="Add new section">
+                + Add Section
+              </button>
+            </div>
+            <FragmentList
+              fragments={fragments}
+              onReorder={handleReorderFragments}
+              onRemove={handleRemoveFragmentConfirmed}
+              onInsertBefore={handleInsertBefore}
+              onInsertAfter={handleInsertAfter}
+              onItemClick={(frag) => setEditingFragmentId(frag.id)}
+            />
           </div>
-          <textarea
-            id="markdown-input"
-            className="markdown-input"
-            placeholder="## Title\n\nDraft your content here..."
-            value={markdownDraft}
-            onChange={(event) => setMarkdownDraft(event.target.value)}
-            rows={8}
+        ) : (
+          <InlineEditorPanel
+            fragment={fragments.find((f) => f.id === editingFragmentId)}
+            onCancel={() => setEditingFragmentId(null)}
+            onChange={handleEditFragmentFields}
+            onDelete={() => handleRemoveFragmentConfirmed(editingFragmentId)}
           />
-          <button type="submit" className="primary">
-            Add Markdown
-          </button>
-        </form>
-
-        <div className="card">
-          <label htmlFor="pdf-input">Attach PDF</label>
-          <input
-            id="pdf-input"
-            ref={inputRef}
-            type="file"
-            accept="application/pdf"
-            onChange={handlePdfUpload}
-          />
-          <p className="help-text">
-            Uploaded PDFs keep their original pagination. Multi-page documents are supported.
-          </p>
-        </div>
-
-        <FragmentList
-          fragments={fragments}
-          onChangeContent={handleFragmentContentChange}
-          onChangeTitle={handleFragmentTitleChange}
-          onMove={handleMoveFragment}
-          onRemove={handleRemoveFragment}
-          onOpenEditor={setEditingFragmentId}
-        />
+        )}
       </aside>
 
       <main className="preview-panel">
@@ -1345,51 +1626,7 @@ export default function App() {
           })()}
         </FullscreenOverlay>
       )}
-      {editingFragmentId && (
-        <EditorOverlay
-          fragment={fragments.find((f) => f.id === editingFragmentId)}
-          onClose={() => setEditingFragmentId(null)}
-          onSave={(updated) => {
-            setFragments((current) =>
-              current.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)),
-            );
-            setEditingFragmentId(null);
-          }}
-        />
-      )}
-      {isDraftEditorOpen && (
-        <FullscreenOverlay onClose={() => setIsDraftEditorOpen(false)}>
-          <div className="editor-fullscreen-container">
-            <div className="editor-fullscreen-header">
-              <h3>New Markdown Entry</h3>
-              <div className="editor-fullscreen-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setIsDraftEditorOpen(false)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="editor-fullscreen-form">
-              <input
-                type="text"
-                className="heading-input editor-fullscreen-title"
-                placeholder="Entry title"
-                value={markdownTitleDraft}
-                onChange={(e) => setMarkdownTitleDraft(e.target.value)}
-              />
-              <textarea
-                className="markdown-editor editor-fullscreen-textarea"
-                placeholder="## Title\n\nDraft your content here..."
-                value={markdownDraft}
-                onChange={(e) => setMarkdownDraft(e.target.value)}
-              />
-            </div>
-          </div>
-        </FullscreenOverlay>
-      )}
+      {/* Inline editor now lives in left panel; removed modal editors */}
     </div>
   );
 }
@@ -1481,3 +1718,48 @@ function EditorOverlay({ fragment, onClose, onSave }) {
     </FullscreenOverlay>
   );
 }
+
+// Inline editor shown in the left panel instead of a modal
+function InlineEditorPanel({ fragment, onCancel, onChange, onDelete }) {
+  if (!fragment || fragment.type !== 'markdown') return null;
+  const renderRef = useRef(0);
+  useEffect(() => {
+    // dbg(`[InlineEditorPanel render #${++renderRef.current}]`, {
+    //   id: fragment.id,
+    //   titleLen: (fragment.title || '').length,
+    //   contentLen: (fragment.content || '').length,
+    // });
+  });
+  return (
+    <div className="card editor-inline">
+      <div className="editor-fullscreen-header">
+        <h3>Edit Section</h3>
+        <div className="editor-fullscreen-actions">
+          <button type="button" className="danger" onClick={onDelete}>Delete</button>
+          <button type="button" className="secondary" onClick={onCancel}>Back</button>
+        </div>
+      </div>
+      <div className="editor-fullscreen-form">
+        <input
+          type="text"
+          className="heading-input editor-fullscreen-title"
+          placeholder="Entry title"
+          value={fragment.title || ''}
+          onChange={(e) => onChange && onChange(fragment.id, { title: e.target.value })}
+        />
+        <textarea
+          className="markdown-editor editor-fullscreen-textarea"
+          placeholder="## Title\n\nDraft your content here..."
+          value={fragment.content || ''}
+          onChange={(e) => onChange && onChange(fragment.id, { content: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+const MemoInlineEditorPanel = React.memo(InlineEditorPanel, (prev, next) => {
+  const diffs = propDiff(prev, next);
+  // if (diffs.length) dbg('[InlineEditorPanel props changed]', diffs);
+  return diffs.length === 0;
+});

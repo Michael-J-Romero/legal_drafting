@@ -832,7 +832,11 @@ button:not(:disabled):active {
   }
 
   html, body {
+    margin: 0 !important;
+    padding: 0 !important;
     background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .app-shell {
@@ -845,6 +849,7 @@ button:not(:disabled):active {
   }
 
   .preview-scroll {
+    display: block !important; /* avoid flex rounding during print */
     padding: 0 !important;
     background: none !important;
     height: auto !important;
@@ -854,8 +859,11 @@ button:not(:disabled):active {
   /* Remove any margins/padding around each page wrapper in print */
   .fragment-wrapper,
   .page-wrapper {
+    display: block !important;
     margin: 0 !important;
     padding: 0 !important;
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
   }
 
   /* Hide screen-only controls */
@@ -871,19 +879,26 @@ button:not(:disabled):active {
     border: none !important;
     margin: 0 auto !important;
     background: #fff !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important; /* clip any rounding overflow */
   }
 
   /* Ensure page containers don’t add spacing inside */
   .page-surface {
     width: 8.5in !important;
-    min-height: 11in !important;
+    height: 11in !important; /* exact height for each printed page */
     padding: 0 !important;
     gap: 0 !important;
-    page-break-after: always;
+    page-break-after: auto !important; /* delegate page breaking to wrapper */
   }
 
-  .page-surface:last-child {
-    page-break-after: auto;
+  .page-wrapper { /* ensure each wrapper is one printed page */
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+  .page-wrapper:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
 
   /* Exact paper size */
