@@ -3,7 +3,7 @@
   grid-template-columns: 480px 1fr;
   height: 100vh;
   padding: 24px;
-  gap: 24px;
+  gap: 24px; 
 }
 
 .editor-panel {
