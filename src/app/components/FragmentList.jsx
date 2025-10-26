@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { LuGripVertical } from 'react-icons/lu';
+import { HiOutlineDotsHorizontal } from 'react-icons/hi';
 
 export default function FragmentList({
   fragments,
@@ -11,19 +13,35 @@ export default function FragmentList({
   onItemClick,
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [draggingIndex, setDraggingIndex] = useState(null);
+  const [dropIndex, setDropIndex] = useState(null);
 
   const onDragStart = (e, fromIndex) => {
     try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
     e.dataTransfer.setData('text/plain', String(fromIndex));
+    setDraggingIndex(fromIndex);
   };
-  const onDragOver = (e) => {
+  const onDragOver = (e, toIndex) => {
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    setDropIndex(toIndex);
+  };
+  const onDragLeave = (e, toIndex) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    if (dropIndex === toIndex) {
+      setDropIndex(null);
+    }
   };
   const onDrop = (e, toIndex) => {
     e.preventDefault();
     const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    setDropIndex(null);
+    setDraggingIndex(null);
     if (Number.isInteger(from) && from !== toIndex) onReorder(from, toIndex);
+  };
+  const onDragEnd = () => {
+    setDraggingIndex(null);
+    setDropIndex(null);
   };
 
   return (
@@ -32,16 +50,22 @@ export default function FragmentList({
         const title = fragment.type === 'markdown'
           ? (fragment.title?.trim() || 'Untitled Markdown')
           : (fragment.name || 'PDF');
+        const isDragging = draggingIndex === index;
+        const isDropTarget = dropIndex === index && draggingIndex !== index;
         return (
           <div
             key={fragment.id}
-            className="fragment-row"
+            className={`fragment-row${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' drop-target' : ''}`}
             draggable
             onDragStart={(e) => onDragStart(e, index)}
-            onDragOver={onDragOver}
+            onDragOver={(event) => onDragOver(event, index)}
+            onDragLeave={(event) => onDragLeave(event, index)}
             onDrop={(e) => onDrop(e, index)}
+            onDragEnd={onDragEnd}
           >
-            <button type="button" className="drag-handle" title="Drag to reorder" aria-label="Drag handle">≡</button>
+            <button type="button" className="drag-handle" title="Drag to reorder" aria-label="Drag handle">
+              <LuGripVertical aria-hidden="true" />
+            </button>
             <button
               type="button"
               className="fragment-title-button"
@@ -60,7 +84,7 @@ export default function FragmentList({
                 onClick={() => setOpenMenuId((cur) => (cur === fragment.id ? null : fragment.id))}
                 title="More actions"
               >
-                •••
+                <HiOutlineDotsHorizontal aria-hidden="true" />
               </button>
               {openMenuId === fragment.id && (
                 <div className="fragment-menu" role="menu">
