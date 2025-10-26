@@ -19,6 +19,7 @@
     "@stripe/stripe-js": "^7.8.0",
     "@supabase/supabase-js": "^2.55.0",
     "aws-amplify": "^6.15.5",
+    "@legal/undo-stack": "file:packages/undo-stack",
     "framer-motion": "^12.23.12",
     "localforage": "^1.10.0",
     "next": "13.4.19",
