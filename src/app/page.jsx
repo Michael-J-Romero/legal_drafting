@@ -179,9 +179,14 @@ export default function App() {
       const ok = window.confirm(CONFIRM_DELETE_MESSAGE);
       if (!ok) return;
     }
-    setFragments((current) => current.filter((fragment) => fragment.id !== id));
+    pushHistorySnapshot();
+    setFragments((current) => {
+      const next = current.filter((fragment) => fragment.id !== id);
+      schedulePersist();
+      return next;
+    });
     if (editingFragmentId === id) setEditingFragmentId(null);
-  }, [editingFragmentId]);
+  }, [editingFragmentId, pushHistorySnapshot, schedulePersist]);
 
   const handleInsertBefore = useCallback((id) => {
     pushHistorySnapshot();
@@ -316,11 +321,15 @@ export default function App() {
     } catch (_) {}
   }, []);
 
-  const persistHistory = useCallback((pastArr = historyPast, futureArr = historyFuture) => {
-    try {
-      writeHistory(pastArr, makeSnapshot(), futureArr);
-    } catch (_) {}
-  }, [historyPast, historyFuture, makeSnapshot]);
+  const persistHistory = useCallback(
+    (pastArr = historyPast, futureArr = historyFuture, presentSnap = null) => {
+      try {
+        const present = presentSnap || makeSnapshot();
+        writeHistory(pastArr, present, futureArr);
+      } catch (_) {}
+    },
+    [historyPast, historyFuture, makeSnapshot],
+  );
 
   const pushHistorySnapshot = useCallback(() => {
     setHistoryPast((cur) => {
@@ -346,41 +355,89 @@ export default function App() {
     }
   }, [pushHistorySnapshot]);
 
-  const handleUndo = useCallback(async () => {
-    setHistoryPast(async (cur) => {
-      if (!cur.length) return cur;
-      const prev = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to future
-      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
-      await applySnapshot(prev);
-      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
+  const handleDocDateChange = useCallback(
+    (value) => {
+      scheduleThrottledHistoryPush();
+      setDocDate(value);
+      schedulePersist();
+    },
+    [schedulePersist, scheduleThrottledHistoryPush],
+  );
 
-  const handleRedo = useCallback(async () => {
-    setHistoryFuture(async (cur) => {
-      if (!cur.length) return cur;
-      const nextSnap = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to past
-      setHistoryPast((p) => [...p, makeSnapshot()]);
-      await applySnapshot(nextSnap);
-      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
-      return rest;
+  const handlePlaintiffNameChange = useCallback(
+    (value) => {
+      scheduleThrottledHistoryPush();
+      setPlaintiffName(value);
+      schedulePersist();
+    },
+    [schedulePersist, scheduleThrottledHistoryPush],
+  );
+
+  const handleDefendantNameChange = useCallback(
+    (value) => {
+      scheduleThrottledHistoryPush();
+      setDefendantName(value);
+      schedulePersist();
+    },
+    [schedulePersist, scheduleThrottledHistoryPush],
+  );
+
+  const handleCourtTitleChange = useCallback(
+    (value) => {
+      scheduleThrottledHistoryPush();
+      setCourtTitle(value);
+      schedulePersist();
+    },
+    [schedulePersist, scheduleThrottledHistoryPush],
+  );
+
+  const handleUndo = useCallback(() => {
+    setHistoryPast((curPast) => {
+      if (!curPast.length) return curPast;
+      const prevSnapshot = curPast[curPast.length - 1];
+      const newPast = curPast.slice(0, -1);
+      const presentSnapshot = makeSnapshot();
+
+      setHistoryFuture((curFuture) => {
+        const newFuture = [...curFuture, presentSnapshot];
+        applySnapshot(prevSnapshot).then(() => {
+          persistHistory(newPast, newFuture, prevSnapshot);
+        });
+        return newFuture;
+      });
+
+      return newPast;
     });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
+  }, [applySnapshot, makeSnapshot, persistHistory]);
+
+  const handleRedo = useCallback(() => {
+    setHistoryFuture((curFuture) => {
+      if (!curFuture.length) return curFuture;
+      const nextSnapshot = curFuture[curFuture.length - 1];
+      const newFuture = curFuture.slice(0, -1);
+      const presentSnapshot = makeSnapshot();
+
+      setHistoryPast((curPast) => {
+        const newPast = [...curPast, presentSnapshot];
+        applySnapshot(nextSnapshot).then(() => {
+          persistHistory(newPast, newFuture, nextSnapshot);
+        });
+        return newPast;
+      });
+
+      return newFuture;
+    });
+  }, [applySnapshot, makeSnapshot, persistHistory]);
 
   // Load history on mount
   useEffect(() => {
     try {
-  if (typeof window === 'undefined') return;
-  const parsed = readHistory();
-  if (!parsed) return;
-  const present = parsed.present || null;
-  const pastArr = Array.isArray(parsed.past) ? parsed.past : [];
-  const futureArr = Array.isArray(parsed.future) ? parsed.future : [];
+      if (typeof window === 'undefined') return;
+      const parsed = readHistory();
+      if (!parsed) return;
+      const present = parsed.present || null;
+      const pastArr = Array.isArray(parsed.past) ? parsed.past : [];
+      const futureArr = Array.isArray(parsed.future) ? parsed.future : [];
       if (present) {
         // prevent default PDF injection when restoring history
         defaultPdfLoadedRef.current = true;
@@ -416,7 +473,7 @@ export default function App() {
     <div className="app-shell">
       <EditorPanel
         docDate={docDate}
-        setDocDate={setDocDate}
+        setDocDate={handleDocDateChange}
         headingExpanded={headingExpanded}
         setHeadingExpanded={setHeadingExpanded}
         leftHeadingFields={leftHeadingFields}
@@ -430,9 +487,9 @@ export default function App() {
         onAddRightField={handleAddRightField}
         onRightFieldChange={handleRightFieldChange}
         onRemoveRightField={handleRemoveRightField}
-        setPlaintiffName={setPlaintiffName}
-        setDefendantName={setDefendantName}
-        setCourtTitle={setCourtTitle}
+        setPlaintiffName={handlePlaintiffNameChange}
+        setDefendantName={handleDefendantNameChange}
+        setCourtTitle={handleCourtTitleChange}
         fragments={fragments}
         onReorder={handleReorderFragments}
         onRemove={handleRemoveFragmentConfirmed}
