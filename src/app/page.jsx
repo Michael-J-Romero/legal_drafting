@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-// ...existing code...
+// ...existing code... 
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import '/src/App.css';
@@ -316,19 +316,23 @@ export default function App() {
     } catch (_) {}
   }, []);
 
-  const persistHistory = useCallback((pastArr = historyPast, futureArr = historyFuture) => {
-    try {
-      writeHistory(pastArr, makeSnapshot(), futureArr);
-    } catch (_) {}
-  }, [historyPast, historyFuture, makeSnapshot]);
+  const persistHistory = useCallback(
+    (pastArr = historyPast, presentSnap = makeSnapshot(), futureArr = historyFuture) => {
+      try {
+        writeHistory(pastArr, presentSnap, futureArr);
+      } catch (_) {}
+    },
+    [historyPast, historyFuture, makeSnapshot],
+  );
 
   const pushHistorySnapshot = useCallback(() => {
     setHistoryPast((cur) => {
-      const next = [...cur, makeSnapshot()];
+      const snapshot = makeSnapshot();
+      const next = [...cur, snapshot];
       // clear future when new action
       setHistoryFuture([]);
       // persist after the state mutation tick
-      setTimeout(() => persistHistory(next, []), 0);
+      setTimeout(() => persistHistory(next, undefined, []), 0);
       return next;
     });
   }, [makeSnapshot, persistHistory]);
@@ -347,30 +351,32 @@ export default function App() {
   }, [pushHistorySnapshot]);
 
   const handleUndo = useCallback(async () => {
-    setHistoryPast(async (cur) => {
-      if (!cur.length) return cur;
-      const prev = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to future
-      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
-      await applySnapshot(prev);
-      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
+    if (!historyPast.length) return;
+    const prev = historyPast[historyPast.length - 1];
+    const rest = historyPast.slice(0, -1);
+    const currentSnap = makeSnapshot();
+    const updatedFuture = [...historyFuture, currentSnap];
+
+    setHistoryPast(rest);
+    setHistoryFuture(updatedFuture);
+
+    await applySnapshot(prev);
+    persistHistory(rest, prev, updatedFuture);
+  }, [applySnapshot, historyFuture, historyPast, makeSnapshot, persistHistory]);
 
   const handleRedo = useCallback(async () => {
-    setHistoryFuture(async (cur) => {
-      if (!cur.length) return cur;
-      const nextSnap = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to past
-      setHistoryPast((p) => [...p, makeSnapshot()]);
-      await applySnapshot(nextSnap);
-      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
+    if (!historyFuture.length) return;
+    const nextSnap = historyFuture[historyFuture.length - 1];
+    const rest = historyFuture.slice(0, -1);
+    const currentSnap = makeSnapshot();
+    const updatedPast = [...historyPast, currentSnap];
+
+    setHistoryFuture(rest);
+    setHistoryPast(updatedPast);
+
+    await applySnapshot(nextSnap);
+    persistHistory(updatedPast, nextSnap, rest);
+  }, [applySnapshot, historyFuture, historyPast, makeSnapshot, persistHistory]);
 
   // Load history on mount
   useEffect(() => {
