@@ -37,7 +37,8 @@
     "remove-markdown": "^0.6.2",
     "stripe": "^18.4.0",
     "three": "^0.179.1",
-    "zustand": "^5.0.8"
+    "zustand": "^5.0.8",
+    "@legal-drafting/use-undo": "file:packages/use-undo"
   },
   "devDependencies": {
     "@types/react": "^19.1.15",
