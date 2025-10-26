@@ -1,17 +1,19 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-// ...existing code...
+import { useUndoStack } from '@legal/undo-stack';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import '/src/App.css';
-// pdfjs utilities used by PdfPreview only
 import { idbSetPdf, idbGetPdf } from './lib/pdfStorage';
 import { formatDisplayDate } from './lib/date';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
-import { appendMarkdownFragment as appendMarkdownFragmentPdf, appendPdfFragment as appendPdfFragmentPdf, LETTER_WIDTH } from './lib/pdf/generate';
-import { writeHistory, readHistory } from './lib/history';
+import {
+  appendMarkdownFragment as appendMarkdownFragmentPdf,
+  appendPdfFragment as appendPdfFragmentPdf,
+  LETTER_WIDTH,
+} from './lib/pdf/generate';
 import {
   DEFAULT_LEFT_HEADING_FIELDS,
   DEFAULT_RIGHT_HEADING_FIELDS,
@@ -27,51 +29,204 @@ import {
   CONFIRM_DELETE_MESSAGE,
   UNDO_THROTTLE_MS,
 } from './lib/defaults';
-let fragmentCounter = 0; 
+import { saveDocumentHistory, loadDocumentHistory } from './lib/documentPersistence';
+
+let fragmentCounter = 0;
+
+const HISTORY_MAX_SIZE = 200;
 
 function createFragmentId() {
   fragmentCounter += 1;
   return `fragment-${fragmentCounter}`;
-} 
-export default function App() {
-  // --- History state ---
-  const [historyPast, setHistoryPast] = useState([]); // array of snapshots
-  const [historyFuture, setHistoryFuture] = useState([]); // array of snapshots
-  const lastEditTsRef = useRef(0);
-  const [docDate, setDocDate] = useState(() => {
-    try {
-      return new Date().toISOString().slice(0, 10);
-    } catch (_) {
-      return '';
-    }
+}
+
+function getDefaultDocDate() {
+  try {
+    return new Date().toISOString().slice(0, 10);
+  } catch (_) {
+    return '';
+  }
+}
+
+function createInitialDocument() {
+  return {
+    docDate: getDefaultDocDate(),
+    leftHeadingFields: DEFAULT_LEFT_HEADING_FIELDS.slice(),
+    rightHeadingFields: DEFAULT_RIGHT_HEADING_FIELDS.slice(),
+    plaintiffName: DEFAULT_PLAINTIFF_NAME,
+    defendantName: DEFAULT_DEFENDANT_NAME,
+    courtTitle: DEFAULT_COURT_TITLE,
+    fragments: [
+      { id: createFragmentId(), type: 'markdown', content: DEFAULT_WELCOME_CONTENT, title: DEFAULT_WELCOME_TITLE },
+    ],
+  };
+}
+
+function normalizeDocument(doc) {
+  if (!doc || typeof doc !== 'object') {
+    return createInitialDocument();
+  }
+  return {
+    docDate: doc.docDate || '',
+    leftHeadingFields: Array.isArray(doc.leftHeadingFields) ? doc.leftHeadingFields.slice() : [],
+    rightHeadingFields: Array.isArray(doc.rightHeadingFields) ? doc.rightHeadingFields.slice() : [],
+    plaintiffName: doc.plaintiffName || '',
+    defendantName: doc.defendantName || '',
+    courtTitle: doc.courtTitle || '',
+    fragments: Array.isArray(doc.fragments)
+      ? doc.fragments
+          .map((fragment) => {
+            if (!fragment || typeof fragment !== 'object') return null;
+            const baseId = typeof fragment.id === 'string' ? fragment.id : createFragmentId();
+            if (fragment.type === 'pdf') {
+              return {
+                id: baseId,
+                type: 'pdf',
+                name: fragment.name || '',
+                data: fragment.data ?? null,
+              };
+            }
+            return {
+              id: baseId,
+              type: 'markdown',
+              title: fragment.title || '',
+              content: fragment.content || '',
+            };
+          })
+          .filter(Boolean)
+      : [],
+  };
+}
+
+function updateFragmentCounterFromDocs(docs) {
+  let maxId = fragmentCounter;
+  docs.forEach((doc) => {
+    if (!doc || !Array.isArray(doc.fragments)) return;
+    doc.fragments.forEach((fragment) => {
+      if (!fragment || typeof fragment.id !== 'string') return;
+      const match = fragment.id.match(/fragment-(\d+)/);
+      if (!match) return;
+      const num = Number.parseInt(match[1], 10);
+      if (Number.isFinite(num) && num > maxId) {
+        maxId = num;
+      }
+    });
   });
-  const [leftHeadingFields, setLeftHeadingFields] = useState(DEFAULT_LEFT_HEADING_FIELDS);
-  const [rightHeadingFields, setRightHeadingFields] = useState(DEFAULT_RIGHT_HEADING_FIELDS);
-  // return 8
-  const [plaintiffName, setPlaintiffName] = useState(DEFAULT_PLAINTIFF_NAME);
-  const [defendantName, setDefendantName] = useState(DEFAULT_DEFENDANT_NAME);
-  const [courtTitle, setCourtTitle] = useState(DEFAULT_COURT_TITLE);
+  fragmentCounter = maxId;
+}
+
+export default function App() {
+  const initialDocumentRef = useRef(null);
+  if (!initialDocumentRef.current) {
+    initialDocumentRef.current = createInitialDocument();
+  }
+
+  const [history, controls] = useUndoStack(initialDocumentRef.current, { maxSize: HISTORY_MAX_SIZE });
+  const { set: setDocumentInternal, undo, redo, commit, load } = controls;
+  const document = history.present || initialDocumentRef.current;
+
   const [headingExpanded, setHeadingExpanded] = useState(false);
-  const [fragments, setFragments] = useState(() => [
-    { id: createFragmentId(), type: 'markdown', content: DEFAULT_WELCOME_CONTENT, title: DEFAULT_WELCOME_TITLE },
-  ]);
   const [fullscreenFragmentId, setFullscreenFragmentId] = useState(null);
   const [editingFragmentId, setEditingFragmentId] = useState(null);
-
-  // Load a default PDF from the public folder on first load
+  const [restoreComplete, setRestoreComplete] = useState(false);
+  const previewRef = useRef(null);
   const defaultPdfLoadedRef = useRef(false);
+  const lastThrottledCommitRef = useRef(0);
+
+  const applyDocumentChange = useCallback((mutator, options = {}) => {
+    setDocumentInternal((current) => {
+      const base = current ?? createInitialDocument();
+      const working = {
+        docDate: base.docDate,
+        leftHeadingFields: base.leftHeadingFields.slice(),
+        rightHeadingFields: base.rightHeadingFields.slice(),
+        plaintiffName: base.plaintiffName,
+        defendantName: base.defendantName,
+        courtTitle: base.courtTitle,
+        fragments: base.fragments.map((fragment) => ({ ...fragment })),
+      };
+      if (typeof mutator === 'function') {
+        mutator(working);
+      } else if (mutator && typeof mutator === 'object') {
+        return normalizeDocument(mutator);
+      }
+      return normalizeDocument(working);
+    }, options);
+  }, [setDocumentInternal]);
+
+  const throttledCommit = useCallback(() => {
+    const now = Date.now();
+    if (now - lastThrottledCommitRef.current > UNDO_THROTTLE_MS) {
+      lastThrottledCommitRef.current = now;
+      commit();
+    }
+  }, [commit]);
+
+  const docDate = document.docDate || '';
+  const leftHeadingFields = document.leftHeadingFields || [];
+  const rightHeadingFields = document.rightHeadingFields || [];
+  const plaintiffName = document.plaintiffName || '';
+  const defendantName = document.defendantName || '';
+  const courtTitle = document.courtTitle || '';
+  const fragments = document.fragments || [];
+
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = loadDocumentHistory();
+    if (stored && stored.present) {
+      defaultPdfLoadedRef.current = true;
+      updateFragmentCounterFromDocs([...stored.past, stored.present, ...stored.future]);
+      load(stored);
+    }
+    setRestoreComplete(true);
+  }, [load]);
+
+  useEffect(() => {
+    if (!restoreComplete) return;
+    if (!history.present) return;
+    saveDocumentHistory(history);
+  }, [history, restoreComplete]);
+
+  useEffect(() => {
+    updateFragmentCounterFromDocs([document]);
+  }, [document]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const fragment of fragments) {
+        if (fragment.type === 'pdf' && !fragment.data) {
+          const data = await idbGetPdf(fragment.id);
+          if (!data || cancelled) continue;
+          applyDocumentChange((draft) => {
+            const target = draft.fragments.find((item) => item.id === fragment.id);
+            if (target && !target.data) {
+              target.data = data;
+            }
+          }, { record: false, clearFuture: false });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fragments, applyDocumentChange]);
+
+  useEffect(() => {
+    if (!restoreComplete) return;
     if (defaultPdfLoadedRef.current) return;
+
+    const defaultPdfName = DEFAULT_PDF_FILE;
+    const defaultPdfPath = DEFAULT_PDF_PATH;
+
     defaultPdfLoadedRef.current = true;
 
-  const defaultPdfName = DEFAULT_PDF_FILE;
-  const defaultPdfPath = DEFAULT_PDF_PATH;
-
-    // If a fragment with this name already exists (e.g., after HMR), skip
     const hasDefault = fragments.some(
-      (f) => f.type === 'pdf' && (f.name === defaultPdfName)
+      (fragment) => fragment.type === 'pdf' && fragment.name === defaultPdfName,
     );
     if (hasDefault) return;
+
+    let cancelled = false;
 
     fetch(defaultPdfPath)
       .then((res) => {
@@ -79,20 +234,179 @@ export default function App() {
         return res.arrayBuffer();
       })
       .then(async (buffer) => {
+        if (cancelled) return;
         const newId = createFragmentId();
         await idbSetPdf(newId, buffer);
-        setFragments((current) => [
-          { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
-          ...current,
-        ]);
-        schedulePersist();
+        applyDocumentChange((draft) => {
+          draft.fragments.unshift({
+            id: newId,
+            type: 'pdf',
+            data: buffer,
+            name: defaultPdfName,
+          });
+        }, { record: false });
       })
       .catch(() => {
-        // Silently ignore if the file isn't present; UI will still work
+        // ignore missing default PDF
       });
-  }, []);
 
-  const previewRef = useRef(null); 
+    return () => {
+      cancelled = true;
+    };
+  }, [restoreComplete, fragments, applyDocumentChange]);
+
+  const handleDocDateChange = useCallback((value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      draft.docDate = value || '';
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleAddLeftField = useCallback(() => {
+    applyDocumentChange((draft) => {
+      draft.leftHeadingFields.push('');
+    });
+  }, [applyDocumentChange]);
+
+  const handleLeftFieldChange = useCallback((index, value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      if (index < 0 || index >= draft.leftHeadingFields.length) return;
+      draft.leftHeadingFields[index] = value;
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleRemoveLeftField = useCallback((index) => {
+    applyDocumentChange((draft) => {
+      if (index < 0 || index >= draft.leftHeadingFields.length) return;
+      draft.leftHeadingFields.splice(index, 1);
+    });
+  }, [applyDocumentChange]);
+
+  const handleAddRightField = useCallback(() => {
+    applyDocumentChange((draft) => {
+      draft.rightHeadingFields.push('');
+    });
+  }, [applyDocumentChange]);
+
+  const handleRightFieldChange = useCallback((index, value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      if (index < 0 || index >= draft.rightHeadingFields.length) return;
+      draft.rightHeadingFields[index] = value;
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleRemoveRightField = useCallback((index) => {
+    applyDocumentChange((draft) => {
+      if (index < 0 || index >= draft.rightHeadingFields.length) return;
+      draft.rightHeadingFields.splice(index, 1);
+    });
+  }, [applyDocumentChange]);
+
+  const handlePlaintiffNameChange = useCallback((value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      draft.plaintiffName = value || '';
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleDefendantNameChange = useCallback((value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      draft.defendantName = value || '';
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleCourtTitleChange = useCallback((value) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      draft.courtTitle = value || '';
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
+
+  const handleReorderFragments = useCallback((fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    applyDocumentChange((draft) => {
+      if (fromIndex < 0 || fromIndex >= draft.fragments.length) return;
+      const [moved] = draft.fragments.splice(fromIndex, 1);
+      if (!moved) return;
+      const targetIndex = Math.min(Math.max(toIndex, 0), draft.fragments.length);
+      draft.fragments.splice(targetIndex, 0, moved);
+    });
+  }, [applyDocumentChange]);
+
+  const handleRemoveFragmentConfirmed = useCallback((id) => {
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm(CONFIRM_DELETE_MESSAGE);
+      if (!ok) return;
+    }
+    applyDocumentChange((draft) => {
+      const index = draft.fragments.findIndex((fragment) => fragment.id === id);
+      if (index >= 0) {
+        draft.fragments.splice(index, 1);
+      }
+    });
+    if (editingFragmentId === id) {
+      setEditingFragmentId(null);
+    }
+  }, [applyDocumentChange, editingFragmentId]);
+
+  const handleInsertBefore = useCallback((id) => {
+    const newId = createFragmentId();
+    applyDocumentChange((draft) => {
+      const index = draft.fragments.findIndex((fragment) => fragment.id === id);
+      if (index < 0) return;
+      draft.fragments.splice(index, 0, {
+        id: newId,
+        type: 'markdown',
+        title: 'Untitled',
+        content: '',
+      });
+    });
+    setEditingFragmentId(newId);
+  }, [applyDocumentChange]);
+
+  const handleInsertAfter = useCallback((id) => {
+    const newId = createFragmentId();
+    applyDocumentChange((draft) => {
+      const index = draft.fragments.findIndex((fragment) => fragment.id === id);
+      if (index < 0) return;
+      draft.fragments.splice(index + 1, 0, {
+        id: newId,
+        type: 'markdown',
+        title: 'Untitled',
+        content: '',
+      });
+    });
+    setEditingFragmentId(newId);
+  }, [applyDocumentChange]);
+
+  const handleAddSectionEnd = useCallback(() => {
+    const newId = createFragmentId();
+    applyDocumentChange((draft) => {
+      draft.fragments.push({
+        id: newId,
+        type: 'markdown',
+        title: 'Untitled',
+        content: '',
+      });
+    });
+  }, [applyDocumentChange]);
+
+  const handleEditFragmentFields = useCallback((id, updates) => {
+    throttledCommit();
+    applyDocumentChange((draft) => {
+      const target = draft.fragments.find((fragment) => fragment.id === id);
+      if (!target || target.type !== 'markdown') return;
+      if (Object.prototype.hasOwnProperty.call(updates, 'title')) {
+        target.title = updates.title ?? '';
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'content')) {
+        target.content = updates.content ?? '';
+      }
+    }, { record: false });
+  }, [applyDocumentChange, throttledCommit]);
 
   const headingSettings = useMemo(
     () => ({
@@ -105,143 +419,7 @@ export default function App() {
     [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle],
   );
 
-  const handleAddLeftField = useCallback(() => {
-    pushHistorySnapshot();
-    setLeftHeadingFields((current) => {
-      const next = [...current, ''];
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleLeftFieldChange = useCallback((index, value) => {
-    setLeftHeadingFields((current) => {
-      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleRemoveLeftField = useCallback((index) => {
-    pushHistorySnapshot();
-    setLeftHeadingFields((current) => {
-      const next = current.filter((_, itemIndex) => itemIndex !== index);
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleAddRightField = useCallback(() => {
-    pushHistorySnapshot();
-    setRightHeadingFields((current) => {
-      const next = [...current, ''];
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleRightFieldChange = useCallback((index, value) => {
-    setRightHeadingFields((current) => {
-      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleRemoveRightField = useCallback((index) => {
-    pushHistorySnapshot();
-    setRightHeadingFields((current) => {
-      const next = current.filter((_, itemIndex) => itemIndex !== index);
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  // react-to-print v3: use `contentRef` instead of the deprecated `content` callback
   const handlePrint = useReactToPrint({ contentRef: previewRef, documentTitle: PRINT_DOCUMENT_TITLE });
- 
-  const handleReorderFragments = useCallback((fromIndex, toIndex) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const next = [...current];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      schedulePersist();
-      return next;
-    });
-  }, []);
- 
-
-  const handleRemoveFragmentConfirmed = useCallback((id) => {
-    if (typeof window !== 'undefined') {
-      const ok = window.confirm(CONFIRM_DELETE_MESSAGE);
-      if (!ok) return;
-    }
-    setFragments((current) => current.filter((fragment) => fragment.id !== id));
-    if (editingFragmentId === id) setEditingFragmentId(null);
-  }, [editingFragmentId]);
-
-  const handleInsertBefore = useCallback((id) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const idx = current.findIndex((f) => f.id === id);
-      if (idx < 0) return current;
-      const newFrag = {
-        id: createFragmentId(),
-        type: 'markdown',
-        title: 'Untitled',
-        content: '',
-      };
-      const next = [...current];
-      next.splice(idx, 0, newFrag);
-      // Open for editing
-      setEditingFragmentId(newFrag.id);
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleInsertAfter = useCallback((id) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const idx = current.findIndex((f) => f.id === id);
-      if (idx < 0) return current;
-      const newFrag = {
-        id: createFragmentId(),
-        type: 'markdown',
-        title: 'Untitled',
-        content: '',
-      };
-      const next = [...current];
-      next.splice(idx + 1, 0, newFrag);
-      setEditingFragmentId(newFrag.id);
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleAddSectionEnd = useCallback(() => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const next = ([
-        ...current,
-        { id: createFragmentId(), type: 'markdown', title: 'Untitled', content: '' },
-      ]);
-      schedulePersist();
-      return next;
-    });
-  }, []);
-
-  const handleEditFragmentFields = useCallback((id, updates) => {
-    setFragments((current) => {
-      const next = current.map((f) => (f.id === id ? { ...f, ...updates } : f));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
-    });
-  }, []);
 
   const handleCompilePdf = useCallback(async () => {
     if (!fragments.length) return;
@@ -249,13 +427,22 @@ export default function App() {
 
     for (const fragment of fragments) {
       if (fragment.type === 'markdown') {
-        await appendMarkdownFragmentPdf(pdfDoc, fragment.content, headingSettings, fragment.title, docDate, formatDisplayDate);
+        await appendMarkdownFragmentPdf(
+          pdfDoc,
+          fragment.content,
+          headingSettings,
+          fragment.title,
+          docDate,
+          formatDisplayDate,
+        );
       } else if (fragment.type === 'pdf') {
-        await appendPdfFragmentPdf(pdfDoc, fragment.data);
+        const data = fragment.data || (await idbGetPdf(fragment.id));
+        if (data) {
+          await appendPdfFragmentPdf(pdfDoc, data);
+        }
       }
     }
 
-    // Add page numbers at bottom center: "Page X of Y"
     const totalPages = pdfDoc.getPageCount();
     if (totalPages > 0) {
       const footerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -265,7 +452,7 @@ export default function App() {
         const size = 10;
         const textWidth = footerFont.widthOfTextAtSize(label, size);
         const x = (LETTER_WIDTH - textWidth) / 2;
-        const y = 18; // ~0.25in from bottom
+        const y = 18;
         page.drawText(label, { x, y, size, font: footerFont, color: rgb(0.28, 0.32, 0.37) });
       }
     }
@@ -281,120 +468,14 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [fragments, headingSettings, docDate]);
 
-  // --- History: snapshot helpers ---
-  const makeSnapshot = useCallback(() => ({
-    docDate,
-    leftHeadingFields,
-    rightHeadingFields,
-    plaintiffName,
-    defendantName,
-    courtTitle,
-    fragments: fragments.map((f) => (
-      f.type === 'pdf' ? { id: f.id, type: 'pdf', name: f.name } : { id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' }
-    )),
-  }), [docDate, leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle, fragments]);
+  const handleUndo = useCallback(() => {
+    undo();
+  }, [undo]);
 
-  const applySnapshot = useCallback(async (snap) => {
-    try {
-      setDocDate(snap.docDate || '');
-      setLeftHeadingFields(Array.isArray(snap.leftHeadingFields) ? snap.leftHeadingFields : []);
-      setRightHeadingFields(Array.isArray(snap.rightHeadingFields) ? snap.rightHeadingFields : []);
-      setPlaintiffName(snap.plaintiffName || '');
-      setDefendantName(snap.defendantName || '');
-      setCourtTitle(snap.courtTitle || '');
-      // Load PDFs' binary from IDB
-      const out = [];
-      for (const f of snap.fragments || []) {
-        if (f.type === 'pdf') {
-          const data = await idbGetPdf(f.id);
-          out.push({ id: f.id, type: 'pdf', name: f.name || 'PDF', data: data || null });
-        } else {
-          out.push({ id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' });
-        }
-      }
-      setFragments(out);
-    } catch (_) {}
-  }, []);
+  const handleRedo = useCallback(() => {
+    redo();
+  }, [redo]);
 
-  const persistHistory = useCallback((pastArr = historyPast, futureArr = historyFuture) => {
-    try {
-      writeHistory(pastArr, makeSnapshot(), futureArr);
-    } catch (_) {}
-  }, [historyPast, historyFuture, makeSnapshot]);
-
-  const pushHistorySnapshot = useCallback(() => {
-    setHistoryPast((cur) => {
-      const next = [...cur, makeSnapshot()];
-      // clear future when new action
-      setHistoryFuture([]);
-      // persist after the state mutation tick
-      setTimeout(() => persistHistory(next, []), 0);
-      return next;
-    });
-  }, [makeSnapshot, persistHistory]);
-
-  const schedulePersist = useCallback(() => {
-    // persist in next tick to include latest state
-    setTimeout(() => persistHistory(), 0);
-  }, [persistHistory]);
-
-  const scheduleThrottledHistoryPush = useCallback(() => {
-    const now = Date.now();
-    if (now - lastEditTsRef.current > UNDO_THROTTLE_MS) {
-      lastEditTsRef.current = now;
-      pushHistorySnapshot();
-    }
-  }, [pushHistorySnapshot]);
-
-  const handleUndo = useCallback(async () => {
-    setHistoryPast(async (cur) => {
-      if (!cur.length) return cur;
-      const prev = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to future
-      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
-      await applySnapshot(prev);
-      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
-
-  const handleRedo = useCallback(async () => {
-    setHistoryFuture(async (cur) => {
-      if (!cur.length) return cur;
-      const nextSnap = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to past
-      setHistoryPast((p) => [...p, makeSnapshot()]);
-      await applySnapshot(nextSnap);
-      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
-
-  // Load history on mount
-  useEffect(() => {
-    try {
-  if (typeof window === 'undefined') return;
-  const parsed = readHistory();
-  if (!parsed) return;
-  const present = parsed.present || null;
-  const pastArr = Array.isArray(parsed.past) ? parsed.past : [];
-  const futureArr = Array.isArray(parsed.future) ? parsed.future : [];
-      if (present) {
-        // prevent default PDF injection when restoring history
-        defaultPdfLoadedRef.current = true;
-        // Apply snapshot and set stacks
-        (async () => {
-          await applySnapshot(present);
-          setHistoryPast(pastArr);
-          setHistoryFuture(futureArr);
-        })();
-      }
-    } catch (_) {}
-  }, [applySnapshot]);
-
-  // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const onKey = (e) => {
       const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
@@ -403,7 +484,7 @@ export default function App() {
       if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
-      } else if ((e.key.toLowerCase() === 'y') || (e.key.toLowerCase() === 'z' && e.shiftKey)) {
+      } else if (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey)) {
         e.preventDefault();
         handleRedo();
       }
@@ -416,7 +497,7 @@ export default function App() {
     <div className="app-shell">
       <EditorPanel
         docDate={docDate}
-        setDocDate={setDocDate}
+        setDocDate={handleDocDateChange}
         headingExpanded={headingExpanded}
         setHeadingExpanded={setHeadingExpanded}
         leftHeadingFields={leftHeadingFields}
@@ -430,9 +511,9 @@ export default function App() {
         onAddRightField={handleAddRightField}
         onRightFieldChange={handleRightFieldChange}
         onRemoveRightField={handleRemoveRightField}
-        setPlaintiffName={setPlaintiffName}
-        setDefendantName={setDefendantName}
-        setCourtTitle={setCourtTitle}
+        setPlaintiffName={handlePlaintiffNameChange}
+        setDefendantName={handleDefendantNameChange}
+        setCourtTitle={handleCourtTitleChange}
         fragments={fragments}
         onReorder={handleReorderFragments}
         onRemove={handleRemoveFragmentConfirmed}
@@ -457,4 +538,4 @@ export default function App() {
       />
     </div>
   );
-} 
+}
