@@ -313,6 +313,17 @@ export default function App() {
         }
       }
       setFragments(out);
+
+      const maxId = out.reduce((max, fragment) => {
+        if (!fragment || typeof fragment.id !== 'string') return max;
+        const match = fragment.id.match(/fragment-(\d+)/);
+        if (!match) return max;
+        const numeric = Number.parseInt(match[1], 10);
+        return Number.isNaN(numeric) ? max : Math.max(max, numeric);
+      }, 0);
+      if (maxId > fragmentCounter) {
+        fragmentCounter = maxId;
+      }
     } catch (_) {}
   }, []);
 
@@ -347,30 +358,32 @@ export default function App() {
   }, [pushHistorySnapshot]);
 
   const handleUndo = useCallback(async () => {
-    setHistoryPast(async (cur) => {
-      if (!cur.length) return cur;
-      const prev = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to future
-      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
-      await applySnapshot(prev);
-      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
+    if (!historyPast.length) return;
+    const prev = historyPast[historyPast.length - 1];
+    const restPast = historyPast.slice(0, -1);
+    const currentSnapshot = makeSnapshot();
+
+    await applySnapshot(prev);
+
+    setHistoryPast(restPast);
+    const nextFuture = [...historyFuture, currentSnapshot];
+    setHistoryFuture(nextFuture);
+    setTimeout(() => persistHistory(restPast, nextFuture), 0);
+  }, [applySnapshot, historyFuture, historyPast, makeSnapshot, persistHistory]);
 
   const handleRedo = useCallback(async () => {
-    setHistoryFuture(async (cur) => {
-      if (!cur.length) return cur;
-      const nextSnap = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to past
-      setHistoryPast((p) => [...p, makeSnapshot()]);
-      await applySnapshot(nextSnap);
-      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
+    if (!historyFuture.length) return;
+    const nextSnap = historyFuture[historyFuture.length - 1];
+    const restFuture = historyFuture.slice(0, -1);
+    const currentSnapshot = makeSnapshot();
+
+    await applySnapshot(nextSnap);
+
+    const nextPast = [...historyPast, currentSnapshot];
+    setHistoryPast(nextPast);
+    setHistoryFuture(restFuture);
+    setTimeout(() => persistHistory(nextPast, restFuture), 0);
+  }, [applySnapshot, historyFuture, historyPast, makeSnapshot, persistHistory]);
 
   // Load history on mount
   useEffect(() => {
