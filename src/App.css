@@ -1,3 +1,78 @@
+
+/* Fragment List Styles - Flattened for compatibility */
+.fragment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fragment-row {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  cursor: grab;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.fragment-row:hover {
+  background-color: #f3f6fa;
+  box-shadow: 0 2px 8px rgba(37,99,235,0.07);
+}
+.fragment-row:active {
+  cursor: grabbing;
+}
+.fragment-row .drag-icon {
+  font-size: 18px;
+  margin-right: 8px;
+  cursor: grab;
+}
+.fragment-row .fragment-index {
+  font-weight: bold;
+  margin-right: 4px;
+}
+.fragment-row .fragment-title-text {
+  flex-grow: 1;
+  cursor: pointer;
+}
+.fragment-row .fragment-menu-wrap {
+  position: relative;
+}
+.fragment-row .fragment-menu-wrap .menu-button {
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.fragment-row .fragment-menu-wrap .fragment-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  display: flex;
+  flex-direction: row;
+}
+.fragment-row .fragment-menu-wrap .fragment-menu button {
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.fragment-row .fragment-menu-wrap .fragment-menu button:hover {
+  background-color: #f0f0f0;
+}
+.fragment-row .fragment-menu-wrap .fragment-menu button.danger {
+  color: #e53e3e;
+}
+.fragment-row .fragment-menu-wrap .fragment-menu button.danger:hover {
+  background-color: #fed7d7;
+}
+
+
 .app-shell {
   display: grid;
   grid-template-columns: 480px 1fr;
