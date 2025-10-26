@@ -166,19 +166,18 @@ function createFragmentId() {
   return `fragment-${fragmentCounter}`;
 }
 
-function MarkdownPreview({ content, heading }) {
+function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate }) {
   const {
     leftFields = [],
     rightFields = [],
     plaintiffName = '',
     defendantName = '',
-    documentTitle = '',
+    courtTitle = '',
   } = heading || {};
 
   const normalizedLeft = leftFields.filter((value) => value.trim());
   const normalizedRight = rightFields.filter((value) => value.trim());
-  const upperTitle = documentTitle.trim().toUpperCase();
-// return 3
+  const upperTitle = (title || '').trim().toUpperCase();
   return (
     <div className="page-surface markdown-fragment">
       <div className="pleading-paper">
@@ -188,55 +187,230 @@ function MarkdownPreview({ content, heading }) {
           ))}
         </div>
         <div className="pleading-main">
-          <header className="pleading-header">
-            <div className="pleading-contact">
-              {normalizedLeft.length ? (
-                normalizedLeft.map((value, index) => (
-                  <div key={`left-field-${index}`} className="pleading-contact-line">
-                    {value}
-                  </div>
-                ))
-              ) : (
-                <div className="pleading-contact-line pleading-placeholder">Attorney or party information</div>
-              )}
-            </div>
-            <div className="pleading-clerk-space" aria-hidden />
-          </header>
-
-          <div className="pleading-caption">
-            <div className="pleading-caption-left">
-              <div className="pleading-caption-box">
-                <div className="pleading-party-block">
-                  <span className="pleading-party-label">Plaintiff:</span>
-                  <span className="pleading-party-value">{plaintiffName || 'Plaintiff Name'}</span>
+          {firstPage && (
+            <>
+              <header className="pleading-header">
+                <div className="pleading-contact">
+                  {normalizedLeft.length ? (
+                    normalizedLeft.map((value, index) => (
+                      <div key={`left-field-${index}`} className="pleading-contact-line">
+                        {value}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="pleading-contact-line pleading-placeholder">Attorney or party information</div>
+                  )}
                 </div>
-                <div className="pleading-versus">v.</div>
-                <div className="pleading-party-block">
-                  <span className="pleading-party-label">Defendant:</span>
-                  <span className="pleading-party-value">{defendantName || 'Defendant Name'}</span>
+                <div className="pleading-clerk-space" aria-hidden />
+              </header>
+
+              {courtTitle?.trim() ? (
+                <div className="pleading-court-title">{courtTitle.trim().toUpperCase()}</div>
+              ) : null}
+
+              <div className="pleading-caption">
+                <div className="pleading-caption-left">
+                  <div className="pleading-caption-box">
+                    <div className="pleading-party-block">
+                      <span className="pleading-party-value">{plaintiffName || 'Plaintiff Name'},</span>
+                      <span className="pleading-party-label">Plaintiff,</span>
+                    </div>
+                    <div className="pleading-versus">v.</div>
+                    <div className="pleading-party-block">
+                      <span className="pleading-party-value">{defendantName || 'Defendant Name'},</span>
+                      <span className="pleading-party-label">Defendant,</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="pleading-caption-right">
+                  {normalizedRight.length ? (
+                    normalizedRight.map((value, index) => (
+                      <div key={`right-field-${index}`} className="pleading-right-line">
+                        {value}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="pleading-right-line pleading-placeholder">
+                      Court, judge, department details
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-            <div className="pleading-caption-right">
-              {normalizedRight.length ? (
-                normalizedRight.map((value, index) => (
-                  <div key={`right-field-${index}`} className="pleading-right-line">
-                    {value}
-                  </div>
-                ))
-              ) : (
-                <div className="pleading-right-line pleading-placeholder">
-                  Court, judge, department details
-                </div>
-              )}
-            </div>
-          </div>
 
-          <div className="pleading-document-title">
-            {upperTitle || 'DOCUMENT TITLE'}
-          </div>
+              <div className="pleading-document-title">
+                {upperTitle || 'DOCUMENT TITLE'}
+              </div>
+            </>
+          )}
 
-          <div className="pleading-body">
+          <div className="pleading-body">{children}</div>
+          {pageNumber === totalPages && (
+            <div className="signature-row">
+              <div className="signature-date">Date: {formatDisplayDate(docDate)}</div>
+              <div className="signature-line">Signature: ______________________________</div>
+            </div>
+          )}
+          <div className="page-footer" aria-hidden>
+            <span>
+              Page {pageNumber} of {totalPages}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Paginate Markdown across multiple pleading pages for on-screen preview
+function PaginatedMarkdown({ content, heading, title, docDate }) {
+  const measurerRef = useRef(null);
+  const [pages, setPages] = useState([]);
+
+  // Basic helpers to classify blocks
+  const isParagraphBlock = (block) => {
+    const trimmed = block.trim();
+    if (!trimmed) return true;
+    // Non-paragraph starts: headings, lists, blockquotes, tables, code fences
+    if (/^(#{1,6})\s/.test(trimmed)) return false;
+    if (/^\s*([-*+]\s)/.test(trimmed)) return false;
+    if (/^\s*\d+\.\s/.test(trimmed)) return false;
+    if (/^\s*>\s?/.test(trimmed)) return false;
+    if (/^\s*\|.*\|\s*$/.test(trimmed)) return false;
+    if (/^\s*```/.test(trimmed)) return false;
+    return true;
+  };
+
+  useEffect(() => {
+    if (!measurerRef.current) return;
+
+    const root = measurerRef.current;
+    const main = root.querySelector('.pleading-main');
+    const body = root.querySelector('.pleading-body');
+    if (!main || !body) return;
+
+    const cs = window.getComputedStyle(body);
+    const lineHeightPx = parseFloat(cs.lineHeight);
+    const bodyWidth = body.getBoundingClientRect().width;
+    const mainHeight = main.getBoundingClientRect().height;
+    const bodyTop = body.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    const firstPageAvail = Math.floor((mainHeight - bodyTop) / lineHeightPx);
+    const fullPageAvail = Math.floor(mainHeight / lineHeightPx);
+
+    // Prepare canvas for text measurement
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    // Match body text font
+    ctx.font = `${cs.fontSize || '12pt'} ${cs.fontFamily || 'Times New Roman, Times, serif'}`;
+
+    const wrapParagraphToLines = (text) => {
+      const words = text.split(/\s+/);
+      const lines = [];
+      let current = '';
+      words.forEach((w) => {
+        const attempt = current ? `${current} ${w}` : w;
+        const width = ctx.measureText(attempt).width;
+        if (width > bodyWidth && current) {
+          lines.push(current);
+          current = w;
+        } else {
+          current = attempt;
+        }
+      });
+      if (current) lines.push(current);
+      return lines;
+    };
+
+    const blocks = content.split(/\n\n+/); // crude block split
+    const outputPages = [];
+    let currentPage = [];
+    let remainingLines = firstPageAvail;
+
+    const pushPage = () => {
+      outputPages.push(currentPage);
+      currentPage = [];
+      remainingLines = fullPageAvail;
+    };
+
+    for (let i = 0; i < blocks.length; i += 1) {
+      let block = blocks[i];
+      if (!block.trim()) {
+        // blank paragraph spacing ~ half line; approximate as 1 line occasionally
+        if (remainingLines <= 1) {
+          pushPage();
+        } else {
+          currentPage.push('');
+          remainingLines -= 1;
+        }
+        continue;
+      }
+
+      if (!isParagraphBlock(block)) {
+        // Measure this block by temporarily rendering it in the measurer body
+        const temp = document.createElement('div');
+        temp.style.visibility = 'hidden';
+        body.appendChild(temp);
+        // Render with React into temp is heavy; approximate as 6 lines for small blocks if cannot measure
+        temp.textContent = block.replace(/[#*>`_\-\d\.]/g, '');
+        const approxLines = Math.max(1, Math.ceil(temp.getBoundingClientRect().height / lineHeightPx) || 4);
+        body.removeChild(temp);
+        if (approxLines > remainingLines) {
+          pushPage();
+        }
+        currentPage.push(block);
+        remainingLines -= Math.min(remainingLines, approxLines);
+      } else {
+        // Paragraph: split by lines based on width
+        let para = block.replace(/\s+/g, ' ').trim();
+        const lines = wrapParagraphToLines(para);
+        let start = 0;
+        while (start < lines.length) {
+          if (remainingLines === 0) pushPage();
+          const canTake = Math.min(remainingLines, lines.length - start);
+          const slice = lines.slice(start, start + canTake).join(' ');
+          currentPage.push(slice);
+          start += canTake;
+          remainingLines -= canTake;
+          if (start < lines.length) pushPage();
+        }
+        // Add paragraph margin as a spacer line if room
+        if (remainingLines === 0) pushPage();
+        if (remainingLines > 0) {
+          currentPage.push('');
+          remainingLines -= 1;
+        }
+      }
+    }
+
+    if (currentPage.length || !outputPages.length) outputPages.push(currentPage);
+    setPages(outputPages);
+  }, [content, heading, title]);
+
+  // Render hidden measurer and visible pages
+  return (
+    <>
+      <div ref={measurerRef} className="page-measurer" aria-hidden style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}>
+        <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate}>
+          {/* Empty body for measuring sizes */}
+        </PleadingPage>
+      </div>
+      {pages.map((blocks, pageIndex) => (
+        <div className="page-wrapper" key={`md-page-${pageIndex}`}> 
+          <button
+            type="button"
+            className="fullscreen-toggle"
+            title="Fullscreen"
+            onClick={() => { /* fullscreen handled by outer preview using fragment id */ }}
+          >
+            ⤢
+          </button>
+          <PleadingPage
+            heading={heading}
+            title={title}
+            firstPage={pageIndex === 0}
+            pageNumber={pageIndex + 1}
+            totalPages={pages.length}
+            docDate={docDate}
+          >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -245,13 +419,30 @@ function MarkdownPreview({ content, heading }) {
                 td: (props) => <td className="md-table-cell" {...props} />,
               }}
             >
-              {content}
+              {blocks.join('\n\n')}
             </ReactMarkdown>
-          </div>
+          </PleadingPage>
         </div>
-      </div>
-    </div>
+      ))}
+    </>
   );
+}
+
+function formatDisplayDate(dateStr) {
+  try {
+    if (!dateStr) return '__________';
+    // Expecting YYYY-MM-DD from input[type="date"]
+    const [y, m, d] = dateStr.split('-').map((n) => parseInt(n, 10));
+    if (!y || !m || !d) return dateStr;
+    const date = new Date(Date.UTC(y, m - 1, d));
+    const fmt = date.toLocaleDateString(undefined, {
+      year: 'numeric', month: 'long', day: 'numeric',
+      timeZone: 'UTC',
+    });
+    return fmt;
+  } catch (_) {
+    return dateStr;
+  }
 }
 // Lightweight PDF preview using an iframe
 function PdfPreview({ data }) {
@@ -335,14 +526,13 @@ function PdfPreview({ data }) {
   return <div ref={containerRef} className="pdf-document" />;
 }
 
-async function appendMarkdownFragment(pdfDoc, content, heading) {
+async function appendMarkdownFragment(pdfDoc, content, heading, fragmentTitle, docDate) {
   const clean = removeMarkdown(content || '').trim();
   const {
     leftFields = [],
     rightFields = [],
     plaintiffName = '',
     defendantName = '',
-    documentTitle = '',
   } = heading || {};
 
   const trimmedLeft = leftFields.filter((value) => value.trim());
@@ -351,43 +541,46 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
     trimmedLeft.length ||
     trimmedRight.length ||
     plaintiffName.trim() ||
-    defendantName.trim() ||
-    documentTitle.trim();
+    defendantName.trim();
 
   if (!clean && !hasHeadingContent) {
     return;
   }
 
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // Use Helvetica (Arial-like) for headings, Times New Roman for body
+  const headerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const headerBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+  const bodyBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
 
   const textLeftX = PLEADING_LEFT_MARGIN + PLEADING_NUMBER_GUTTER;
   const textRightLimit = LETTER_WIDTH - PLEADING_RIGHT_MARGIN;
   const maxWidth = textRightLimit - textLeftX;
   const headerLineHeight = 14;
-  const uppercaseTitle = documentTitle.trim().toUpperCase();
+  const uppercaseTitle = (fragmentTitle || '').trim().toUpperCase();
 
   const drawLineNumbers = (page) => {
-    const top = LETTER_HEIGHT - PLEADING_TOP_MARGIN;
+    const top = LETTER_HEIGHT - PLEADING_TOP_MARGIN; // content top
     for (let index = 0; index < PLEADING_LINE_COUNT; index += 1) {
       const y = top - index * PLEADING_BODY_LINE_HEIGHT;
       page.drawText(`${index + 1}`.padStart(2, ' '), {
         x: PLEADING_LEFT_MARGIN - 26,
         y,
         size: 8,
-        font,
+        font: bodyFont,
         color: rgb(0, 0, 0),
       });
     }
+    // Full-height vertical rules (span entire page height)
     page.drawLine({
-      start: { x: PLEADING_LEFT_MARGIN - 6, y: top },
-      end: { x: PLEADING_LEFT_MARGIN - 6, y: PLEADING_BOTTOM_MARGIN },
+      start: { x: PLEADING_LEFT_MARGIN - 6, y: LETTER_HEIGHT },
+      end: { x: PLEADING_LEFT_MARGIN - 6, y: 0 },
       thickness: 1.2,
       color: rgb(0, 0, 0),
     });
     page.drawLine({
-      start: { x: textRightLimit, y: top },
-      end: { x: textRightLimit, y: PLEADING_BOTTOM_MARGIN },
+      start: { x: textRightLimit, y: LETTER_HEIGHT },
+      end: { x: textRightLimit, y: 0 },
       thickness: 0.8,
       color: rgb(0, 0, 0),
     });
@@ -409,7 +602,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: textLeftX,
         y,
         size: 10,
-        font,
+        font: headerFont,
         color: rgb(0, 0, 0),
       });
     });
@@ -451,14 +644,14 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
       x: captionX + 8,
       y: partyY,
       size: partyLabelSize,
-      font,
+      font: headerFont,
     });
     const plaintiffValue = plaintiffName.trim() || '____________________________';
     page.drawText(plaintiffValue, {
       x: captionX + 80,
       y: partyY,
       size: partyValueSize,
-      font: boldFont,
+      font: headerBold,
     });
 
     partyY -= headerLineHeight * 1.1;
@@ -467,7 +660,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
       x: captionX + captionWidth / 2 - 6,
       y: partyY,
       size: partyValueSize,
-      font: boldFont,
+      font: headerBold,
     });
 
     partyY -= headerLineHeight * 1.1;
@@ -476,14 +669,14 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
       x: captionX + 8,
       y: partyY,
       size: partyLabelSize,
-      font,
+      font: headerFont,
     });
     const defendantValue = defendantName.trim() || '____________________________';
     page.drawText(defendantValue, {
       x: captionX + 80,
       y: partyY,
       size: partyValueSize,
-      font: boldFont,
+      font: headerBold,
     });
 
     const rightColumnX = captionX + captionWidth + 24;
@@ -493,7 +686,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: rightColumnX,
         y: rightCursor,
         size: 11,
-        font,
+        font: headerFont,
       });
       rightCursor -= headerLineHeight;
     });
@@ -503,7 +696,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: rightColumnX,
         y: rightCursor,
         size: 11,
-        font,
+        font: headerFont,
         color: rgb(0.45, 0.45, 0.45),
       });
       rightCursor -= headerLineHeight;
@@ -516,7 +709,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: captionX,
         y: cursorY,
         size: 14,
-        font: boldFont,
+        font: headerBold,
       });
       cursorY -= headerLineHeight * 2;
     } else {
@@ -524,7 +717,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: captionX,
         y: cursorY,
         size: 14,
-        font: boldFont,
+        font: headerBold,
         color: rgb(0.45, 0.45, 0.45),
       });
       cursorY -= headerLineHeight * 2;
@@ -567,7 +760,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
         x: textLeftX,
         y: cursorY,
         size: 12,
-        font,
+        font: bodyFont,
       });
       cursorY -= PLEADING_BODY_LINE_HEIGHT;
       current = '';
@@ -575,7 +768,7 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
 
     words.forEach((word) => {
       const attempt = current ? `${current} ${word}` : word;
-      const width = font.widthOfTextAtSize(attempt, 12);
+  const width = bodyFont.widthOfTextAtSize(attempt, 12);
       if (width > maxWidth) {
         flush();
         current = word;
@@ -593,6 +786,22 @@ async function appendMarkdownFragment(pdfDoc, content, heading) {
       cursorY -= PLEADING_BODY_LINE_HEIGHT * 0.5;
     }
   });
+
+  // Draw signature block at bottom of the last page for this fragment
+  const footerFont = bodyFont;
+  const neededLines = 3;
+  if (cursorY <= PLEADING_BOTTOM_MARGIN + neededLines * PLEADING_BODY_LINE_HEIGHT) {
+    page = preparePage();
+    cursorY = LETTER_HEIGHT - PLEADING_TOP_MARGIN;
+    // Only draw heading on first page; keep headingDrawn true
+  }
+  const sigDate = formatDisplayDate(docDate);
+  const dateLabel = `Date: ${sigDate}`;
+  const sigLabel = 'Signature: ______________________________';
+  const dateY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 2;
+  const sigY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 1;
+  page.drawText(dateLabel, { x: textLeftX, y: dateY, size: 11, font: footerFont });
+  page.drawText(sigLabel, { x: textLeftX, y: sigY, size: 11, font: footerFont });
 }
 
 async function appendPdfFragment(pdfDoc, data) {
@@ -601,7 +810,7 @@ async function appendPdfFragment(pdfDoc, data) {
   copiedPages.forEach((page) => pdfDoc.addPage(page));
 }
 
-function FragmentList({ fragments, onChangeContent, onMove, onRemove }) {
+function FragmentList({ fragments, onChangeContent, onChangeTitle, onMove, onRemove, onOpenEditor }) {
   return (
     <div className="fragment-list">
       {fragments.map((fragment, index) => (
@@ -609,7 +818,7 @@ function FragmentList({ fragments, onChangeContent, onMove, onRemove }) {
           <div className="fragment-header">
             <span className="fragment-index">{index + 1}.</span>
             <span className="fragment-label">
-              {fragment.type === 'markdown' ? 'Markdown' : fragment.name || 'PDF'}
+              {fragment.type === 'markdown' ? (fragment.title?.trim() || 'Untitled Markdown') : fragment.name || 'PDF'}
             </span>
             <div className="fragment-actions">
               <button
@@ -628,18 +837,37 @@ function FragmentList({ fragments, onChangeContent, onMove, onRemove }) {
               >
                 ↓
               </button>
+              {fragment.type === 'markdown' && (
+                <button
+                  type="button"
+                  className="ghost"
+                  title="Edit fullscreen"
+                  onClick={() => onOpenEditor && onOpenEditor(fragment.id)}
+                >
+                  ⤢
+                </button>
+              )}
               <button type="button" className="ghost" onClick={() => onRemove(fragment.id)}>
                 ✕
               </button>
             </div>
           </div>
           {fragment.type === 'markdown' ? (
-            <textarea
-              value={fragment.content}
-              onChange={(event) => onChangeContent(fragment.id, event.target.value)}
-              className="markdown-editor"
-              rows={6}
-            />
+            <>
+              <input
+                type="text"
+                className="heading-input"
+                placeholder="Entry title"
+                value={fragment.title || ''}
+                onChange={(e) => onChangeTitle && onChangeTitle(fragment.id, e.target.value)}
+              />
+              <textarea
+                value={fragment.content}
+                onChange={(event) => onChangeContent(fragment.id, event.target.value)}
+                className="markdown-editor"
+                rows={6}
+              />
+            </>
           ) : (
             <p className="pdf-summary">{fragment.name}</p>
           )}
@@ -692,6 +920,13 @@ function HeadingFieldList({
 }
 
 export default function App() {
+  const [docDate, setDocDate] = useState(() => {
+    try {
+      return new Date().toISOString().slice(0, 10);
+    } catch (_) {
+      return '';
+    }
+  });
   const [leftHeadingFields, setLeftHeadingFields] = useState([
     'Michael Romero',
     '304 W Avenue 43,',
@@ -702,7 +937,6 @@ export default function App() {
   ]);
   const [rightHeadingFields, setRightHeadingFields] = useState([
     // 'SUPERIOR COURT OF THE STATE OF CALIFORNIA,',
-    'COUNTY OF SAN BERNARDINO',
     'Case No. CIVRS2501874',
     'Assigned Judge: Hon. Kory Mathewson',
     '8303 Haven Avenue',
@@ -712,17 +946,22 @@ export default function App() {
   // return 8
   const [plaintiffName, setPlaintiffName] = useState('Michael James Romero');
   const [defendantName, setDefendantName] = useState('Megan Nicole Bentley');
-  const [documentTitle, setDocumentTitle] = useState('');
+  const [courtTitle, setCourtTitle] = useState('SUPERIOR COURT OF THE STATE OF CALIFORNIA, COUNTY OF SAN BERNARDINO');
   const [headingExpanded, setHeadingExpanded] = useState(true);
   const [markdownDraft, setMarkdownDraft] = useState('');
+  const [markdownTitleDraft, setMarkdownTitleDraft] = useState('');
   const [fragments, setFragments] = useState(() => [
     {
       id: createFragmentId(),
       type: 'markdown',
       content:
         '# Welcome to the legal drafting preview\n\nUse the panel on the left to add Markdown notes or attach PDFs. Drag the order using the arrows to see how the combined packet will render when printed.',
+      title: 'Welcome',
     },
   ]);
+  const [fullscreenFragmentId, setFullscreenFragmentId] = useState(null);
+  const [editingFragmentId, setEditingFragmentId] = useState(null);
+  const [isDraftEditorOpen, setIsDraftEditorOpen] = useState(false);
 
   // Load a default PDF from the public folder on first load
   const defaultPdfLoadedRef = useRef(false);
@@ -764,9 +1003,9 @@ export default function App() {
       rightFields: rightHeadingFields,
       plaintiffName,
       defendantName,
-      documentTitle,
+      courtTitle,
     }),
-    [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, documentTitle],
+    [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle],
   );
 
   const handleAddLeftField = useCallback(() => {
@@ -809,11 +1048,17 @@ export default function App() {
       if (!markdownDraft.trim()) return;
       setFragments((current) => [
         ...current,
-        { id: createFragmentId(), type: 'markdown', content: markdownDraft.trim() },
+        {
+          id: createFragmentId(),
+          type: 'markdown',
+          content: markdownDraft.trim(),
+          title: markdownTitleDraft.trim() || 'Untitled',
+        },
       ]);
       setMarkdownDraft('');
+      setMarkdownTitleDraft('');
     },
-    [markdownDraft],
+    [markdownDraft, markdownTitleDraft],
   );
 
   const handlePdfUpload = useCallback(async (event) => {
@@ -832,6 +1077,12 @@ export default function App() {
   const handleFragmentContentChange = useCallback((id, content) => {
     setFragments((current) =>
       current.map((fragment) => (fragment.id === id ? { ...fragment, content } : fragment)),
+    );
+  }, []);
+
+  const handleFragmentTitleChange = useCallback((id, title) => {
+    setFragments((current) =>
+      current.map((fragment) => (fragment.id === id ? { ...fragment, title } : fragment)),
     );
   }, []);
 
@@ -856,9 +1107,24 @@ export default function App() {
 
     for (const fragment of fragments) {
       if (fragment.type === 'markdown') {
-        await appendMarkdownFragment(pdfDoc, fragment.content, headingSettings);
+        await appendMarkdownFragment(pdfDoc, fragment.content, headingSettings, fragment.title, docDate);
       } else if (fragment.type === 'pdf') {
         await appendPdfFragment(pdfDoc, fragment.data);
+      }
+    }
+
+    // Add page numbers at bottom center: "Page X of Y"
+    const totalPages = pdfDoc.getPageCount();
+    if (totalPages > 0) {
+      const footerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      for (let i = 0; i < totalPages; i += 1) {
+        const page = pdfDoc.getPage(i);
+        const label = `Page ${i + 1} of ${totalPages}`;
+        const size = 10;
+        const textWidth = footerFont.widthOfTextAtSize(label, size);
+        const x = (LETTER_WIDTH - textWidth) / 2;
+        const y = 18; // ~0.25in from bottom
+        page.drawText(label, { x, y, size, font: footerFont, color: rgb(0.28, 0.32, 0.37) });
       }
     }
 
@@ -871,20 +1137,32 @@ export default function App() {
     anchor.download = 'combined.pdf';
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [fragments, headingSettings]);
+  }, [fragments, headingSettings, docDate]);
 
   const previewFragments = useMemo(
     () =>
       fragments.map((fragment) => (
         <React.Fragment key={fragment.id}>
           {fragment.type === 'markdown' ? (
-            <MarkdownPreview content={fragment.content} heading={headingSettings} />
+            <div className="fragment-wrapper">
+              <div className="fragment-toolbar">
+                <button
+                  type="button"
+                  className="ghost"
+                  title="Fullscreen"
+                  onClick={() => setFullscreenFragmentId(fragment.id)}
+                >
+                  ⤢ Fullscreen
+                </button>
+              </div>
+              <PaginatedMarkdown content={fragment.content} heading={headingSettings} title={fragment.title} docDate={docDate} />
+            </div>
           ) : (
             <PdfPreview data={fragment.data} />
           )}
         </React.Fragment>
       )),
-    [fragments, headingSettings],
+    [fragments, headingSettings, docDate],
   );
 
   return (
@@ -895,6 +1173,17 @@ export default function App() {
           Assemble Markdown notes and PDFs into a single, print-ready packet. Add new fragments
           below and fine-tune their order.
         </p>
+
+        <div className="card">
+          <label htmlFor="doc-date-input">Document date (applies to all sections)</label>
+          <input
+            id="doc-date-input"
+            type="date"
+            className="heading-input"
+            value={docDate}
+            onChange={(e) => setDocDate(e.target.value)}
+          />
+        </div>
 
         <div className={`card heading-card${headingExpanded ? ' expanded' : ''}`}>
           <button
@@ -951,23 +1240,41 @@ export default function App() {
                 onChange={handleRightFieldChange}
               />
 
-              <label className="heading-label" htmlFor="document-title-input">
-                Document title
-              </label>
+              <label className="heading-label" htmlFor="court-title-input">Court/Venue title</label>
               <input
-                id="document-title-input"
+                id="court-title-input"
                 type="text"
-                value={documentTitle}
-                onChange={(event) => setDocumentTitle(event.target.value)}
-                className="heading-input heading-title-input"
-                placeholder="e.g., Memorandum of Points and Authorities"
+                value={courtTitle}
+                onChange={(event) => setCourtTitle(event.target.value)}
+                className="heading-input"
+                placeholder="e.g., COUNTY OF SAN BERNARDINO"
               />
             </div>
           )}
         </div>
 
         <form onSubmit={handleMarkdownSubmit} className="card">
-          <label htmlFor="markdown-input">Markdown fragment</label>
+          <label className="heading-label" htmlFor="entry-title-input">Section title</label>
+          <input
+            id="entry-title-input"
+            type="text"
+            value={markdownTitleDraft}
+            onChange={(event) => setMarkdownTitleDraft(event.target.value)}
+            className="heading-input"
+            placeholder="e.g., Introduction"
+          />
+
+          <div className="label-row">
+            <label htmlFor="markdown-input">Markdown fragment</label>
+            <button
+              type="button"
+              className="ghost small"
+              onClick={() => setIsDraftEditorOpen(true)}
+              aria-label="Open fullscreen editor for draft"
+            >
+              Fullscreen
+            </button>
+          </div>
           <textarea
             id="markdown-input"
             className="markdown-input"
@@ -998,8 +1305,10 @@ export default function App() {
         <FragmentList
           fragments={fragments}
           onChangeContent={handleFragmentContentChange}
+          onChangeTitle={handleFragmentTitleChange}
           onMove={handleMoveFragment}
           onRemove={handleRemoveFragment}
+          onOpenEditor={setEditingFragmentId}
         />
       </aside>
 
@@ -1022,6 +1331,153 @@ export default function App() {
           )}
         </div>
       </main>
+      {/* Fullscreen overlay for markdown previews */}
+      {fullscreenFragmentId && (
+        <FullscreenOverlay onClose={() => setFullscreenFragmentId(null)}>
+          {(() => {
+            const frag = fragments.find((f) => f.id === fullscreenFragmentId);
+            if (!frag || frag.type !== 'markdown') return null;
+            return (
+              <div className="fullscreen-content-inner">
+                <PaginatedMarkdown content={frag.content} heading={headingSettings} title={frag.title} docDate={docDate} />
+              </div>
+            );
+          })()}
+        </FullscreenOverlay>
+      )}
+      {editingFragmentId && (
+        <EditorOverlay
+          fragment={fragments.find((f) => f.id === editingFragmentId)}
+          onClose={() => setEditingFragmentId(null)}
+          onSave={(updated) => {
+            setFragments((current) =>
+              current.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)),
+            );
+            setEditingFragmentId(null);
+          }}
+        />
+      )}
+      {isDraftEditorOpen && (
+        <FullscreenOverlay onClose={() => setIsDraftEditorOpen(false)}>
+          <div className="editor-fullscreen-container">
+            <div className="editor-fullscreen-header">
+              <h3>New Markdown Entry</h3>
+              <div className="editor-fullscreen-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setIsDraftEditorOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="editor-fullscreen-form">
+              <input
+                type="text"
+                className="heading-input editor-fullscreen-title"
+                placeholder="Entry title"
+                value={markdownTitleDraft}
+                onChange={(e) => setMarkdownTitleDraft(e.target.value)}
+              />
+              <textarea
+                className="markdown-editor editor-fullscreen-textarea"
+                placeholder="## Title\n\nDraft your content here..."
+                value={markdownDraft}
+                onChange={(e) => setMarkdownDraft(e.target.value)}
+              />
+            </div>
+          </div>
+        </FullscreenOverlay>
+      )}
     </div>
+  );
+}
+
+// Fullscreen overlay component
+function FullscreenOverlay({ onClose, children }) {
+  const overlayRef = useRef(null);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const onBackdrop = (e) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  return (
+    <div className="fullscreen-overlay" ref={overlayRef} onMouseDown={onBackdrop}>
+      <div className="fullscreen-header">
+        <div className="fullscreen-spacer" />
+        <button type="button" className="fullscreen-close" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+      </div>
+      <div className="fullscreen-body">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Fullscreen editor for an existing markdown fragment
+function EditorOverlay({ fragment, onClose, onSave }) {
+  const [title, setTitle] = useState(fragment?.title || '');
+  const [content, setContent] = useState(fragment?.content || '');
+
+  if (!fragment || fragment.type !== 'markdown') return null;
+
+  return (
+    <FullscreenOverlay onClose={onClose}>
+      <div className="editor-fullscreen-container">
+        <div className="editor-fullscreen-header">
+          <h3>Edit Markdown Entry</h3>
+          <div className="editor-fullscreen-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => onSave && onSave({ id: fragment.id, title: title?.trim() || 'Untitled', content })}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+        <div className="editor-fullscreen-form">
+          <input
+            type="text"
+            className="heading-input editor-fullscreen-title"
+            placeholder="Entry title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            className="markdown-editor editor-fullscreen-textarea"
+            placeholder="## Title\n\nDraft your content here..."
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+          />
+        </div>
+      </div>
+    </FullscreenOverlay>
   );
 }
