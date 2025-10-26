@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-// ...existing code...
+import { usePersistentHistory } from 'persistent-history';
 import { useReactToPrint } from 'react-to-print';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import '/src/App.css';
@@ -11,7 +11,7 @@ import { formatDisplayDate } from './lib/date';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import { appendMarkdownFragment as appendMarkdownFragmentPdf, appendPdfFragment as appendPdfFragmentPdf, LETTER_WIDTH } from './lib/pdf/generate';
-import { writeHistory, readHistory } from './lib/history';
+import { LS_HISTORY_KEY, historyToStorage, historyFromStorage } from './lib/history';
 import {
   DEFAULT_LEFT_HEADING_FIELDS,
   DEFAULT_RIGHT_HEADING_FIELDS,
@@ -27,52 +27,102 @@ import {
   CONFIRM_DELETE_MESSAGE,
   UNDO_THROTTLE_MS,
 } from './lib/defaults';
-let fragmentCounter = 0; 
+let fragmentCounter = 0;
 
 function createFragmentId() {
   fragmentCounter += 1;
   return `fragment-${fragmentCounter}`;
-} 
-export default function App() {
-  // --- History state ---
-  const [historyPast, setHistoryPast] = useState([]); // array of snapshots
-  const [historyFuture, setHistoryFuture] = useState([]); // array of snapshots
-  const lastEditTsRef = useRef(0);
-  const [docDate, setDocDate] = useState(() => {
-    try {
-      return new Date().toISOString().slice(0, 10);
-    } catch (_) {
-      return '';
+}
+
+function syncFragmentCounterFromList(fragments) {
+  let maxSeen = fragmentCounter;
+  for (const fragment of fragments || []) {
+    if (!fragment || typeof fragment.id !== 'string') continue;
+    const match = fragment.id.match(/fragment-(\d+)/);
+    if (match) {
+      const value = parseInt(match[1], 10);
+      if (Number.isFinite(value)) {
+        maxSeen = Math.max(maxSeen, value);
+      }
     }
+  }
+  fragmentCounter = maxSeen;
+}
+
+function createInitialDocState() {
+  return {
+    docDate: (() => {
+      try {
+        return new Date().toISOString().slice(0, 10);
+      } catch (error) {
+        return '';
+      }
+    })(),
+    leftHeadingFields: [...DEFAULT_LEFT_HEADING_FIELDS],
+    rightHeadingFields: [...DEFAULT_RIGHT_HEADING_FIELDS],
+    plaintiffName: DEFAULT_PLAINTIFF_NAME,
+    defendantName: DEFAULT_DEFENDANT_NAME,
+    courtTitle: DEFAULT_COURT_TITLE,
+    fragments: [
+      {
+        id: createFragmentId(),
+        type: 'markdown',
+        content: DEFAULT_WELCOME_CONTENT,
+        title: DEFAULT_WELCOME_TITLE,
+      },
+    ],
+  };
+}
+export default function App() {
+  const initialDocStateRef = useRef();
+  if (!initialDocStateRef.current) {
+    initialDocStateRef.current = createInitialDocState();
+  }
+  const initialDocState = initialDocStateRef.current;
+
+  const {
+    present: docState,
+    updatePresent,
+    mark,
+    maybeMark,
+    undo,
+    redo,
+    hydrated,
+  } = usePersistentHistory(initialDocState, {
+    storageKey: LS_HISTORY_KEY,
+    throttleMs: UNDO_THROTTLE_MS,
+    serialize: historyToStorage,
+    deserialize: (raw) => historyFromStorage(raw, initialDocState),
   });
-  const [leftHeadingFields, setLeftHeadingFields] = useState(DEFAULT_LEFT_HEADING_FIELDS);
-  const [rightHeadingFields, setRightHeadingFields] = useState(DEFAULT_RIGHT_HEADING_FIELDS);
-  // return 8
-  const [plaintiffName, setPlaintiffName] = useState(DEFAULT_PLAINTIFF_NAME);
-  const [defendantName, setDefendantName] = useState(DEFAULT_DEFENDANT_NAME);
-  const [courtTitle, setCourtTitle] = useState(DEFAULT_COURT_TITLE);
+
   const [headingExpanded, setHeadingExpanded] = useState(false);
-  const [fragments, setFragments] = useState(() => [
-    { id: createFragmentId(), type: 'markdown', content: DEFAULT_WELCOME_CONTENT, title: DEFAULT_WELCOME_TITLE },
-  ]);
   const [fullscreenFragmentId, setFullscreenFragmentId] = useState(null);
   const [editingFragmentId, setEditingFragmentId] = useState(null);
+
+  const {
+    docDate,
+    leftHeadingFields,
+    rightHeadingFields,
+    plaintiffName,
+    defendantName,
+    courtTitle,
+    fragments,
+  } = docState;
 
   // Load a default PDF from the public folder on first load
   const defaultPdfLoadedRef = useRef(false);
   useEffect(() => {
-    if (defaultPdfLoadedRef.current) return;
+    if (!hydrated || defaultPdfLoadedRef.current) return;
+
+    const defaultPdfName = DEFAULT_PDF_FILE;
+    const defaultPdfPath = DEFAULT_PDF_PATH;
+
+    if (fragments.some((fragment) => fragment.type === 'pdf' && fragment.name === defaultPdfName)) {
+      defaultPdfLoadedRef.current = true;
+      return;
+    }
+
     defaultPdfLoadedRef.current = true;
-
-  const defaultPdfName = DEFAULT_PDF_FILE;
-  const defaultPdfPath = DEFAULT_PDF_PATH;
-
-    // If a fragment with this name already exists (e.g., after HMR), skip
-    const hasDefault = fragments.some(
-      (f) => f.type === 'pdf' && (f.name === defaultPdfName)
-    );
-    if (hasDefault) return;
-
     fetch(defaultPdfPath)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch default PDF: ${res.status}`);
@@ -81,16 +131,18 @@ export default function App() {
       .then(async (buffer) => {
         const newId = createFragmentId();
         await idbSetPdf(newId, buffer);
-        setFragments((current) => [
-          { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
+        updatePresent((current) => ({
           ...current,
-        ]);
-        schedulePersist();
+          fragments: [
+            { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
+            ...current.fragments,
+          ],
+        }), { preserveFuture: true });
       })
       .catch(() => {
         // Silently ignore if the file isn't present; UI will still work
       });
-  }, []);
+  }, [fragments, hydrated, updatePresent]);
 
   const previewRef = useRef(null); 
 
@@ -105,143 +157,187 @@ export default function App() {
     [leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle],
   );
 
-  const handleAddLeftField = useCallback(() => {
-    pushHistorySnapshot();
-    setLeftHeadingFields((current) => {
-      const next = [...current, ''];
-      schedulePersist();
-      return next;
+  const setDocDate = useCallback((valueOrUpdater) => {
+    mark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.docDate) : valueOrUpdater;
+      return { ...current, docDate: nextValue };
     });
-  }, []);
+  }, [mark, updatePresent]);
+
+  const setPlaintiffName = useCallback((valueOrUpdater) => {
+    maybeMark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.plaintiffName) : valueOrUpdater;
+      return { ...current, plaintiffName: nextValue };
+    });
+  }, [maybeMark, updatePresent]);
+
+  const setDefendantName = useCallback((valueOrUpdater) => {
+    maybeMark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.defendantName) : valueOrUpdater;
+      return { ...current, defendantName: nextValue };
+    });
+  }, [maybeMark, updatePresent]);
+
+  const setCourtTitle = useCallback((valueOrUpdater) => {
+    maybeMark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.courtTitle) : valueOrUpdater;
+      return { ...current, courtTitle: nextValue };
+    });
+  }, [maybeMark, updatePresent]);
+
+  const handleAddLeftField = useCallback(() => {
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      leftHeadingFields: [...current.leftHeadingFields, ''],
+    }));
+  }, [mark, updatePresent]);
 
   const handleLeftFieldChange = useCallback((index, value) => {
-    setLeftHeadingFields((current) => {
-      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
+    maybeMark();
+    updatePresent((current) => {
+      const next = current.leftHeadingFields.map((item, itemIndex) => (itemIndex === index ? value : item));
+      return { ...current, leftHeadingFields: next };
     });
-  }, []);
+  }, [maybeMark, updatePresent]);
 
   const handleRemoveLeftField = useCallback((index) => {
-    pushHistorySnapshot();
-    setLeftHeadingFields((current) => {
-      const next = current.filter((_, itemIndex) => itemIndex !== index);
-      schedulePersist();
-      return next;
-    });
-  }, []);
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      leftHeadingFields: current.leftHeadingFields.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }, [mark, updatePresent]);
 
   const handleAddRightField = useCallback(() => {
-    pushHistorySnapshot();
-    setRightHeadingFields((current) => {
-      const next = [...current, ''];
-      schedulePersist();
-      return next;
-    });
-  }, []);
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      rightHeadingFields: [...current.rightHeadingFields, ''],
+    }));
+  }, [mark, updatePresent]);
 
   const handleRightFieldChange = useCallback((index, value) => {
-    setRightHeadingFields((current) => {
-      const next = current.map((item, itemIndex) => (itemIndex === index ? value : item));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
+    maybeMark();
+    updatePresent((current) => {
+      const next = current.rightHeadingFields.map((item, itemIndex) => (itemIndex === index ? value : item));
+      return { ...current, rightHeadingFields: next };
     });
-  }, []);
+  }, [maybeMark, updatePresent]);
 
   const handleRemoveRightField = useCallback((index) => {
-    pushHistorySnapshot();
-    setRightHeadingFields((current) => {
-      const next = current.filter((_, itemIndex) => itemIndex !== index);
-      schedulePersist();
-      return next;
-    });
-  }, []);
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      rightHeadingFields: current.rightHeadingFields.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }, [mark, updatePresent]);
 
   // react-to-print v3: use `contentRef` instead of the deprecated `content` callback
   const handlePrint = useReactToPrint({ contentRef: previewRef, documentTitle: PRINT_DOCUMENT_TITLE });
  
   const handleReorderFragments = useCallback((fromIndex, toIndex) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const next = [...current];
+    if (fromIndex === toIndex) return;
+    mark();
+    updatePresent((current) => {
+      const next = [...current.fragments];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
-      schedulePersist();
-      return next;
+      return { ...current, fragments: next };
     });
-  }, []);
- 
+  }, [mark, updatePresent]);
 
   const handleRemoveFragmentConfirmed = useCallback((id) => {
+    if (!fragments.some((fragment) => fragment.id === id)) return;
     if (typeof window !== 'undefined') {
       const ok = window.confirm(CONFIRM_DELETE_MESSAGE);
       if (!ok) return;
     }
-    setFragments((current) => current.filter((fragment) => fragment.id !== id));
-    if (editingFragmentId === id) setEditingFragmentId(null);
-  }, [editingFragmentId]);
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      fragments: current.fragments.filter((fragment) => fragment.id !== id),
+    }));
+    if (editingFragmentId === id) {
+      setEditingFragmentId(null);
+    }
+  }, [editingFragmentId, fragments, mark, updatePresent]);
 
   const handleInsertBefore = useCallback((id) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const idx = current.findIndex((f) => f.id === id);
+    const index = fragments.findIndex((fragment) => fragment.id === id);
+    if (index < 0) return;
+    const newFragment = {
+      id: createFragmentId(),
+      type: 'markdown',
+      title: 'Untitled',
+      content: '',
+    };
+    let inserted = false;
+    mark();
+    updatePresent((current) => {
+      const idx = current.fragments.findIndex((fragment) => fragment.id === id);
       if (idx < 0) return current;
-      const newFrag = {
-        id: createFragmentId(),
-        type: 'markdown',
-        title: 'Untitled',
-        content: '',
-      };
-      const next = [...current];
-      next.splice(idx, 0, newFrag);
-      // Open for editing
-      setEditingFragmentId(newFrag.id);
-      schedulePersist();
-      return next;
+      const next = [...current.fragments];
+      next.splice(idx, 0, newFragment);
+      inserted = true;
+      return { ...current, fragments: next };
     });
-  }, []);
+    if (inserted) {
+      setEditingFragmentId(newFragment.id);
+    }
+  }, [fragments, mark, updatePresent]);
 
   const handleInsertAfter = useCallback((id) => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const idx = current.findIndex((f) => f.id === id);
+    const index = fragments.findIndex((fragment) => fragment.id === id);
+    if (index < 0) return;
+    const newFragment = {
+      id: createFragmentId(),
+      type: 'markdown',
+      title: 'Untitled',
+      content: '',
+    };
+    let inserted = false;
+    mark();
+    updatePresent((current) => {
+      const idx = current.fragments.findIndex((fragment) => fragment.id === id);
       if (idx < 0) return current;
-      const newFrag = {
-        id: createFragmentId(),
-        type: 'markdown',
-        title: 'Untitled',
-        content: '',
-      };
-      const next = [...current];
-      next.splice(idx + 1, 0, newFrag);
-      setEditingFragmentId(newFrag.id);
-      schedulePersist();
-      return next;
+      const next = [...current.fragments];
+      next.splice(idx + 1, 0, newFragment);
+      inserted = true;
+      return { ...current, fragments: next };
     });
-  }, []);
+    if (inserted) {
+      setEditingFragmentId(newFragment.id);
+    }
+  }, [fragments, mark, updatePresent]);
 
   const handleAddSectionEnd = useCallback(() => {
-    pushHistorySnapshot();
-    setFragments((current) => {
-      const next = ([
-        ...current,
-        { id: createFragmentId(), type: 'markdown', title: 'Untitled', content: '' },
-      ]);
-      schedulePersist();
-      return next;
-    });
-  }, []);
+    const newFragment = {
+      id: createFragmentId(),
+      type: 'markdown',
+      title: 'Untitled',
+      content: '',
+    };
+    mark();
+    updatePresent((current) => ({
+      ...current,
+      fragments: [...current.fragments, newFragment],
+    }));
+  }, [mark, updatePresent]);
 
   const handleEditFragmentFields = useCallback((id, updates) => {
-    setFragments((current) => {
-      const next = current.map((f) => (f.id === id ? { ...f, ...updates } : f));
-      scheduleThrottledHistoryPush();
-      schedulePersist();
-      return next;
-    });
-  }, []);
+    maybeMark();
+    updatePresent((current) => ({
+      ...current,
+      fragments: current.fragments.map((fragment) => (
+        fragment.id === id ? { ...fragment, ...updates } : fragment
+      )),
+    }));
+  }, [maybeMark, updatePresent]);
 
   const handleCompilePdf = useCallback(async () => {
     if (!fragments.length) return;
@@ -281,118 +377,45 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [fragments, headingSettings, docDate]);
 
-  // --- History: snapshot helpers ---
-  const makeSnapshot = useCallback(() => ({
-    docDate,
-    leftHeadingFields,
-    rightHeadingFields,
-    plaintiffName,
-    defendantName,
-    courtTitle,
-    fragments: fragments.map((f) => (
-      f.type === 'pdf' ? { id: f.id, type: 'pdf', name: f.name } : { id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' }
-    )),
-  }), [docDate, leftHeadingFields, rightHeadingFields, plaintiffName, defendantName, courtTitle, fragments]);
-
-  const applySnapshot = useCallback(async (snap) => {
-    try {
-      setDocDate(snap.docDate || '');
-      setLeftHeadingFields(Array.isArray(snap.leftHeadingFields) ? snap.leftHeadingFields : []);
-      setRightHeadingFields(Array.isArray(snap.rightHeadingFields) ? snap.rightHeadingFields : []);
-      setPlaintiffName(snap.plaintiffName || '');
-      setDefendantName(snap.defendantName || '');
-      setCourtTitle(snap.courtTitle || '');
-      // Load PDFs' binary from IDB
-      const out = [];
-      for (const f of snap.fragments || []) {
-        if (f.type === 'pdf') {
-          const data = await idbGetPdf(f.id);
-          out.push({ id: f.id, type: 'pdf', name: f.name || 'PDF', data: data || null });
-        } else {
-          out.push({ id: f.id, type: 'markdown', title: f.title || '', content: f.content || '' });
-        }
-      }
-      setFragments(out);
-    } catch (_) {}
-  }, []);
-
-  const persistHistory = useCallback((pastArr = historyPast, futureArr = historyFuture) => {
-    try {
-      writeHistory(pastArr, makeSnapshot(), futureArr);
-    } catch (_) {}
-  }, [historyPast, historyFuture, makeSnapshot]);
-
-  const pushHistorySnapshot = useCallback(() => {
-    setHistoryPast((cur) => {
-      const next = [...cur, makeSnapshot()];
-      // clear future when new action
-      setHistoryFuture([]);
-      // persist after the state mutation tick
-      setTimeout(() => persistHistory(next, []), 0);
-      return next;
-    });
-  }, [makeSnapshot, persistHistory]);
-
-  const schedulePersist = useCallback(() => {
-    // persist in next tick to include latest state
-    setTimeout(() => persistHistory(), 0);
-  }, [persistHistory]);
-
-  const scheduleThrottledHistoryPush = useCallback(() => {
-    const now = Date.now();
-    if (now - lastEditTsRef.current > UNDO_THROTTLE_MS) {
-      lastEditTsRef.current = now;
-      pushHistorySnapshot();
-    }
-  }, [pushHistorySnapshot]);
-
-  const handleUndo = useCallback(async () => {
-    setHistoryPast(async (cur) => {
-      if (!cur.length) return cur;
-      const prev = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to future
-      setHistoryFuture((fut) => [...fut, makeSnapshot()]);
-      await applySnapshot(prev);
-      setTimeout(() => persistHistory(rest, [...historyFuture, makeSnapshot()]), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyFuture]);
-
-  const handleRedo = useCallback(async () => {
-    setHistoryFuture(async (cur) => {
-      if (!cur.length) return cur;
-      const nextSnap = cur[cur.length - 1];
-      const rest = cur.slice(0, -1);
-      // move current to past
-      setHistoryPast((p) => [...p, makeSnapshot()]);
-      await applySnapshot(nextSnap);
-      setTimeout(() => persistHistory([...historyPast, makeSnapshot()], rest), 0);
-      return rest;
-    });
-  }, [applySnapshot, makeSnapshot, persistHistory, historyPast]);
-
-  // Load history on mount
   useEffect(() => {
-    try {
-  if (typeof window === 'undefined') return;
-  const parsed = readHistory();
-  if (!parsed) return;
-  const present = parsed.present || null;
-  const pastArr = Array.isArray(parsed.past) ? parsed.past : [];
-  const futureArr = Array.isArray(parsed.future) ? parsed.future : [];
-      if (present) {
-        // prevent default PDF injection when restoring history
-        defaultPdfLoadedRef.current = true;
-        // Apply snapshot and set stacks
-        (async () => {
-          await applySnapshot(present);
-          setHistoryPast(pastArr);
-          setHistoryFuture(futureArr);
-        })();
+    syncFragmentCounterFromList(fragments);
+  }, [fragments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending = fragments.filter((fragment) => fragment.type === 'pdf' && !fragment.data);
+    if (!pending.length) return undefined;
+
+    (async () => {
+      const updates = [];
+      for (const fragment of pending) {
+        const data = await idbGetPdf(fragment.id);
+        if (cancelled) return;
+        updates.push({ id: fragment.id, data: data || null });
       }
-    } catch (_) {}
-  }, [applySnapshot]);
+      if (!updates.length) return;
+      updatePresent((current) => ({
+        ...current,
+        fragments: current.fragments.map((fragment) => {
+          const match = updates.find((item) => item.id === fragment.id);
+          if (!match) return fragment;
+          return { ...fragment, data: match.data };
+        }),
+      }), { preserveFuture: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fragments, updatePresent]);
+
+  const handleUndo = useCallback(() => {
+    undo();
+  }, [undo]);
+
+  const handleRedo = useCallback(() => {
+    redo();
+  }, [redo]);
 
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
