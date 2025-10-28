@@ -10,6 +10,26 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
   const measurerRef = useRef(null);
   const [pages, setPages] = useState([]);
 
+  // Fingerprint layout-affecting heading values so the effect only reruns
+  // when actual layout inputs change, not on every parent re-render.
+  const layoutFingerprint = useMemo(() => {
+    const h = heading || {};
+    const left = Array.isArray(h.leftFields) ? h.leftFields.join('\n') : '';
+    const right = Array.isArray(h.rightFields) ? h.rightFields.join('\n') : '';
+    const plaintiff = h.plaintiffName || '';
+    const defendant = h.defendantName || '';
+    const court = h.courtTitle || '';
+    const t = title || '';
+    return [left, right, plaintiff, defendant, court, t].join('|~|');
+  }, [
+    Array.isArray(heading?.leftFields) ? heading.leftFields.join('\n') : '',
+    Array.isArray(heading?.rightFields) ? heading.rightFields.join('\n') : '',
+    heading?.plaintiffName || '',
+    heading?.defendantName || '',
+    heading?.courtTitle || '',
+    title || '',
+  ]);
+
   // Basic helpers to classify blocks
   const isParagraphBlock = (block) => {
     const trimmed = block.trim();
@@ -33,7 +53,11 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
     if (!main || !body) return;
 
     const cs = window.getComputedStyle(body);
-    const lineHeightPx = parseFloat(cs.lineHeight);
+    let lineHeightPx = parseFloat(cs.lineHeight);
+    if (!Number.isFinite(lineHeightPx)) {
+      const fontSizePx = parseFloat(cs.fontSize) || 16;
+      lineHeightPx = Math.max(1, Math.round(fontSizePx * 1.2));
+    }
     const bodyWidth = body.getBoundingClientRect().width;
     const mainHeight = main.getBoundingClientRect().height;
     const bodyTop = body.getBoundingClientRect().top - main.getBoundingClientRect().top;
@@ -126,8 +150,21 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
     }
 
     if (currentPage.length || !outputPages.length) outputPages.push(currentPage);
-    setPages(outputPages);
-  }, [content, heading, title]);
+    // Avoid state updates if pages haven't actually changed to prevent unnecessary re-renders
+    setPages((prev) => {
+      const sameLength = Array.isArray(prev) && prev.length === outputPages.length;
+      if (sameLength) {
+        let equal = true;
+        for (let i = 0; i < prev.length; i += 1) {
+          const a = Array.isArray(prev[i]) ? prev[i].join('\n\n') : '';
+          const b = Array.isArray(outputPages[i]) ? outputPages[i].join('\n\n') : '';
+          if (a !== b) { equal = false; break; }
+        }
+        if (equal) return prev;
+      }
+      return outputPages;
+    });
+  }, [content, layoutFingerprint]);
 
   // Render hidden measurer and visible pages
   return (

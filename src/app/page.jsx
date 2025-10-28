@@ -74,6 +74,27 @@ function createInitialDocState() {
   };
 }
 export default function App() {
+  // Clear all local data: localStorage and IndexedDB
+  const handleClearLocalData = async () => {
+    try {
+      // Clear localStorage
+      if (typeof window !== 'undefined') {
+        window.localStorage.clear();
+      }
+      // Clear IndexedDB
+      if (typeof window !== 'undefined' && window.indexedDB) {
+        const req = window.indexedDB.deleteDatabase('legalDraftingDB');
+        req.onsuccess = req.onerror = req.onblocked = () => {
+          // Optionally reload after DB cleared
+          window.location.reload();
+        };
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      alert('Failed to clear local data: ' + (err?.message || err));
+    }
+  };
   const initialDocStateRef = useRef();
   if (!initialDocStateRef.current) {
     initialDocStateRef.current = createInitialDocState();
@@ -116,8 +137,8 @@ export default function App() {
 
     const defaultPdfName = DEFAULT_PDF_FILE;
     const defaultPdfPath = DEFAULT_PDF_PATH;
-
-    if (fragments.some((fragment) => fragment.type === 'pdf' && fragment.name === defaultPdfName)) {
+    const existing = fragments.find((fragment) => fragment.type === 'pdf' && fragment.name === defaultPdfName);
+    if (existing && existing.data) {
       defaultPdfLoadedRef.current = true;
       return;
     }
@@ -129,15 +150,25 @@ export default function App() {
         return res.arrayBuffer();
       })
       .then(async (buffer) => {
-        const newId = createFragmentId();
-        await idbSetPdf(newId, buffer);
-        updatePresent((current) => ({
-          ...current,
-          fragments: [
-            { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
-            ...current.fragments,
-          ],
-        }), { preserveFuture: true });
+        if (existing) {
+          await idbSetPdf(existing.id, buffer);
+          updatePresent((current) => ({
+            ...current,
+            fragments: current.fragments.map((f) => (
+              f.id === existing.id ? { ...f, data: buffer } : f
+            )),
+          }), { preserveFuture: true });
+        } else {
+          const newId = createFragmentId();
+          await idbSetPdf(newId, buffer);
+          updatePresent((current) => ({
+            ...current,
+            fragments: [
+              { id: newId, type: 'pdf', data: buffer, name: defaultPdfName },
+              ...current.fragments,
+            ],
+          }), { preserveFuture: true });
+        }
       })
       .catch(() => {
         // Silently ignore if the file isn't present; UI will still work
@@ -391,17 +422,23 @@ export default function App() {
       for (const fragment of pending) {
         const data = await idbGetPdf(fragment.id);
         if (cancelled) return;
-        updates.push({ id: fragment.id, data: data || null });
+        if (data) {
+          updates.push({ id: fragment.id, data });
+        }
       }
       if (!updates.length) return;
-      updatePresent((current) => ({
-        ...current,
-        fragments: current.fragments.map((fragment) => {
+      updatePresent((current) => {
+        let changed = false;
+        const nextFragments = current.fragments.map((fragment) => {
           const match = updates.find((item) => item.id === fragment.id);
           if (!match) return fragment;
+          if (fragment.data === match.data) return fragment;
+          changed = true;
           return { ...fragment, data: match.data };
-        }),
-      }), { preserveFuture: true });
+        });
+        if (!changed) return current;
+        return { ...current, fragments: nextFragments };
+      }, { preserveFuture: true });
     })();
 
     return () => {
@@ -437,6 +474,16 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <div style={{ padding: '12px 0', textAlign: 'center', background: '#f8f8f8', borderBottom: '1px solid #eee' }}>
+        <button
+          type="button"
+          style={{ fontWeight: 'bold', color: '#b00', background: '#fff', border: '1px solid #b00', borderRadius: 4, padding: '6px 16px', cursor: 'pointer' }}
+          onClick={handleClearLocalData}
+          title="Clear all saved data and reload"
+        >
+          Clear All Local Data
+        </button>
+      </div>
       <EditorPanel
         docDate={docDate}
         setDocDate={setDocDate}
