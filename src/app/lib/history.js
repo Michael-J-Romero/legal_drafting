@@ -15,19 +15,39 @@ function ensureFragment(fragment) {
     return { id: '', type: 'markdown', title: '', content: '' };
   }
   if (fragment.type === 'pdf') {
-    // Important: if "data" is not present on the persisted fragment,
-    // leave it undefined so hydration can detect and load from IDB.
     const base = {
       id: ensureString(fragment.id),
       type: 'pdf',
       name: ensureString(fragment.name, 'PDF'),
+      fileId: ensureString(fragment.fileId),
     };
-    if ('data' in fragment) {
-      base.data = fragment.data ?? null;
-    } else {
-      base.data = undefined; // pending hydration
-    }
+    // Back-compat: allow reading inline data if present, but do not rely on it for storage
+    if ('data' in fragment) base.data = fragment.data ?? undefined;
     return base;
+  }
+  if (fragment.type === 'exhibits') {
+    const ensureExhibit = (ex) => {
+      const obj = ex && typeof ex === 'object' ? ex : {};
+      return {
+        id: ensureString(obj.id),
+        title: ensureString(obj.title),
+        description: ensureString(obj.description),
+        name: ensureString(obj.name),
+        mimeType: ensureString(obj.mimeType),
+        type: ensureString(obj.type), // 'pdf' | 'image' | 'group'
+        fileId: ensureString(obj.fileId),
+        isCompound: Boolean(obj.isCompound),
+        isGroupHeader: Boolean(obj.isGroupHeader),
+        // Back-compat inline data if present
+        data: 'data' in obj ? obj.data ?? undefined : undefined,
+      };
+    };
+    return {
+      id: ensureString(fragment.id),
+      type: 'exhibits',
+      captions: ensureArray(fragment.captions, []).map((s) => ensureString(s)),
+      exhibits: ensureArray(fragment.exhibits, []).map(ensureExhibit),
+    };
   }
   return {
     id: ensureString(fragment.id),
@@ -57,8 +77,25 @@ export function snapshotForStorage(snapshot) {
     ...safe,
     fragments: safe.fragments.map((fragment) => (
       fragment.type === 'pdf'
-        ? { id: fragment.id, type: 'pdf', name: fragment.name }
-        : { id: fragment.id, type: 'markdown', title: fragment.title, content: fragment.content }
+        ? { id: fragment.id, type: 'pdf', name: fragment.name, fileId: ensureString(fragment.fileId) }
+        : fragment.type === 'exhibits'
+          ? {
+              id: fragment.id,
+              type: 'exhibits',
+              captions: ensureArray(fragment.captions, []).map((s) => ensureString(s)),
+              exhibits: ensureArray(fragment.exhibits, []).map((ex) => ({
+                id: ensureString(ex.id),
+                title: ensureString(ex.title),
+                description: ensureString(ex.description),
+                name: ensureString(ex.name),
+                mimeType: ensureString(ex.mimeType),
+                type: ensureString(ex.type),
+                fileId: ensureString(ex.fileId),
+                isCompound: Boolean(ex.isCompound),
+                isGroupHeader: Boolean(ex.isGroupHeader),
+              })),
+            }
+          : { id: fragment.id, type: 'markdown', title: fragment.title, content: fragment.content }
     )),
   };
 }

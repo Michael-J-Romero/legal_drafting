@@ -4,6 +4,7 @@ import React from 'react';
 import HeadingFieldList from './HeadingFieldList';
 import FragmentList from './FragmentList';
 import InlineEditorPanel from './InlineEditorPanel';
+import ExhibitsEditorPanel from './ExhibitsEditorPanel';
 
 export default function EditorPanel({
   docDate,
@@ -34,7 +35,41 @@ export default function EditorPanel({
   setEditingFragmentId,
   onEditFragmentFields,
   onDeleteEditingFragment,
+  onPdfReplace,
+  onAddPdfSection,
+  onAddExhibitsSection,
+  scrollToAnchor,
 }) {
+  // Add state for popup menu
+  const [showAddMenu, setShowAddMenu] = React.useState(false);
+
+  // Handler for section type selection
+  function onAddSectionType(type) {
+    if (type === 'pdf') {
+      if (typeof window !== 'undefined') {
+        // Trigger file picker for PDF
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/pdf';
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          if (file && onAddPdfSection) {
+            onAddPdfSection(file);
+          }
+        };
+        input.click();
+      }
+    } else if (type === 'pleading') {
+      if (onAddSectionEnd) {
+        onAddSectionEnd();
+      }
+    } else if (type === 'exhibits') {
+      if (onAddExhibitsSection) {
+        onAddExhibitsSection();
+      }
+    }
+  }
+
   return (
     <aside className="editor-panel">
       <h1>Document Builder</h1>
@@ -123,9 +158,18 @@ export default function EditorPanel({
         <div className="card">
           <div className="card-header-row">
             <span>Sections</span>
-            <button type="button" className="ghost small" onClick={onAddSectionEnd} title="Add new section">
-              + Add Section
-            </button>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <button type="button" className="ghost small" onClick={() => setShowAddMenu(true)} title="Add new section">
+                + Add Section
+              </button>
+              {showAddMenu && (
+                <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 10, background: '#fff', border: '1px solid #ccc', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                  <button type="button" style={{ display: 'block', width: '100%' }} onClick={() => { setShowAddMenu(false); onAddSectionType('pdf'); }}>PDF Section</button>
+                  <button type="button" style={{ display: 'block', width: '100%' }} onClick={() => { setShowAddMenu(false); onAddSectionType('pleading'); }}>Pleading Paper Section</button>
+                  <button type="button" style={{ display: 'block', width: '100%' }} onClick={() => { setShowAddMenu(false); onAddSectionType('exhibits'); }}>Exhibits Section</button>
+                </div>
+              )}
+            </div>
           </div>
           <FragmentList
             fragments={fragments}
@@ -133,16 +177,27 @@ export default function EditorPanel({
             onRemove={onRemove}
             onInsertBefore={onInsertBefore}
             onInsertAfter={onInsertAfter}
-            onItemClick={(frag) => setEditingFragmentId(frag.id)}
+            onItemClick={(frag) => { setEditingFragmentId(frag.id); if (scrollToAnchor) scrollToAnchor(`anchor-section-${frag.id}`); }}
+            onPdfReplace={onPdfReplace}
           />
         </div>
-      ) : (
-        <InlineEditorPanel
-          fragment={fragments.find((f) => f.id === editingFragmentId)}
-          onCancel={() => setEditingFragmentId(null)}
-          onChange={onEditFragmentFields}
-          onDelete={() => onDeleteEditingFragment(editingFragmentId)}
-        />
+  ) : (
+        (fragments.find((f) => f.id === editingFragmentId)?.type === 'exhibits') ? (
+          <ExhibitsEditorPanel
+            fragment={fragments.find((f) => f.id === editingFragmentId)}
+            onCancel={() => setEditingFragmentId(null)}
+            onChange={onEditFragmentFields}
+            onDelete={() => onDeleteEditingFragment(editingFragmentId)}
+            onJumpToAnchor={scrollToAnchor}
+          />
+        ) : (
+          <InlineEditorPanel
+            fragment={fragments.find((f) => f.id === editingFragmentId)}
+            onCancel={() => setEditingFragmentId(null)}
+            onChange={onEditFragmentFields}
+            onDelete={() => onDeleteEditingFragment(editingFragmentId)}
+          />
+        )
       )}
     </aside>
   );

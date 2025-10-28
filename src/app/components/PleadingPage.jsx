@@ -6,7 +6,7 @@ import { formatDisplayDate } from '../lib/date';
 // Local constant for visual line numbers on pleading paper
 const PLEADING_LINE_COUNT = 28;
 
-export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate }) {
+export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null }) {
   const {
     leftFields = [],
     rightFields = [],
@@ -27,7 +27,7 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
           ))}
         </div>
         <div className="pleading-main">
-          {firstPage && (
+          {firstPage && !hideHeaderBlocks && (
             <>
               <header className="pleading-header">
                 <div className="pleading-contact">
@@ -76,18 +76,46 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
                   )}
                 </div>
               </div>
+            </>
+          )}
 
-              <div className="pleading-document-title">
-                {upperTitle || 'DOCUMENT TITLE'}
-              </div>
+          {firstPage && (
+            <>
+              {/* Optional caption stack above the title */}
+              {Array.isArray(preTitleCaptions) && preTitleCaptions.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  {preTitleCaptions.filter(Boolean).map((line, idx) => (
+                    <div key={`pre-cap-${idx}`} style={{ fontWeight: 'bold' }}>{line}</div>
+                  ))}
+                </div>
+              )}
+              {!suppressTitlePlaceholder && (
+                <div className="pleading-document-title">
+                  {upperTitle || 'DOCUMENT TITLE'}
+                </div>
+              )}
             </>
           )}
 
           <div className="pleading-body">{children}</div>
-          {pageNumber === totalPages && (
+          {(showSignature === true || (showSignature === null && pageNumber === totalPages)) && (
             <div className="signature-row">
               <div className="signature-date">Date: {formatDisplayDate(docDate)}</div>
-              <div className="signature-line">Signature: ______________________________</div>
+              <div className="signature-line">
+                <span className="signature-label">Signature:</span>
+                <img
+                  src="/sig.png"
+                  alt="Signature"
+                  className="signature-image"
+                  onError={(e) => {
+                    // Fallback to existing asset name if user's sig.png isn't present
+                    if (e.currentTarget && e.currentTarget.getAttribute('src') !== '/signature.png') {
+                      e.currentTarget.setAttribute('src', '/signature.png');
+                    }
+                  }}
+                />
+              </div>
+              <div className="signature-printed-name">{(plaintiffName || 'Michael James Romero').trim()}, Plaintiff in Pro Per</div>
             </div>
           )}
           <div className="page-footer" aria-hidden>

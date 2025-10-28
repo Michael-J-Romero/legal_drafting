@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import PleadingPage from './PleadingPage';
 
 // Paginate Markdown across multiple pleading pages for on-screen preview
-export default function PaginatedMarkdown({ content, heading, title, docDate }) {
+export default function PaginatedMarkdown({ content, heading, title, docDate, pageOffset = 0, totalOverride = null, hideHeader = false, preTitleCaptions = [], suppressTitlePlaceholder = false, onPageCount, disableSignature = false }) {
   const measurerRef = useRef(null);
   const [pages, setPages] = useState([]);
 
@@ -67,7 +67,7 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
     const blocks = content.split(/\n\n+/); // crude block split
     const outputPages = [];
     let currentPage = [];
-    let remainingLines = firstPageAvail;
+  let remainingLines = firstPageAvail;
 
     const pushPage = () => {
       outputPages.push(currentPage);
@@ -117,7 +117,7 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
           if (start < lines.length) pushPage();
         }
         // Add paragraph margin as a spacer line if room
-        if (remainingLines === 0) pushPage();
+  if (remainingLines === 0) pushPage();
         if (remainingLines > 0) {
           currentPage.push('');
           remainingLines -= 1;
@@ -129,11 +129,20 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
     setPages(outputPages);
   }, [content, heading, title]);
 
+  // Notify parent of page count for global numbering if requested
+  useEffect(() => {
+    try {
+      if (typeof onPageCount === 'function') {
+        onPageCount(Array.isArray(pages) ? pages.length : 0);
+      }
+    } catch (_) {}
+  }, [onPageCount, pages.length]);
+
   // Render hidden measurer and visible pages
   return (
     <>
       <div ref={measurerRef} className="page-measurer" aria-hidden style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}>
-        <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate}>
+  <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate} hideHeaderBlocks={hideHeader} preTitleCaptions={preTitleCaptions} suppressTitlePlaceholder={suppressTitlePlaceholder} showSignature={false}>
           {/* Empty body for measuring sizes */}
         </PleadingPage>
       </div>
@@ -150,10 +159,14 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
           <PleadingPage
             heading={heading}
             title={title}
-            firstPage={pageIndex === 0}
-            pageNumber={pageIndex + 1}
-            totalPages={pages.length}
+              firstPage={pageIndex === 0}
+              hideHeaderBlocks={hideHeader}
+            preTitleCaptions={preTitleCaptions}
+            pageNumber={pageOffset + pageIndex + 1}
+            totalPages={typeof totalOverride === 'number' ? totalOverride : (pageOffset + pages.length)}
             docDate={docDate}
+            suppressTitlePlaceholder={suppressTitlePlaceholder}
+            showSignature={disableSignature ? false : (pageIndex === pages.length - 1)}
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

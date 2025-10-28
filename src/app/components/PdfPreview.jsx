@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { loadPdfjs, pushPdfjsLog } from '../lib/pdfjsLoader';
 
-export default function PdfPreview({ data }) {
+export default function PdfPreview({ data, pageOffset = 0, totalPages }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -33,14 +33,26 @@ export default function PdfPreview({ data }) {
           canvas.width = Math.floor(viewport.width);
           canvas.height = Math.floor(viewport.height);
           canvas.style.width = '8.5in';
-          canvas.style.height = 'auto';
+          // Ensure exact height during print to avoid overflow/blank pages
+          canvas.style.height = '11in';
           const pageWrapper = document.createElement('div');
           pageWrapper.className = 'pdf-page';
+          pageWrapper.style.position = 'relative';
           pageWrapper.appendChild(canvas);
           container.appendChild(pageWrapper);
           pushPdfjsLog('renderPdf.pageStart', { pageNum, w: canvas.width, h: canvas.height });
           await page.render({ canvasContext: context, viewport }).promise;
           pushPdfjsLog('renderPdf.pageDone', { pageNum });
+
+          // Add consistent footer overlay when totalPages is provided
+          if (typeof totalPages === 'number' && Number.isFinite(totalPages)) {
+            const footer = document.createElement('div');
+            footer.className = 'page-footer';
+            footer.setAttribute('aria-hidden', 'true');
+            const number = pageOffset + pageNum;
+            footer.innerHTML = `<span>Page ${number} of ${totalPages}</span>`;
+            pageWrapper.appendChild(footer);
+          }
         }
         pushPdfjsLog('renderPdf.done');
       } catch (err) {
@@ -57,7 +69,16 @@ export default function PdfPreview({ data }) {
           iframe.style.border = 'none';
           const wrapper = document.createElement('div');
           wrapper.className = 'pdf-page';
+          wrapper.style.position = 'relative';
           wrapper.appendChild(iframe);
+          if (typeof totalPages === 'number' && Number.isFinite(totalPages)) {
+            const footer = document.createElement('div');
+            footer.className = 'page-footer';
+            footer.setAttribute('aria-hidden', 'true');
+            const number = pageOffset + 1; // best-effort for fallback
+            footer.innerHTML = `<span>Page ${number} of ${totalPages}</span>`;
+            wrapper.appendChild(footer);
+          }
           container.appendChild(wrapper);
           pushPdfjsLog('renderPdf.fallbackIframe', { urlCreated: !!objectUrl });
         } catch (fallbackErr) {
@@ -77,7 +98,7 @@ export default function PdfPreview({ data }) {
         try { URL.revokeObjectURL(objectUrl); } catch (_) {}
       }
     };
-  }, [data]);
+  }, [data, pageOffset, totalPages]);
 
   return <div ref={containerRef} className="pdf-document" />;
 }

@@ -80,7 +80,9 @@ export default function FragmentList({
       {fragments.map((fragment, index) => {
         const title = fragment.type === 'markdown'
           ? (fragment.title?.trim() || 'Untitled Markdown')
-          : (fragment.name || 'PDF');
+          : fragment.type === 'pdf'
+            ? (fragment.name || 'PDF')
+            : `Exhibits (${Array.isArray(fragment.exhibits) ? fragment.exhibits.length : 0})`;
         const isPdf = fragment.type === 'pdf';
         return (
           <div
