@@ -79,22 +79,27 @@ export default function App() {
   if (!initialDocStateRef.current) {
     initialDocStateRef.current = createInitialDocState();
   }
+
   const initialDocState = initialDocStateRef.current;
+
+  const deserializeHistory = useCallback((raw) => {
+    return historyFromStorage(raw, initialDocState);
+  }, [initialDocState]);
 
   const {
     present: docState,
+    replaceHistory,
     updatePresent,
     mark,
     maybeMark,
     undo,
     redo,
-    replaceHistory,
     hydrated,
   } = usePersistentHistory(initialDocState, {
     storageKey: LS_HISTORY_KEY,
     throttleMs: UNDO_THROTTLE_MS,
     serialize: historyToStorage,
-    deserialize: (raw) => historyFromStorage(raw, initialDocState),
+    deserialize: deserializeHistory,
   });
 
   const [headingExpanded, setHeadingExpanded] = useState(false);
@@ -144,7 +149,7 @@ export default function App() {
       .catch(() => {
         // Silently ignore if the file isn't present; UI will still work
       });
-  }, [fragments, hydrated, updatePresent]);
+  }, [ hydrated, updatePresent]);
 
   const previewRef = useRef(null); 
 
@@ -395,7 +400,7 @@ export default function App() {
         if (cancelled) return;
         updates.push({ id: fragment.id, data: data || null });
       }
-      if (!updates.length) return;
+      if (!updates.length || cancelled) return;
       updatePresent((current) => ({
         ...current,
         fragments: current.fragments.map((fragment) => {
@@ -409,7 +414,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [fragments, updatePresent]);
+  }, [
+    JSON.stringify(fragments.filter(f => f.type === 'pdf' && !f.data).map(f => f.id)),
+    updatePresent
+  ]);
 
   const handleUndo = useCallback(() => {
     undo();

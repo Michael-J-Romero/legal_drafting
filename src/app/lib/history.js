@@ -15,12 +15,19 @@ function ensureFragment(fragment) {
     return { id: '', type: 'markdown', title: '', content: '' };
   }
   if (fragment.type === 'pdf') {
-    return {
+    // Important: if "data" is not present on the persisted fragment,
+    // leave it undefined so hydration can detect and load from IDB.
+    const base = {
       id: ensureString(fragment.id),
       type: 'pdf',
       name: ensureString(fragment.name, 'PDF'),
-      data: fragment.data ?? null,
     };
+    if ('data' in fragment) {
+      base.data = fragment.data ?? null;
+    } else {
+      base.data = undefined; // pending hydration
+    }
+    return base;
   }
   return {
     id: ensureString(fragment.id),
