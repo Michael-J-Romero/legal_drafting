@@ -5,145 +5,347 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import PleadingPage from './PleadingPage';
 
+const HEIGHT_TOLERANCE_PX = 0.5;
+
 // Paginate Markdown across multiple pleading pages for on-screen preview
 export default function PaginatedMarkdown({ content, heading, title, docDate }) {
   const measurerRef = useRef(null);
+  const firstTemplateRef = useRef(null);
+  const regularTemplateRef = useRef(null);
+  const scratchRef = useRef(null);
+  const testRef = useRef(null);
   const [pages, setPages] = useState([]);
 
-  // Basic helpers to classify blocks
-  const isParagraphBlock = (block) => {
-    const trimmed = block.trim();
-    if (!trimmed) return true;
-    // Non-paragraph starts: headings, lists, blockquotes, tables, code fences
-    if (/^(#{1,6})\s/.test(trimmed)) return false;
-    if (/^\s*([-*+]\s)/.test(trimmed)) return false;
-    if (/^\s*\d+\.\s/.test(trimmed)) return false;
-    if (/^\s*>\s?/.test(trimmed)) return false;
-    if (/^\s*\|.*\|\s*$/.test(trimmed)) return false;
-    if (/^\s*```/.test(trimmed)) return false;
-    return true;
-  };
+  const markdown = useMemo(() => content || '', [content]);
+
+  const markdownComponents = useMemo(
+    () => ({
+      table: (props) => <table className="md-table" {...props} />,
+      th: (props) => <th className="md-table-cell" {...props} />,
+      td: (props) => <td className="md-table-cell" {...props} />,
+    }),
+    [],
+  );
 
   useEffect(() => {
-    if (!measurerRef.current) return;
+    const measurer = measurerRef.current;
+    const firstTemplate = firstTemplateRef.current;
+    const regularTemplate = regularTemplateRef.current;
+    const scratch = scratchRef.current;
+    const testHost = testRef.current;
 
-    const root = measurerRef.current;
-    const main = root.querySelector('.pleading-main');
-    const body = root.querySelector('.pleading-body');
-    if (!main || !body) return;
-
-    const cs = window.getComputedStyle(body);
-    const lineHeightPx = parseFloat(cs.lineHeight);
-    const bodyWidth = body.getBoundingClientRect().width;
-    const mainHeight = main.getBoundingClientRect().height;
-    const bodyTop = body.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    const firstPageAvail = Math.floor((mainHeight - bodyTop) / lineHeightPx);
-    const fullPageAvail = Math.floor(mainHeight / lineHeightPx);
-
-    // Prepare canvas for text measurement
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    // Match body text font
-    ctx.font = `${cs.fontSize || '12pt'} ${cs.fontFamily || 'Times New Roman, Times, serif'}`;
-
-    const wrapParagraphToLines = (text) => {
-      const words = text.split(/\s+/);
-      const lines = [];
-      let current = '';
-      words.forEach((w) => {
-        const attempt = current ? `${current} ${w}` : w;
-        const width = ctx.measureText(attempt).width;
-        if (width > bodyWidth && current) {
-          lines.push(current);
-          current = w;
-        } else {
-          current = attempt;
-        }
-      });
-      if (current) lines.push(current);
-      return lines;
-    };
-
-    const blocks = content.split(/\n\n+/); // crude block split
-    const outputPages = [];
-    let currentPage = [];
-    let remainingLines = firstPageAvail;
-
-    const pushPage = () => {
-      outputPages.push(currentPage);
-      currentPage = [];
-      remainingLines = fullPageAvail;
-    };
-
-    for (let i = 0; i < blocks.length; i += 1) {
-      let block = blocks[i];
-      if (!block.trim()) {
-        // blank paragraph spacing ~ half line; approximate as 1 line occasionally
-        if (remainingLines <= 1) {
-          pushPage();
-        } else {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-        continue;
-      }
-
-      if (!isParagraphBlock(block)) {
-        // Measure this block by temporarily rendering it in the measurer body
-        const temp = document.createElement('div');
-        temp.style.visibility = 'hidden';
-        body.appendChild(temp);
-        // Render with React into temp is heavy; approximate as 6 lines for small blocks if cannot measure
-        temp.textContent = block.replace(/[#$*>`_\-\d\.]/g, '');
-        const approxLines = Math.max(1, Math.ceil(temp.getBoundingClientRect().height / lineHeightPx) || 4);
-        body.removeChild(temp);
-        if (approxLines > remainingLines) {
-          pushPage();
-        }
-        currentPage.push(block);
-        remainingLines -= Math.min(remainingLines, approxLines);
-      } else {
-        // Paragraph: split by lines based on width
-        let para = block.replace(/\s+/g, ' ').trim();
-        const lines = wrapParagraphToLines(para);
-        let start = 0;
-        while (start < lines.length) {
-          if (remainingLines === 0) pushPage();
-          const canTake = Math.min(remainingLines, lines.length - start);
-          const slice = lines.slice(start, start + canTake).join(' ');
-          currentPage.push(slice);
-          start += canTake;
-          remainingLines -= canTake;
-          if (start < lines.length) pushPage();
-        }
-        // Add paragraph margin as a spacer line if room
-        if (remainingLines === 0) pushPage();
-        if (remainingLines > 0) {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-      }
+    if (!measurer || !firstTemplate || !regularTemplate || !scratch || !testHost) {
+      return undefined;
     }
 
-    if (currentPage.length || !outputPages.length) outputPages.push(currentPage);
-    setPages(outputPages);
-  }, [content, heading, title]);
+    const fallbackHTML = () => {
+      const templateBody = firstTemplate.querySelector('.pleading-body');
+      return templateBody ? templateBody.innerHTML : '';
+    };
 
-  // Render hidden measurer and visible pages
+    const extractTextNode = (node, limit) => {
+      if (!node || limit <= 0) return null;
+      const textLength = node.textContent?.length || 0;
+      if (textLength === 0) {
+        node.remove();
+        return null;
+      }
+
+      const range = document.createRange();
+      let low = 1;
+      let high = textLength;
+      let best = 0;
+
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        range.setStart(node, 0);
+        range.setEnd(node, mid);
+        const rect = range.getBoundingClientRect();
+        if (rect.height <= limit + HEIGHT_TOLERANCE_PX) {
+          best = mid;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+
+      if (best === 0) {
+        return null;
+      }
+
+      if (best < textLength) {
+        node.splitText(best);
+      }
+
+      const consumed = node.cloneNode(true);
+      node.remove();
+      return consumed;
+    };
+
+    const extractNodeByHeight = (node, limit) => {
+      if (!node || limit <= 0) return null;
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        return extractTextNode(node, limit);
+      }
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const fullRect = node.getBoundingClientRect();
+        if (fullRect.height <= limit + HEIGHT_TOLERANCE_PX) {
+          node.remove();
+          return node;
+        }
+
+        const range = document.createRange();
+        range.setStart(node, 0);
+        let low = 0;
+        let high = node.childNodes.length;
+        let best = 0;
+
+        while (low <= high) {
+          const mid = Math.floor((low + high) / 2);
+          range.setEnd(node, mid);
+          const rect = range.getBoundingClientRect();
+          if (rect.height <= limit + HEIGHT_TOLERANCE_PX) {
+            best = mid;
+            low = mid + 1;
+          } else {
+            high = mid - 1;
+          }
+        }
+
+        if (best > 0) {
+          range.setEnd(node, best);
+          const contents = range.cloneContents();
+          range.deleteContents();
+          const wrapper = node.cloneNode(false);
+          wrapper.appendChild(contents);
+          if (!node.childNodes.length) {
+            node.remove();
+          }
+          return wrapper;
+        }
+
+        const firstChild = node.firstChild;
+        if (!firstChild) {
+          node.remove();
+          return node;
+        }
+
+        const partial = extractNodeByHeight(firstChild, limit);
+        if (!partial) {
+          return null;
+        }
+        const wrapper = node.cloneNode(false);
+        wrapper.appendChild(partial);
+        if (!node.childNodes.length) {
+          node.remove();
+        }
+        return wrapper;
+      }
+
+      return null;
+    };
+
+    const extractFragmentForHeight = (container, limit) => {
+      const fragment = document.createDocumentFragment();
+      if (!container || limit <= 0) {
+        return fragment;
+      }
+
+      const range = document.createRange();
+      range.setStart(container, 0);
+      const totalChildren = container.childNodes.length;
+      let low = 0;
+      let high = totalChildren;
+      let best = 0;
+
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        range.setEnd(container, mid);
+        const rect = range.getBoundingClientRect();
+        if (rect.height <= limit + HEIGHT_TOLERANCE_PX) {
+          best = mid;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+
+      if (best > 0) {
+        range.setEnd(container, best);
+        const contents = range.cloneContents();
+        range.deleteContents();
+        fragment.appendChild(contents);
+        return fragment;
+      }
+
+      const firstNode = container.firstChild;
+      if (!firstNode) {
+        return fragment;
+      }
+
+      const partial = extractNodeByHeight(firstNode, limit);
+      if (partial) {
+        fragment.appendChild(partial);
+        return fragment;
+      }
+
+      // Fallback: move the node entirely to avoid infinite loops
+      fragment.appendChild(firstNode);
+      return fragment;
+    };
+
+    const measureFragmentHeight = (fragment, templateMain) => {
+      if (!fragment || !templateMain) return 0;
+      const clonedMain = templateMain.cloneNode(true);
+      const body = clonedMain.querySelector('.pleading-body');
+      if (!body) return 0;
+      body.innerHTML = '';
+      body.appendChild(fragment.cloneNode(true));
+      testHost.innerHTML = '';
+      testHost.appendChild(clonedMain);
+      return body.getBoundingClientRect().height;
+    };
+
+    const computePages = () => {
+      const firstMain = firstTemplate.querySelector('.pleading-main');
+      const firstBody = firstTemplate.querySelector('.pleading-body');
+      const regularMain = regularTemplate.querySelector('.pleading-main');
+      const regularBody = regularTemplate.querySelector('.pleading-body');
+      const firstLines = firstTemplate.querySelectorAll('.pleading-line-column span');
+      const regularLines = regularTemplate.querySelectorAll('.pleading-line-column span');
+
+      if (!firstMain || !firstBody || !regularMain || !regularBody || !firstLines.length || !regularLines.length) {
+        setPages([fallbackHTML()]);
+        return;
+      }
+
+      const lastFirstLine = firstLines[firstLines.length - 1].getBoundingClientRect().bottom;
+      const firstLimit = lastFirstLine - firstBody.getBoundingClientRect().top;
+      const lastRegularLine = regularLines[regularLines.length - 1].getBoundingClientRect().bottom;
+      const regularLimit = lastRegularLine - regularBody.getBoundingClientRect().top;
+
+      const signatureRow = firstTemplate.querySelector('.signature-row');
+      let signatureReserve = 0;
+      if (signatureRow) {
+        const sigRect = signatureRow.getBoundingClientRect();
+        const sigStyles = window.getComputedStyle(signatureRow);
+        signatureReserve = sigRect.height
+          + parseFloat(sigStyles.marginTop || '0')
+          + parseFloat(sigStyles.marginBottom || '0');
+      }
+
+      scratch.innerHTML = '';
+      const workingMain = firstMain.cloneNode(true);
+      scratch.appendChild(workingMain);
+      const workingBody = workingMain.querySelector('.pleading-body');
+      if (!workingBody) {
+        setPages([fallbackHTML()]);
+        return;
+      }
+
+      const pageFragments = [];
+      let isFirstPage = true;
+
+      while (workingBody.childNodes.length) {
+        const limit = isFirstPage ? firstLimit : regularLimit;
+        let fragment = extractFragmentForHeight(workingBody, limit);
+
+        if (!fragment || !fragment.childNodes.length) {
+          break;
+        }
+
+        if (!workingBody.childNodes.length) {
+          const templateForMeasure = isFirstPage ? firstMain : regularMain;
+          const allowed = Math.max(0, limit - signatureReserve);
+          if (allowed > 0) {
+            let measuredHeight = measureFragmentHeight(fragment, templateForMeasure);
+            while (measuredHeight > allowed + HEIGHT_TOLERANCE_PX && fragment.childNodes.length) {
+              const lastNode = fragment.lastChild;
+              if (!lastNode) break;
+              workingBody.insertBefore(lastNode, workingBody.firstChild);
+              measuredHeight = measureFragmentHeight(fragment, templateForMeasure);
+            }
+            if (!fragment.childNodes.length) {
+              // All nodes moved back, continue to process remaining content
+              continue;
+            }
+          }
+        }
+
+        pageFragments.push({ fragment, isFirstPage });
+        isFirstPage = false;
+      }
+
+      testHost.innerHTML = '';
+      scratch.innerHTML = '';
+
+      if (!pageFragments.length) {
+        setPages([fallbackHTML()]);
+        return;
+      }
+
+      const htmlPages = pageFragments.map(({ fragment }) => {
+        const container = document.createElement('div');
+        container.appendChild(fragment);
+        return container.innerHTML;
+      });
+
+      setPages(htmlPages);
+    };
+
+    const handleResize = () => {
+      requestAnimationFrame(computePages);
+    };
+
+    const resizeObserver = new ResizeObserver(handleResize);
+    const firstMain = firstTemplate.querySelector('.pleading-main');
+    const regularMain = regularTemplate.querySelector('.pleading-main');
+    if (firstMain) resizeObserver.observe(firstMain);
+    if (regularMain) resizeObserver.observe(regularMain);
+
+    handleResize();
+
+    return () => {
+      resizeObserver.disconnect();
+      testHost.innerHTML = '';
+      scratch.innerHTML = '';
+    };
+  }, [markdown, heading, title, docDate]);
+
   return (
     <>
-      <div ref={measurerRef} className="page-measurer" aria-hidden style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}>
-        <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate}>
-          {/* Empty body for measuring sizes */}
-        </PleadingPage>
+      <div
+        ref={measurerRef}
+        className="page-measurer"
+        aria-hidden
+        style={{ position: 'absolute', inset: '-10000px auto auto -10000px', pointerEvents: 'none', visibility: 'hidden' }}
+      >
+        <div ref={firstTemplateRef} className="pagination-template-first">
+          <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {markdown}
+            </ReactMarkdown>
+          </PleadingPage>
+        </div>
+        <div ref={regularTemplateRef} className="pagination-template-regular">
+          <PleadingPage heading={heading} title={title} firstPage={false} pageNumber={2} totalPages={2} docDate={docDate}>
+            <div className="pagination-placeholder" />
+          </PleadingPage>
+        </div>
+        <div ref={scratchRef} className="pagination-scratch" />
+        <div ref={testRef} className="pagination-test" />
       </div>
-      {pages.map((blocks, pageIndex) => (
+      {(pages.length ? pages : ['']).map((html, pageIndex) => (
         <div className="page-wrapper" key={`md-page-${pageIndex}`}>
           <button
             type="button"
             className="fullscreen-toggle"
             title="Fullscreen"
-            onClick={() => { /* fullscreen handled by outer preview using fragment id */ }}
+            onClick={() => {
+              /* fullscreen handled by outer preview using fragment id */
+            }}
           >
             ⤢
           </button>
@@ -152,19 +354,10 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
             title={title}
             firstPage={pageIndex === 0}
             pageNumber={pageIndex + 1}
-            totalPages={pages.length}
+            totalPages={pages.length || 1}
             docDate={docDate}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                table: (props) => <table className="md-table" {...props} />,
-                th: (props) => <th className="md-table-cell" {...props} />,
-                td: (props) => <td className="md-table-cell" {...props} />,
-              }}
-            >
-              {blocks.join('\n\n')}
-            </ReactMarkdown>
+            <div className="paginated-markdown-chunk" dangerouslySetInnerHTML={{ __html: html }} />
           </PleadingPage>
         </div>
       ))}
