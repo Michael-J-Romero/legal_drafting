@@ -731,6 +731,10 @@ button:not(:disabled):active {
   font-style: italic;
 }
 
+.paginated-markdown-chunk {
+  display: contents;
+}
+
 .md-table {
   border-collapse: collapse;
   width: 100%;
