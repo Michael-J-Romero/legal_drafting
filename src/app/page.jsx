@@ -12,6 +12,7 @@ import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import { appendMarkdownFragment as appendMarkdownFragmentPdf, appendPdfFragment as appendPdfFragmentPdf, LETTER_WIDTH } from './lib/pdf/generate';
 import { LS_HISTORY_KEY, historyToStorage, historyFromStorage } from './lib/history';
+import { clearAllLocalData } from './lib/clearData';
 import {
   DEFAULT_LEFT_HEADING_FIELDS,
   DEFAULT_RIGHT_HEADING_FIELDS,
@@ -87,6 +88,7 @@ export default function App() {
     maybeMark,
     undo,
     redo,
+    replaceHistory,
     hydrated,
   } = usePersistentHistory(initialDocState, {
     storageKey: LS_HISTORY_KEY,
@@ -417,6 +419,17 @@ export default function App() {
     redo();
   }, [redo]);
 
+  const handleClearAll = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm('This will remove all locally saved data (history, uploaded PDFs) and reload the app. Continue?');
+      if (!ok) return;
+    }
+    try { window.localStorage.removeItem(LS_HISTORY_KEY); } catch (_) {}
+    // Reset in-memory state immediately so empty fragments disappear even before reload
+    try { replaceHistory({ past: [], present: initialDocState, future: [] }); } catch (_) {}
+    await clearAllLocalData({ reload: true });
+  }, [replaceHistory, initialDocState]);
+
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const onKey = (e) => {
@@ -474,6 +487,7 @@ export default function App() {
         docDate={docDate}
         onPrint={handlePrint}
         onCompilePdf={handleCompilePdf}
+        onClearAll={handleClearAll}
         fullscreenFragmentId={fullscreenFragmentId}
         setFullscreenFragmentId={setFullscreenFragmentId}
         contentRef={previewRef}

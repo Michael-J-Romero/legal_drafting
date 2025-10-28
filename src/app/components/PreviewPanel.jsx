@@ -11,6 +11,7 @@ export default function PreviewPanel({
   docDate,
   onPrint,
   onCompilePdf,
+  onClearAll,
   fullscreenFragmentId,
   setFullscreenFragmentId,
   contentRef,
@@ -44,6 +45,9 @@ export default function PreviewPanel({
   return (
     <main className="preview-panel">
       <div className="toolbar">
+        <button type="button" onClick={onClearAll} className="danger" title="Remove all saved data and reload">
+          Clear All Local Data
+        </button>
         <button type="button" onClick={onPrint} className="secondary">
           Print or Save as PDF
         </button>
