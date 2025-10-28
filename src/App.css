@@ -654,6 +654,7 @@ button:not(:disabled):active {
   display: flex;
   flex-direction: column;
   color: #111827;
+  position: relative;
 }
 
 /* Signature row appears above the page footer on the last page */

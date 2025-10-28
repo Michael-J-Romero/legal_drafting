@@ -5,145 +5,279 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import PleadingPage from './PleadingPage';
 
+const EPSILON = 0.5;
+
+const serializeNodes = (nodes) => {
+  const container = document.createElement('div');
+  nodes.forEach((node) => {
+    if (node) container.appendChild(node.cloneNode(true));
+  });
+  return container.innerHTML;
+};
+
+const measureHeightFactory = (temp) => (nodes) => {
+  if (!temp) return 0;
+  const filtered = nodes.filter(Boolean);
+  temp.innerHTML = '';
+  if (!filtered.length) return 0;
+  filtered.forEach((node) => {
+    temp.appendChild(node.cloneNode(true));
+  });
+  const rect = temp.getBoundingClientRect();
+  return rect.height;
+};
+
+const splitTextNode = (textNode, existingNodes, limit, measure) => {
+  const text = textNode.textContent ?? '';
+  if (!text) {
+    return { fit: null, remainder: null };
+  }
+
+  const probe = document.createTextNode('');
+  const baseNodes = [...existingNodes, probe];
+
+  let best = 0;
+  let low = 0;
+  let high = text.length;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    probe.textContent = text.slice(0, mid);
+    const height = measure(baseNodes);
+    if (height <= limit + EPSILON) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  if (best === 0) {
+    return { fit: null, remainder: document.createTextNode(text) };
+  }
+
+  const fitText = text.slice(0, best);
+  const remainderText = text.slice(best);
+
+  return {
+    fit: document.createTextNode(fitText),
+    remainder: remainderText ? document.createTextNode(remainderText) : null,
+  };
+};
+
+const splitNodeByHeight = (node, existingNodes, limit, measure) => {
+  if (!node) return { fit: null, remainder: null };
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return splitTextNode(node, existingNodes, limit, measure);
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return { fit: null, remainder: null };
+  }
+
+  const head = node.cloneNode(false);
+  const tail = node.cloneNode(false);
+  const children = Array.from(node.childNodes);
+
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
+    const childClone = child.cloneNode(true);
+    head.appendChild(childClone);
+    const height = measure([...existingNodes, head]);
+    if (height <= limit + EPSILON) {
+      continue;
+    }
+
+    head.removeChild(childClone);
+    const { fit, remainder } = splitNodeByHeight(child, [...existingNodes, head], limit, measure);
+
+    if (fit) {
+      head.appendChild(fit);
+    }
+
+    if (remainder) {
+      tail.appendChild(remainder);
+    }
+
+    for (let j = i + 1; j < children.length; j += 1) {
+      tail.appendChild(children[j].cloneNode(true));
+    }
+
+    return {
+      fit: head.childNodes.length ? head : null,
+      remainder: tail.childNodes.length ? tail : null,
+    };
+  }
+
+  return {
+    fit: head.childNodes.length ? head : null,
+    remainder: null,
+  };
+};
+
+const paginateNodes = (source, temp, firstHeight, standardHeight) => {
+  if (!source) return [''];
+
+  const measure = measureHeightFactory(temp);
+  const queue = Array.from(source.childNodes).map((node) => node.cloneNode(true));
+  const pages = [];
+  let currentNodes = [];
+  let availableHeight = firstHeight;
+
+  const flushPage = () => {
+    if (!currentNodes.length) return;
+    pages.push(serializeNodes(currentNodes));
+    currentNodes = [];
+    availableHeight = standardHeight;
+  };
+
+  while (queue.length) {
+    let node = queue.shift();
+    if (!node) continue;
+
+    if (node.nodeType === Node.TEXT_NODE && !(node.textContent ?? '').trim()) {
+      if (!currentNodes.length) continue;
+    }
+
+    while (node) {
+      const height = measure([...currentNodes, node]);
+      if (height <= availableHeight + EPSILON) {
+        currentNodes.push(node);
+        node = null;
+        break;
+      }
+
+      if (currentNodes.length === 0) {
+        const { fit, remainder } = splitNodeByHeight(node, currentNodes, availableHeight, measure);
+        if (fit) {
+          currentNodes.push(fit);
+          flushPage();
+          node = remainder;
+        } else {
+          currentNodes.push(remainder || node);
+          flushPage();
+          node = null;
+        }
+      } else {
+        flushPage();
+        availableHeight = standardHeight;
+      }
+    }
+  }
+
+  if (currentNodes.length) {
+    flushPage();
+  }
+
+  if (!pages.length) {
+    pages.push('');
+  }
+
+  return pages;
+};
+
 // Paginate Markdown across multiple pleading pages for on-screen preview
 export default function PaginatedMarkdown({ content, heading, title, docDate }) {
   const measurerRef = useRef(null);
-  const [pages, setPages] = useState([]);
-
-  // Basic helpers to classify blocks
-  const isParagraphBlock = (block) => {
-    const trimmed = block.trim();
-    if (!trimmed) return true;
-    // Non-paragraph starts: headings, lists, blockquotes, tables, code fences
-    if (/^(#{1,6})\s/.test(trimmed)) return false;
-    if (/^\s*([-*+]\s)/.test(trimmed)) return false;
-    if (/^\s*\d+\.\s/.test(trimmed)) return false;
-    if (/^\s*>\s?/.test(trimmed)) return false;
-    if (/^\s*\|.*\|\s*$/.test(trimmed)) return false;
-    if (/^\s*```/.test(trimmed)) return false;
-    return true;
-  };
+  const [pages, setPages] = useState(['']);
+  const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
-    if (!measurerRef.current) return;
+    if (!measurerRef.current) return undefined;
 
     const root = measurerRef.current;
     const main = root.querySelector('.pleading-main');
     const body = root.querySelector('.pleading-body');
-    if (!main || !body) return;
+    if (!main || !body) return undefined;
 
-    const cs = window.getComputedStyle(body);
-    const lineHeightPx = parseFloat(cs.lineHeight);
-    const bodyWidth = body.getBoundingClientRect().width;
-    const mainHeight = main.getBoundingClientRect().height;
-    const bodyTop = body.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    const firstPageAvail = Math.floor((mainHeight - bodyTop) / lineHeightPx);
-    const fullPageAvail = Math.floor(mainHeight / lineHeightPx);
-
-    // Prepare canvas for text measurement
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    // Match body text font
-    ctx.font = `${cs.fontSize || '12pt'} ${cs.fontFamily || 'Times New Roman, Times, serif'}`;
-
-    const wrapParagraphToLines = (text) => {
-      const words = text.split(/\s+/);
-      const lines = [];
-      let current = '';
-      words.forEach((w) => {
-        const attempt = current ? `${current} ${w}` : w;
-        const width = ctx.measureText(attempt).width;
-        if (width > bodyWidth && current) {
-          lines.push(current);
-          current = w;
-        } else {
-          current = attempt;
-        }
+    const compute = () => {
+      const cs = window.getComputedStyle(body);
+      const lineHeight = parseFloat(cs.lineHeight) || 1;
+      const mainRect = main.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const headerOffset = Math.max(0, bodyRect.top - mainRect.top);
+      const maxLines = 28;
+      const firstLines = Math.min(maxLines, Math.floor((mainRect.height - headerOffset) / lineHeight));
+      const standardLines = Math.min(maxLines, Math.floor(mainRect.height / lineHeight));
+      const firstHeight = Math.max(lineHeight, firstLines * lineHeight);
+      const standardHeight = Math.max(lineHeight, standardLines * lineHeight);
+      setMetrics({
+        lineHeight,
+        firstHeight,
+        standardHeight,
       });
-      if (current) lines.push(current);
-      return lines;
     };
 
-    const blocks = content.split(/\n\n+/); // crude block split
-    const outputPages = [];
-    let currentPage = [];
-    let remainingLines = firstPageAvail;
+    compute();
+    const resizeObserver = new ResizeObserver(() => {
+      compute();
+    });
 
-    const pushPage = () => {
-      outputPages.push(currentPage);
-      currentPage = [];
-      remainingLines = fullPageAvail;
+    resizeObserver.observe(main);
+    resizeObserver.observe(body);
+
+    return () => {
+      resizeObserver.disconnect();
     };
+  }, [heading, title, docDate]);
 
-    for (let i = 0; i < blocks.length; i += 1) {
-      let block = blocks[i];
-      if (!block.trim()) {
-        // blank paragraph spacing ~ half line; approximate as 1 line occasionally
-        if (remainingLines <= 1) {
-          pushPage();
-        } else {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-        continue;
-      }
+  useEffect(() => {
+    if (!measurerRef.current || !metrics) return;
 
-      if (!isParagraphBlock(block)) {
-        // Measure this block by temporarily rendering it in the measurer body
-        const temp = document.createElement('div');
-        temp.style.visibility = 'hidden';
-        body.appendChild(temp);
-        // Render with React into temp is heavy; approximate as 6 lines for small blocks if cannot measure
-        temp.textContent = block.replace(/[#$*>`_\-\d\.]/g, '');
-        const approxLines = Math.max(1, Math.ceil(temp.getBoundingClientRect().height / lineHeightPx) || 4);
-        body.removeChild(temp);
-        if (approxLines > remainingLines) {
-          pushPage();
-        }
-        currentPage.push(block);
-        remainingLines -= Math.min(remainingLines, approxLines);
-      } else {
-        // Paragraph: split by lines based on width
-        let para = block.replace(/\s+/g, ' ').trim();
-        const lines = wrapParagraphToLines(para);
-        let start = 0;
-        while (start < lines.length) {
-          if (remainingLines === 0) pushPage();
-          const canTake = Math.min(remainingLines, lines.length - start);
-          const slice = lines.slice(start, start + canTake).join(' ');
-          currentPage.push(slice);
-          start += canTake;
-          remainingLines -= canTake;
-          if (start < lines.length) pushPage();
-        }
-        // Add paragraph margin as a spacer line if room
-        if (remainingLines === 0) pushPage();
-        if (remainingLines > 0) {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-      }
-    }
+    const root = measurerRef.current;
+    const body = root.querySelector('.pleading-body');
+    const source = body?.querySelector('.markdown-source');
+    const temp = body?.querySelector('.pagination-temp');
+    if (!body || !source || !temp) return;
 
-    if (currentPage.length || !outputPages.length) outputPages.push(currentPage);
-    setPages(outputPages);
-  }, [content, heading, title]);
+    temp.style.position = 'absolute';
+    temp.style.visibility = 'hidden';
+    temp.style.pointerEvents = 'none';
+    temp.style.left = '0';
+    temp.style.right = '0';
+    temp.style.top = '0';
+    temp.style.width = '100%';
 
-  // Render hidden measurer and visible pages
+    const pagesHtml = paginateNodes(source, temp, metrics.firstHeight, metrics.standardHeight || metrics.firstHeight);
+    setPages(pagesHtml);
+  }, [content, metrics, heading, title, docDate]);
+
+  const markdownComponents = useMemo(
+    () => ({
+      table: (props) => <table className="md-table" {...props} />,
+      th: (props) => <th className="md-table-cell" {...props} />,
+      td: (props) => <td className="md-table-cell" {...props} />,
+    }),
+    [],
+  );
+
   return (
     <>
-      <div ref={measurerRef} className="page-measurer" aria-hidden style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}>
+      <div
+        ref={measurerRef}
+        className="page-measurer"
+        aria-hidden
+        style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}
+      >
         <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate}>
-          {/* Empty body for measuring sizes */}
+          <div className="markdown-source">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {content || ''}
+            </ReactMarkdown>
+          </div>
+          <div className="pagination-temp" aria-hidden />
         </PleadingPage>
       </div>
-      {pages.map((blocks, pageIndex) => (
+      {pages.map((html, pageIndex) => (
         <div className="page-wrapper" key={`md-page-${pageIndex}`}>
           <button
             type="button"
             className="fullscreen-toggle"
             title="Fullscreen"
-            onClick={() => { /* fullscreen handled by outer preview using fragment id */ }}
+            onClick={() => {
+              /* fullscreen handled by outer preview using fragment id */
+            }}
           >
             ⤢
           </button>
@@ -155,16 +289,7 @@ export default function PaginatedMarkdown({ content, heading, title, docDate }) 
             totalPages={pages.length}
             docDate={docDate}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                table: (props) => <table className="md-table" {...props} />,
-                th: (props) => <th className="md-table-cell" {...props} />,
-                td: (props) => <td className="md-table-cell" {...props} />,
-              }}
-            >
-              {blocks.join('\n\n')}
-            </ReactMarkdown>
+            <div className="markdown-output" dangerouslySetInnerHTML={{ __html: html }} />
           </PleadingPage>
         </div>
       ))}
