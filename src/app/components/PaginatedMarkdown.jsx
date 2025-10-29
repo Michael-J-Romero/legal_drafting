@@ -1,133 +1,202 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import PleadingPage from './PleadingPage';
+
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
+
+// Utility guard for whitespace-only text nodes
+const isEmptyText = (node) => node?.nodeType === TEXT_NODE && !(node.textContent || '').trim();
 
 // Paginate Markdown across multiple pleading pages for on-screen preview
 export default function PaginatedMarkdown({ content, heading, title, docDate, pageOffset = 0, totalOverride = null, hideHeader = false, preTitleCaptions = [], suppressTitlePlaceholder = false, onPageCount, disableSignature = false }) {
   const measurerRef = useRef(null);
   const [pages, setPages] = useState([]);
 
-  // Basic helpers to classify blocks
-  const isParagraphBlock = (block) => {
-    const trimmed = block.trim();
-    if (!trimmed) return true;
-    // Non-paragraph starts: headings, lists, blockquotes, tables, code fences
-    if (/^(#{1,6})\s/.test(trimmed)) return false;
-    if (/^\s*([-*+]\s)/.test(trimmed)) return false;
-    if (/^\s*\d+\.\s/.test(trimmed)) return false;
-    if (/^\s*>\s?/.test(trimmed)) return false;
-    if (/^\s*\|.*\|\s*$/.test(trimmed)) return false;
-    if (/^\s*```/.test(trimmed)) return false;
-    return true;
-  };
+  const markdown = useMemo(() => content || '', [content]);
+
+  const computePages = useCallback(() => {
+    if (!measurerRef.current) return;
+    const root = measurerRef.current;
+    const body = root.querySelector('.pleading-body');
+    if (!body) return;
+
+    const computed = window.getComputedStyle(body);
+    const lineHeight = parseFloat(computed.lineHeight || '0');
+    if (!lineHeight) return;
+
+    const pageHeight = lineHeight * 28;
+    const tolerance = lineHeight * 0.2;
+
+    const scratch = body.cloneNode(false);
+    scratch.style.position = 'absolute';
+    scratch.style.visibility = 'hidden';
+    scratch.style.pointerEvents = 'none';
+    scratch.style.top = '-10000px';
+    scratch.style.left = '-10000px';
+    scratch.style.width = `${body.getBoundingClientRect().width}px`;
+    root.appendChild(scratch);
+
+    const sourceNodes = Array.from(body.childNodes)
+      .filter((node) => !isEmptyText(node))
+      .map((node) => node.cloneNode(true));
+
+    if (!sourceNodes.length) {
+      scratch.remove();
+      setPages(['']);
+      return;
+    }
+
+    const results = [];
+    const queue = [...sourceNodes];
+
+    const fitNodeInto = (node, parent) => {
+      if (!node) return null;
+
+      if (node.nodeType === TEXT_NODE) {
+        const text = node.textContent || '';
+        if (!text) {
+          parent.appendChild(document.createTextNode(''));
+          return null;
+        }
+
+        const holder = document.createTextNode('');
+        parent.appendChild(holder);
+
+        let low = 0;
+        let high = text.length;
+        let best = 0;
+        while (low <= high) {
+          const mid = Math.ceil((low + high) / 2);
+          holder.textContent = text.slice(0, mid);
+          if (scratch.scrollHeight <= pageHeight + tolerance) {
+            best = mid;
+            low = mid + 1;
+          } else {
+            high = mid - 1;
+          }
+        }
+
+        if (best === 0) {
+          parent.removeChild(holder);
+          return node.cloneNode(true);
+        }
+
+        holder.textContent = text.slice(0, best);
+        const remainderText = text.slice(best);
+        return remainderText ? document.createTextNode(remainderText) : null;
+      }
+
+      if (node.nodeType === ELEMENT_NODE) {
+        const clone = node.cloneNode(false);
+        parent.appendChild(clone);
+
+        if (scratch.scrollHeight > pageHeight + tolerance) {
+          parent.removeChild(clone);
+          return node.cloneNode(true);
+        }
+
+        const children = Array.from(node.childNodes);
+        let appendedItems = 0;
+
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i];
+          const remainder = fitNodeInto(child, clone);
+          if (!remainder && child.nodeName === 'LI') {
+            appendedItems += 1;
+          }
+          if (remainder) {
+            if (!clone.hasChildNodes()) {
+              parent.removeChild(clone);
+            }
+
+            const tail = node.cloneNode(false);
+            if (node.nodeName === 'P' || node.nodeName === 'LI') {
+              tail.setAttribute('data-continued', 'true');
+            }
+
+            if (node.nodeName === 'OL') {
+              const startAttr = node.getAttribute('start');
+              const startIndex = startAttr ? parseInt(startAttr, 10) || 1 : 1;
+              tail.setAttribute('start', String(startIndex + appendedItems));
+            }
+
+            tail.appendChild(remainder);
+            for (let j = i + 1; j < children.length; j += 1) {
+              tail.appendChild(children[j].cloneNode(true));
+            }
+            return tail;
+          }
+        }
+
+        if (scratch.scrollHeight > pageHeight + tolerance) {
+          if (clone.parentNode === parent) {
+            parent.removeChild(clone);
+          }
+          return node.cloneNode(true);
+        }
+
+        return null;
+      }
+
+      const fallback = node.cloneNode(true);
+      parent.appendChild(fallback);
+      if (scratch.scrollHeight > pageHeight + tolerance) {
+        parent.removeChild(fallback);
+        return node.cloneNode(true);
+      }
+      return null;
+    };
+
+    while (queue.length) {
+      scratch.innerHTML = '';
+      let appended = false;
+
+      while (queue.length) {
+        const current = queue.shift();
+        const beforeCount = scratch.childNodes.length;
+        const remainder = fitNodeInto(current, scratch);
+        const afterCount = scratch.childNodes.length;
+        appended = appended || afterCount > beforeCount;
+        if (remainder) {
+          queue.unshift(remainder);
+          break;
+        }
+      }
+
+      if (!appended) {
+        // No progress could be made; avoid infinite loop
+        break;
+      }
+
+      results.push(scratch.innerHTML);
+    }
+
+    scratch.remove();
+    setPages(results.length ? results : ['']);
+  }, [markdown, heading, title, hideHeader, preTitleCaptions, suppressTitlePlaceholder]);
 
   useEffect(() => {
     if (!measurerRef.current) return;
-
     const root = measurerRef.current;
-    const main = root.querySelector('.pleading-main');
     const body = root.querySelector('.pleading-body');
-    if (!main || !body) return;
+    if (!body) return;
 
-    const cs = window.getComputedStyle(body);
-    const lineHeightPx = parseFloat(cs.lineHeight);
-    const bodyWidth = body.getBoundingClientRect().width;
-    const mainHeight = main.getBoundingClientRect().height;
-    const bodyTop = body.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    const firstPageAvail = Math.floor((mainHeight - bodyTop) / lineHeightPx);
-    const fullPageAvail = Math.floor(mainHeight / lineHeightPx);
+    let raf = requestAnimationFrame(() => computePages());
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => computePages());
+    });
+    observer.observe(body);
 
-    // Prepare canvas for text measurement
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    // Match body text font
-    ctx.font = `${cs.fontSize || '12pt'} ${cs.fontFamily || 'Times New Roman, Times, serif'}`;
-
-    const wrapParagraphToLines = (text) => {
-      const words = text.split(/\s+/);
-      const lines = [];
-      let current = '';
-      words.forEach((w) => {
-        const attempt = current ? `${current} ${w}` : w;
-        const width = ctx.measureText(attempt).width;
-        if (width > bodyWidth && current) {
-          lines.push(current);
-          current = w;
-        } else {
-          current = attempt;
-        }
-      });
-      if (current) lines.push(current);
-      return lines;
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
     };
-
-    const blocks = content.split(/\n\n+/); // crude block split
-    const outputPages = [];
-    let currentPage = [];
-  let remainingLines = firstPageAvail;
-
-    const pushPage = () => {
-      outputPages.push(currentPage);
-      currentPage = [];
-      remainingLines = fullPageAvail;
-    };
-
-    for (let i = 0; i < blocks.length; i += 1) {
-      let block = blocks[i];
-      if (!block.trim()) {
-        // blank paragraph spacing ~ half line; approximate as 1 line occasionally
-        if (remainingLines <= 1) {
-          pushPage();
-        } else {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-        continue;
-      }
-
-      if (!isParagraphBlock(block)) {
-        // Measure this block by temporarily rendering it in the measurer body
-        const temp = document.createElement('div');
-        temp.style.visibility = 'hidden';
-        body.appendChild(temp);
-        // Render with React into temp is heavy; approximate as 6 lines for small blocks if cannot measure
-        temp.textContent = block.replace(/[#$*>`_\-\d\.]/g, '');
-        const approxLines = Math.max(1, Math.ceil(temp.getBoundingClientRect().height / lineHeightPx) || 4);
-        body.removeChild(temp);
-        if (approxLines > remainingLines) {
-          pushPage();
-        }
-        currentPage.push(block);
-        remainingLines -= Math.min(remainingLines, approxLines);
-      } else {
-        // Paragraph: split by lines based on width
-        let para = block.replace(/\s+/g, ' ').trim();
-        const lines = wrapParagraphToLines(para);
-        let start = 0;
-        while (start < lines.length) {
-          if (remainingLines === 0) pushPage();
-          const canTake = Math.min(remainingLines, lines.length - start);
-          const slice = lines.slice(start, start + canTake).join(' ');
-          currentPage.push(slice);
-          start += canTake;
-          remainingLines -= canTake;
-          if (start < lines.length) pushPage();
-        }
-        // Add paragraph margin as a spacer line if room
-  if (remainingLines === 0) pushPage();
-        if (remainingLines > 0) {
-          currentPage.push('');
-          remainingLines -= 1;
-        }
-      }
-    }
-
-    if (currentPage.length || !outputPages.length) outputPages.push(currentPage);
-    setPages(outputPages);
-  }, [content, heading, title]);
+  }, [computePages]);
 
   // Notify parent of page count for global numbering if requested
   useEffect(() => {
@@ -138,46 +207,66 @@ export default function PaginatedMarkdown({ content, heading, title, docDate, pa
     } catch (_) {}
   }, [onPageCount, pages.length]);
 
-  // Render hidden measurer and visible pages
+  const renderedPages = pages.length ? pages : [''];
+
   return (
     <>
-      <div ref={measurerRef} className="page-measurer" aria-hidden style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}>
-  <PleadingPage heading={heading} title={title} firstPage pageNumber={1} totalPages={1} docDate={docDate} hideHeaderBlocks={hideHeader} preTitleCaptions={preTitleCaptions} suppressTitlePlaceholder={suppressTitlePlaceholder} showSignature={false}>
-          {/* Empty body for measuring sizes */}
+      <div
+        ref={measurerRef}
+        className="page-measurer"
+        aria-hidden
+        style={{ position: 'absolute', inset: '-10000px auto auto -10000px' }}
+      >
+        <PleadingPage
+          heading={heading}
+          title={title}
+          firstPage
+          pageNumber={1}
+          totalPages={1}
+          docDate={docDate}
+          hideHeaderBlocks={hideHeader}
+          preTitleCaptions={preTitleCaptions}
+          suppressTitlePlaceholder={suppressTitlePlaceholder}
+          showSignature={false}
+        >
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              table: (props) => <table className="md-table" {...props} />,
+              th: (props) => <th className="md-table-cell" {...props} />,
+              td: (props) => <td className="md-table-cell" {...props} />,
+            }}
+          >
+            {markdown}
+          </ReactMarkdown>
         </PleadingPage>
       </div>
-      {pages.map((blocks, pageIndex) => (
+
+      {renderedPages.map((html, pageIndex) => (
         <div className="page-wrapper" key={`md-page-${pageIndex}`}>
           <button
             type="button"
             className="fullscreen-toggle"
             title="Fullscreen"
-            onClick={() => { /* fullscreen handled by outer preview using fragment id */ }}
+            onClick={() => {
+              /* fullscreen handled by outer preview using fragment id */
+            }}
           >
             ⤢
           </button>
           <PleadingPage
             heading={heading}
             title={title}
-              firstPage={pageIndex === 0}
-              hideHeaderBlocks={hideHeader}
+            firstPage={pageIndex === 0}
+            hideHeaderBlocks={hideHeader}
             preTitleCaptions={preTitleCaptions}
             pageNumber={pageOffset + pageIndex + 1}
-            totalPages={typeof totalOverride === 'number' ? totalOverride : (pageOffset + pages.length)}
+            totalPages={typeof totalOverride === 'number' ? totalOverride : (pageOffset + renderedPages.length)}
             docDate={docDate}
             suppressTitlePlaceholder={suppressTitlePlaceholder}
-            showSignature={disableSignature ? false : (pageIndex === pages.length - 1)}
+            showSignature={disableSignature ? false : pageIndex === renderedPages.length - 1}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                table: (props) => <table className="md-table" {...props} />,
-                th: (props) => <th className="md-table-cell" {...props} />,
-                td: (props) => <td className="md-table-cell" {...props} />,
-              }}
-            >
-              {blocks.join('\n\n')}
-            </ReactMarkdown>
+            <div dangerouslySetInnerHTML={{ __html: html }} />
           </PleadingPage>
         </div>
       ))}
