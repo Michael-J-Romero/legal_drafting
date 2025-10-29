@@ -727,6 +727,30 @@ button:not(:disabled):active {
   color: #1f2937;
 }
 
+.pleading-rendered-markdown {
+  flex: 1;
+  display: block;
+  width: 100%;
+}
+
+.pleading-rendered-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.pleading-body li.pleading-continued-li {
+  list-style: none;
+  padding-left: 0.18in;
+  text-indent: 0;
+}
+
+.pleading-body li.pleading-continued-li::marker {
+  content: '';
+}
+
+.pleading-body p.pleading-continued-block {
+  text-indent: 0;
+}
+
 /* Do not indent first line for paragraphs inside lists or blockquotes */
 .pleading-body li p,
 .pleading-body blockquote p {
