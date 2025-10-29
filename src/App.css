@@ -719,6 +719,25 @@ button:not(:disabled):active {
   line-height: calc((11in - 2in) / 28);
 }
 
+.pleading-body p[data-continued="true"] {
+  text-indent: 0;
+  margin-top: 0;
+}
+
+.pleading-body li[data-continued="true"] {
+  list-style: none;
+  margin-top: 0;
+  padding-left: 0;
+}
+
+.pleading-body li[data-continued="true"]::marker {
+  content: '';
+}
+
+.pleading-body li[data-continued="true"] > p:first-child {
+  text-indent: 0;
+}
+
 .pleading-body blockquote {
   border-left: 4px solid #0f172a;
   padding-left: 0.18in;
