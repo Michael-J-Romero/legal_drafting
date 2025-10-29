@@ -22,6 +22,8 @@ const MARKDOWN_COMPONENTS = {
 
 const CONTINUATION_CLASS = 'pleading-continued-li';
 const CONTINUED_BLOCK_CLASS = 'pleading-continued-block';
+// Page-break token that can appear ANYWHERE. Everything after it must start on the next page.
+const PAGE_BREAK_TOKEN = "bbb";
 
 // Paginate Markdown across multiple pleading pages for on-screen preview
 export default function PaginatedMarkdown({
@@ -29,6 +31,7 @@ export default function PaginatedMarkdown({
   heading,
   title,
   docDate,
+  signatureType = 'default',
   pageOffset = 0,
   totalOverride = null,
   hideHeader = false,
@@ -40,6 +43,8 @@ export default function PaginatedMarkdown({
   const measurerRef = useRef(null);
   const sourceBodyRef = useRef(null);
   const [pages, setPages] = useState([]);
+  // Debug overlays toggle (off by default)
+  const [debugEnabled, setDebugEnabled] = useState(false);
 
   const normalizedContent = useMemo(() => content || '', [content]);
 
@@ -68,7 +73,7 @@ export default function PaginatedMarkdown({
   }, []);
 
   const splitInlineElement = useCallback(
-    (phantom, element, allowedHeight) => {
+    (phantom, element, allowedHeight, prevBottomMarginPx = 0) => {
       if (!phantom || !element) return { fit: null, remainder: element };
 
       const clone = element.cloneNode(true);
@@ -76,24 +81,7 @@ export default function PaginatedMarkdown({
 
       const computed = window.getComputedStyle(clone);
       const marginTop = parseFloat(computed.marginTop) || 0;
-      if (allowedHeight <= marginTop + MEASURE_TOLERANCE) {
-        return { fit: null, remainder: element };
-      }
-
-      const availableContent = allowedHeight - marginTop;
-      const lineHeightValue = parseFloat(computed.lineHeight);
-      const resolvedLineHeight = Number.isFinite(lineHeightValue) && lineHeightValue > 0
-        ? lineHeightValue
-        : computeLineHeight(clone);
-
-      if (!resolvedLineHeight || resolvedLineHeight <= 0) {
-        return { fit: null, remainder: element };
-      }
-
-      const maxLines = Math.floor((availableContent + MEASURE_TOLERANCE) / resolvedLineHeight);
-      if (maxLines <= 0) {
-        return { fit: null, remainder: element };
-      }
+      const topOverlapAllowance = Math.min(prevBottomMarginPx || 0, marginTop);
 
       const range = document.createRange();
       range.setStart(clone, 0);
@@ -185,31 +173,52 @@ export default function PaginatedMarkdown({
 
       range.detach?.();
 
+      // Try to fit as many visual lines as possible by measuring actual fragment height
       if (!lineBoundaries.length) {
         const fullHeight = measureElementHeight(phantom, clone.cloneNode(true));
-        if (fullHeight <= allowedHeight + MEASURE_TOLERANCE) {
+        const allowable = allowedHeight + topOverlapAllowance;
+        if (fullHeight <= allowable + MEASURE_TOLERANCE) {
           return { fit: element, remainder: null };
         }
         return { fit: null, remainder: element };
       }
 
-      const totalLines = lineBoundaries.length;
-      if (totalLines <= maxLines) {
-        return { fit: element, remainder: null };
+      let bestIndex = 0;
+      for (let i = 0; i < lineBoundaries.length; i += 1) {
+        const boundary = lineBoundaries[i];
+        const fitRange = document.createRange();
+        fitRange.setStart(clone, 0);
+        fitRange.setEnd(boundary.node, boundary.offset);
+        const fitFragment = fitRange.cloneContents();
+        const fitElementProbe = element.cloneNode(false);
+        fitElementProbe.appendChild(fitFragment);
+        fitElementProbe.style.marginBottom = '0px';
+        const measured = measureElementHeight(phantom, fitElementProbe.cloneNode(true));
+        const allowable = allowedHeight + topOverlapAllowance;
+        if (measured <= allowable + MEASURE_TOLERANCE) {
+          bestIndex = i + 1; // boundaries are end-inclusive per line
+        } else {
+          break;
+        }
       }
 
-      const boundary = lineBoundaries[Math.max(0, maxLines - 1)];
-      if (!boundary) {
+      if (bestIndex <= 0) {
         return { fit: null, remainder: element };
       }
 
+      // If we can fit all lines, return whole element
+      if (bestIndex >= lineBoundaries.length) {
+        return { fit: element, remainder: null };
+      }
+
+      const chosen = lineBoundaries[bestIndex - 1];
       const fitRange = document.createRange();
       fitRange.setStart(clone, 0);
-      fitRange.setEnd(boundary.node, boundary.offset);
+      fitRange.setEnd(chosen.node, chosen.offset);
       const fitFragment = fitRange.cloneContents();
 
       const remainderRange = document.createRange();
-      remainderRange.setStart(boundary.node, boundary.offset);
+      remainderRange.setStart(chosen.node, chosen.offset);
       remainderRange.setEnd(clone, clone.childNodes.length);
       const remainderFragment = remainderRange.cloneContents();
 
@@ -231,16 +240,14 @@ export default function PaginatedMarkdown({
 
       return { fit: fitElement, remainder: remainderElement };
     },
-    [computeLineHeight, measureElementHeight],
+    [measureElementHeight],
   );
 
-  const splitListElement = useCallback((phantom, element, allowedHeight, splitInline) => {
+  const splitListElement = useCallback((phantom, element, allowedHeight, splitInline, prevBottomMarginPx = 0) => {
     if (!phantom || !element) return { fit: null, remainder: element };
     const computed = window.getComputedStyle(element);
     const marginTop = parseFloat(computed.marginTop) || 0;
-    if (allowedHeight <= marginTop + MEASURE_TOLERANCE) {
-      return { fit: null, remainder: element };
-    }
+    const topOverlapAllowance = Math.min(prevBottomMarginPx || 0, marginTop);
 
     const listFit = element.cloneNode(false);
     const listRemainder = element.cloneNode(false);
@@ -250,7 +257,7 @@ export default function PaginatedMarkdown({
     const isOrdered = element.tagName?.toLowerCase() === 'ol';
     const startAttr = parseInt(element.getAttribute('start') || '1', 10);
     let numberCursor = Number.isNaN(startAttr) ? 1 : startAttr;
-    let consumed = marginTop;
+    let consumed = Math.max(0, marginTop - topOverlapAllowance);
     const children = Array.from(element.children);
     for (let i = 0; i < children.length; i += 1) {
       const child = children[i];
@@ -283,7 +290,7 @@ export default function PaginatedMarkdown({
         break;
       }
 
-      const { fit, remainder } = splitInline(phantom, child, remainingHeight);
+      const { fit, remainder } = splitInline(phantom, child, remainingHeight, consumed === 0 ? topOverlapAllowance : 0);
       if (fit) {
         if (isOrdered) {
           fit.setAttribute('value', String(numberCursor));
@@ -332,10 +339,9 @@ export default function PaginatedMarkdown({
 
     if (!firstMain || !firstBody || !followMain || !followBody) return;
 
-    const lineHeight = computeLineHeight(firstBody);
-    if (!lineHeight) return;
-
-    const pageCapacityPx = lineHeight * 28;
+  // Compute usable capacities purely from geometry (body-to-footer distance),
+  // not by capping to a fixed number of lines. This keeps capacity aligned
+  // with the actual '.pleading-body' size visible in the preview.
     const firstMainRect = firstMain.getBoundingClientRect();
     const firstBodyRect = firstBody.getBoundingClientRect();
     const firstFooterRect = firstMain.querySelector('.page-footer')?.getBoundingClientRect();
@@ -350,9 +356,9 @@ export default function PaginatedMarkdown({
     const followOffset = followBodyRect.top - followMainRect.top;
     const rawFollowCapacity = followMainRect.height - followOffset - followFooterHeight;
 
-    const firstCapacity = Math.max(0, Math.min(pageCapacityPx, rawFirstCapacity));
-    const subsequentCapacity = Math.max(0, Math.min(pageCapacityPx, rawFollowCapacity));
-    const capacityByPage = [firstCapacity || pageCapacityPx, subsequentCapacity || pageCapacityPx];
+  const firstCapacity = Math.max(0, rawFirstCapacity);
+  const subsequentCapacity = Math.max(0, rawFollowCapacity);
+  const capacityByPage = [firstCapacity, subsequentCapacity];
 
     const phantom = followBody.cloneNode(false);
     phantom.style.position = 'absolute';
@@ -370,17 +376,172 @@ export default function PaginatedMarkdown({
     };
 
     try {
-      const blocks = Array.from(sourceBody.children);
-      const pagesHtml = [];
-      let currentHtml = [];
-      let pageIndex = 0;
-      let remaining = capacityByPage[pageIndex] || pageCapacityPx;
+      // Helper: create a sentinel element used to signal a forced page break between blocks
+      const createBreakSentinel = () => {
+        const el = document.createElement('div');
+        el.setAttribute('data-forced-break', '1');
+        el.style.display = 'none';
+        return el;
+      };
+
+      const isBreakSentinel = (node) => node?.nodeType === Node.ELEMENT_NODE && node.getAttribute?.('data-forced-break') === '1';
+
+      const hasMeaningfulContent = (el) => {
+        if (!el) return false;
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+          acceptNode: (node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              return (node.textContent && node.textContent.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+            }
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // Skip our sentinel
+              if (isBreakSentinel(node)) return NodeFilter.FILTER_SKIP;
+              // Accept any element that could render something
+              const tag = node.tagName?.toLowerCase();
+              const voids = ['br', 'img', 'hr', 'svg', 'path'];
+              if (voids.includes(tag)) return NodeFilter.FILTER_ACCEPT;
+              // Otherwise, keep walking
+              return NodeFilter.FILTER_SKIP;
+            }
+            return NodeFilter.FILTER_SKIP;
+          },
+        });
+        return !!walker.nextNode();
+      };
+
+      // Recursively split any node's subtree at occurrences of PAGE_BREAK_TOKEN,
+      // returning an array of nodes and break sentinels interleaved at boundaries.
+      const splitNodeByToken = (node) => {
+        if (!node) return [];
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent || '';
+          if (!text.includes(PAGE_BREAK_TOKEN)) {
+            return [node.cloneNode(true)];
+          }
+          const parts = text.split(PAGE_BREAK_TOKEN);
+          const out = [];
+          parts.forEach((part, i) => {
+            if (part) out.push(document.createTextNode(part));
+            if (i < parts.length - 1) out.push(createBreakSentinel());
+          });
+          return out;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const tag = (node.tagName || '').toLowerCase();
+          const isOrderedList = tag === 'ol';
+          const baseStartAttr = parseInt(node.getAttribute('start') || '1', 10);
+          const baseStart = Number.isNaN(baseStartAttr) ? 1 : baseStartAttr;
+          let globalLiCount = 0; // count li encountered in this element across segments
+
+          const cloneShell = () => node.cloneNode(false);
+          let current = cloneShell();
+          const segments = [];
+
+          const children = Array.from(node.childNodes);
+          for (let cIdx = 0; cIdx < children.length; cIdx += 1) {
+            const child = children[cIdx];
+            const childParts = splitNodeByToken(child);
+            for (let pIdx = 0; pIdx < childParts.length; pIdx += 1) {
+              const part = childParts[pIdx];
+              if (isBreakSentinel(part)) {
+                // close current segment if it has any content
+                if (hasMeaningfulContent(current)) {
+                  segments.push(current);
+                }
+                // propagate a break sentinel at this level
+                segments.push(part);
+                // start a new shell and set start for OL continuation
+                current = cloneShell();
+                if (isOrderedList) {
+                  current.setAttribute('start', String(baseStart + globalLiCount));
+                }
+              } else {
+                // Append the part to current
+                current.appendChild(part);
+                // If a full immediate LI got appended (and wasn't split), bump the counter
+                if (isOrderedList && part.nodeType === Node.ELEMENT_NODE && part.tagName?.toLowerCase() === 'li') {
+                  // Heuristic: if this LI contains no sentinel descendant, then it was not split here.
+                  const containsSentinel = part.querySelector?.('[data-forced-break="1"]');
+                  if (!containsSentinel) {
+                    globalLiCount += 1;
+                  }
+                }
+              }
+            }
+          }
+          // push trailing segment
+          if (hasMeaningfulContent(current) || segments.length === 0) {
+            segments.push(current);
+          }
+          return segments;
+        }
+        // Other node types (comments etc.)
+        return [];
+      };
+
+      // Build a block list with break sentinels interleaved
+      const rawTopLevel = Array.from(sourceBody.childNodes); // include text just in case
+      const blocks = [];
+      rawTopLevel.forEach((n) => {
+        // ignore whitespace-only text at top-level
+        if (n.nodeType === Node.TEXT_NODE && !(n.textContent || '').trim()) return;
+        const parts = splitNodeByToken(n);
+        parts.forEach((p) => {
+          if (p.nodeType === Node.TEXT_NODE) {
+            const pEl = document.createElement('p');
+            pEl.textContent = p.textContent || '';
+            blocks.push(pEl);
+          } else {
+            blocks.push(p);
+          }
+        });
+      });
+
+  const pagesHtml = [];
+  let currentHtml = [];
+  let pageIndex = 0;
+  let remaining = capacityByPage[pageIndex] || pageCapacityPx;
+  // Track previous bottom margin to account for CSS margin-collapsing
+  let lastBottomMarginPx = 0;
+  // Debug page summaries
+  const debugPages = [];
+  let currentDebugItems = [];
+  let currentPageCapacity = remaining;
+
+      // Detect if a given top-level block should act as a forced page break
+      const isPageBreakBlock = (el) => {
+        if (!el) return false;
+        const tag = (el.tagName || '').toLowerCase();
+        if (isBreakSentinel(el)) return true; // our internal sentinel
+        if (tag === 'hr') return true; // Optional: hr also forces a break
+        // If a top-level element is literally just the token text (rare), treat as break too
+        const onlyText = el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE;
+        if (onlyText) {
+          const text = el.textContent?.trim() || '';
+          if (text === PAGE_BREAK_TOKEN) return true;
+        }
+        return false;
+      };
 
       const finalizePage = () => {
+        // Push HTML for this page
         pagesHtml.push(currentHtml.join(''));
+        // Record debug info for this page
+        const used = Math.max(0, currentPageCapacity - remaining);
+        debugPages.push({
+          page: pageIndex + 1,
+          capacity: currentPageCapacity,
+          used,
+          remaining,
+          items: currentDebugItems,
+        });
+        // Reset for next page
         currentHtml = [];
+        currentDebugItems = [];
         pageIndex += 1;
         remaining = capacityByPage[Math.min(pageIndex, 1)] || pageCapacityPx;
+        currentPageCapacity = remaining;
+        lastBottomMarginPx = 0;
       };
 
       const ensureSpace = () => {
@@ -390,12 +551,41 @@ export default function PaginatedMarkdown({
 
       const processBlock = (node) => {
         if (!node) return;
+        // If this is a sentinel, finalize the page and skip rendering
+        if (isPageBreakBlock(node)) {
+          if (currentHtml.length > 0) {
+            finalizePage();
+          }
+          return;
+        }
+
         let working = node.cloneNode(true);
         while (working) {
           const height = measureElementHeight(phantom, working.cloneNode(true));
-          if (height <= remaining + MEASURE_TOLERANCE) {
+          const measuredEl = phantom.firstChild;
+          let marginTopPx = 0;
+          let marginBottomPx = 0;
+          if (measuredEl && measuredEl.nodeType === Node.ELEMENT_NODE) {
+            const cs = window.getComputedStyle(measuredEl);
+            marginTopPx = parseFloat(cs.marginTop) || 0;
+            marginBottomPx = parseFloat(cs.marginBottom) || 0;
+          }
+          const overlap = Math.min(lastBottomMarginPx, marginTopPx);
+          const effectiveHeight = height - overlap;
+          if (effectiveHeight <= remaining + MEASURE_TOLERANCE) {
             currentHtml.push(working.outerHTML);
-            remaining -= height;
+            currentDebugItems.push({
+              type: 'block',
+              tag: (working.tagName || '').toLowerCase() || '#node',
+              eff: effectiveHeight,
+              outer: height,
+              mt: marginTopPx,
+              mb: marginBottomPx,
+              overlap,
+              text: (working.textContent || '').trim().slice(0, 60),
+            });
+            remaining -= effectiveHeight;
+            lastBottomMarginPx = marginBottomPx;
             working = null;
           } else if (remaining <= MEASURE_TOLERANCE) {
             ensureSpace();
@@ -403,14 +593,14 @@ export default function PaginatedMarkdown({
             const tag = (working.tagName || '').toLowerCase();
             let splitResult = null;
             if (tag === 'p' || tag === 'blockquote' || tag === 'pre' || tag === 'code' || /^h[1-6]$/.test(tag)) {
-              splitResult = splitInlineElement(phantom, working, remaining);
+              splitResult = splitInlineElement(phantom, working, remaining, lastBottomMarginPx);
             } else if (tag === 'ul' || tag === 'ol') {
-              splitResult = splitListElement(phantom, working, remaining, splitInlineElement);
+              splitResult = splitListElement(phantom, working, remaining, splitInlineElement, lastBottomMarginPx);
             }
 
             if (!splitResult || (!splitResult.fit && !splitResult.remainder)) {
               ensureSpace();
-              const capacityLimit = capacityByPage[Math.min(pageIndex, 1)] || pageCapacityPx;
+              const capacityLimit = capacityByPage[Math.min(pageIndex, 1)] || 0;
               if (remaining === capacityLimit) {
                 if (height > capacityLimit + MEASURE_TOLERANCE) {
                   currentHtml.push(working.outerHTML);
@@ -425,8 +615,29 @@ export default function PaginatedMarkdown({
             } else {
               const { fit, remainder } = splitResult;
               if (fit) {
+                const fitHeight = measureElementHeight(phantom, fit.cloneNode(true));
+                const fitEl = phantom.firstChild;
+                let fitTop = 0; let fitBottom = 0;
+                if (fitEl && fitEl.nodeType === Node.ELEMENT_NODE) {
+                  const cs2 = window.getComputedStyle(fitEl);
+                  fitTop = parseFloat(cs2.marginTop) || 0;
+                  fitBottom = parseFloat(cs2.marginBottom) || 0;
+                }
+                const fitOverlap = Math.min(lastBottomMarginPx, fitTop);
+                const fitEffective = fitHeight - fitOverlap;
                 currentHtml.push(fit.outerHTML);
-                remaining -= measureElementHeight(phantom, fit.cloneNode(true));
+                currentDebugItems.push({
+                  type: 'fragment',
+                  tag: (fit.tagName || '').toLowerCase() || '#node',
+                  eff: fitEffective,
+                  outer: fitHeight,
+                  mt: fitTop,
+                  mb: fitBottom,
+                  overlap: fitOverlap,
+                  text: (fit.textContent || '').trim().slice(0, 60),
+                });
+                remaining -= fitEffective;
+                lastBottomMarginPx = fitBottom;
               }
               ensureSpace();
               working = remainder;
@@ -443,9 +654,32 @@ export default function PaginatedMarkdown({
 
       blocks.forEach(processBlock);
       if (currentHtml.length) {
-        pagesHtml.push(currentHtml.join(''));
+        // finalize last page too
+        finalizePage();
       }
       if (!pagesHtml.length) pagesHtml.push('');
+
+      // Produce a printable summary log of pagination
+      const round = (n) => Math.round((n + Number.EPSILON) * 10) / 10;
+      const printable = debugPages.map((p) => ({
+        page: p.page,
+        capacity: round(p.capacity),
+        used: round(p.used),
+        remaining: round(p.remaining),
+        items: p.items.map((it, idx) => ({
+          idx: idx + 1,
+          type: it.type,
+          tag: it.tag,
+          eff: round(it.eff),
+          outer: round(it.outer),
+          mt: round(it.mt),
+          mb: round(it.mb),
+          overlap: round(it.overlap),
+          text: it.text,
+        })),
+      }));
+      // eslint-disable-next-line no-console
+      console.log('test2', printable);
 
       setPages(pagesHtml);
     } finally {
@@ -482,6 +716,139 @@ export default function PaginatedMarkdown({
     } catch (_) {}
   }, [onPageCount, pages.length]);
 
+  // Hotkey: Ctrl+Shift+D to toggle debug overlays and outlines
+  useEffect(() => {
+    const onKey = (e) => {
+      try {
+        const key = (e.key || '').toLowerCase();
+        if (e.ctrlKey && e.altKey && key === 'd') {
+          e.preventDefault();
+          setDebugEnabled((v) => !v);
+        }
+      } catch (_) {}
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Debug: draw overlay rectangles for each measured block and the remaining space
+  useLayoutEffect(() => {
+    // Always clear any existing overlays first
+    Array.from(document.querySelectorAll('[data-debug-overlays]')).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    if (!debugEnabled) return () => {};
+
+    // Only run when we have rendered pages in the DOM and debug is enabled
+    const wrappers = Array.from(document.querySelectorAll('.page-wrapper'));
+    const cleanup = [];
+    wrappers.forEach((wrap) => {
+      const body = wrap.querySelector('.pleading-body');
+      const md = wrap.querySelector('.pleading-rendered-markdown');
+      if (!body || !md) return;
+
+      // Layer that holds all overlays for this page
+      const layer = document.createElement('div');
+      layer.setAttribute('data-debug-overlays', '1');
+      Object.assign(layer.style, {
+        position: 'absolute',
+        inset: '0px',
+        pointerEvents: 'none',
+        zIndex: 5,
+      });
+      body.appendChild(layer);
+      cleanup.push(() => layer.remove());
+
+      const bodyRect = body.getBoundingClientRect();
+      let prevBottomMargin = 0;
+      let lastBottom = 0;
+
+      const blocks = Array.from(md.children).filter((el) => el.nodeType === Node.ELEMENT_NODE);
+      blocks.forEach((el, idx) => {
+        const rect = el.getBoundingClientRect();
+        const cs = window.getComputedStyle(el);
+        const mt = parseFloat(cs.marginTop) || 0;
+        const mb = parseFloat(cs.marginBottom) || 0;
+        const outerHeight = rect.height + mt + mb;
+        const overlap = Math.min(prevBottomMargin, mt);
+        const effectiveHeight = outerHeight - overlap;
+
+        const topWithinBody = rect.top - bodyRect.top; // border-box top inside body
+        const overlayTop = Math.max(0, topWithinBody - overlap);
+
+        const blockOverlay = document.createElement('div');
+        Object.assign(blockOverlay.style, {
+          position: 'absolute',
+          left: '0px',
+          width: '100%',
+          top: `${overlayTop}px`,
+          height: `${Math.max(0, effectiveHeight)}px`,
+          background: 'rgba(255,0,0,0.08)',
+          border: '1px solid rgba(255,0,0,0.6)',
+          boxSizing: 'border-box',
+        });
+
+        const label = document.createElement('div');
+        label.textContent = `#${idx + 1} eff:${effectiveHeight.toFixed(1)} outer:${outerHeight.toFixed(1)} mt:${mt.toFixed(1)} mb:${mb.toFixed(1)} overlap:${overlap.toFixed(1)}`;
+        Object.assign(label.style, {
+          position: 'absolute',
+          top: `${overlayTop + 2}px`,
+          right: '2px',
+          fontSize: '10px',
+          color: '#900',
+          background: 'rgba(255,255,255,0.8)',
+          padding: '1px 3px',
+          borderRadius: '2px',
+          border: '1px solid rgba(255,0,0,0.4)'
+        });
+
+        layer.appendChild(blockOverlay);
+        layer.appendChild(label);
+
+        lastBottom = Math.max(lastBottom, overlayTop + Math.max(0, effectiveHeight));
+        prevBottomMargin = mb;
+      });
+
+      // Remaining space overlay in the body
+      const bodyHeight = body.getBoundingClientRect().height;
+      const remainingHeight = Math.max(0, bodyHeight - lastBottom);
+      if (remainingHeight > 0) {
+        const remainOverlay = document.createElement('div');
+        Object.assign(remainOverlay.style, {
+          position: 'absolute',
+          left: '0px',
+          width: '100%',
+          top: `${lastBottom}px`,
+          height: `${remainingHeight}px`,
+          background: 'rgba(0,128,255,0.08)',
+          borderTop: '2px dashed rgba(0,128,255,0.6)',
+          boxSizing: 'border-box',
+        });
+
+        const remainLabel = document.createElement('div');
+        remainLabel.textContent = `remaining:${remainingHeight.toFixed(1)}px`;
+        Object.assign(remainLabel.style, {
+          position: 'absolute',
+          top: `${lastBottom + 2}px`,
+          left: '2px',
+          fontSize: '10px',
+          color: '#085',
+          background: 'rgba(255,255,255,0.8)',
+          padding: '1px 3px',
+          borderRadius: '2px',
+          border: '1px solid rgba(0,128,255,0.4)'
+        });
+
+        layer.appendChild(remainOverlay);
+        layer.appendChild(remainLabel);
+      }
+    });
+
+    return () => {
+      cleanup.forEach((fn) => fn());
+    };
+  }, [pages, debugEnabled]);
+
   return (
     <>
       <div
@@ -498,6 +865,7 @@ export default function PaginatedMarkdown({
             pageNumber={1}
             totalPages={1}
             docDate={docDate}
+            signatureType={signatureType}
             hideHeaderBlocks={hideHeader}
             preTitleCaptions={preTitleCaptions}
             suppressTitlePlaceholder={suppressTitlePlaceholder}
@@ -518,6 +886,7 @@ export default function PaginatedMarkdown({
             pageNumber={1}
             totalPages={1}
             docDate={docDate}
+            signatureType={signatureType}
             hideHeaderBlocks={hideHeader}
             preTitleCaptions={preTitleCaptions}
             suppressTitlePlaceholder={suppressTitlePlaceholder}
@@ -546,8 +915,10 @@ export default function PaginatedMarkdown({
             pageNumber={pageOffset + pageIndex + 1}
             totalPages={typeof totalOverride === 'number' ? totalOverride : pageOffset + pages.length}
             docDate={docDate}
+            signatureType={signatureType}
             suppressTitlePlaceholder={suppressTitlePlaceholder}
             showSignature={disableSignature ? false : pageIndex === pages.length - 1}
+            debugLayout={debugEnabled}
           >
             <div
               className="pleading-rendered-markdown"

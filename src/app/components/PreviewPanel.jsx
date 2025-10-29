@@ -324,6 +324,7 @@ export default function PreviewPanel({
                 heading={headingSettings}
                 title={fragment.title}
                 docDate={docDate}
+                signatureType={fragment.signatureType || 'default'}
                 pageOffset={cursor}
                 totalOverride={globalTotalPages}
                 onPageCount={(n) => setMdCounts((prev) => (prev[fragment.id] === n ? prev : { ...prev, [fragment.id]: n }))}
@@ -555,6 +556,7 @@ export default function PreviewPanel({
                   heading={headingSettings}
                   title={frag.title}
                   docDate={docDate}
+                  signatureType={frag.signatureType || 'default'}
                   pageOffset={overlayOffset}
                   totalOverride={globalTotalPages}
                   onPageCount={(n) => setMdCounts((prev) => (prev[frag.id] === n ? prev : { ...prev, [frag.id]: n }))}

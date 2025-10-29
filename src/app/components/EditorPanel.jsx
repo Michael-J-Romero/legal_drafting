@@ -7,6 +7,8 @@ import InlineEditorPanel from './InlineEditorPanel';
 import ExhibitsEditorPanel from './ExhibitsEditorPanel';
 
 export default function EditorPanel({
+  docTitle,
+  setDocTitle,
   docDate,
   setDocDate,
   headingExpanded,
@@ -38,7 +40,6 @@ export default function EditorPanel({
   onPdfReplace,
   onAddPdfSection,
   onAddExhibitsSection,
-  scrollToAnchor,
 }) {
   // Add state for popup menu
   const [showAddMenu, setShowAddMenu] = React.useState(false);
@@ -73,6 +74,18 @@ export default function EditorPanel({
   return (
     <aside className="editor-panel">
       <h1>Document Builder</h1>
+
+      <div className="card">
+        <label htmlFor="doc-title-input">Document title</label>
+        <input
+          id="doc-title-input"
+          type="text"
+          className="heading-input"
+          value={docTitle}
+          onChange={(e) => setDocTitle(e.target.value)}
+          placeholder="Untitled document"
+        />
+      </div>
 
       <div className="card">
         <label htmlFor="doc-date-input">Document date (applies to all sections)</label>
@@ -177,7 +190,7 @@ export default function EditorPanel({
             onRemove={onRemove}
             onInsertBefore={onInsertBefore}
             onInsertAfter={onInsertAfter}
-            onItemClick={(frag) => { setEditingFragmentId(frag.id); if (scrollToAnchor) scrollToAnchor(`anchor-section-${frag.id}`); }}
+            onItemClick={(frag) => setEditingFragmentId(frag.id)}
             onPdfReplace={onPdfReplace}
           />
         </div>
@@ -188,7 +201,6 @@ export default function EditorPanel({
             onCancel={() => setEditingFragmentId(null)}
             onChange={onEditFragmentFields}
             onDelete={() => onDeleteEditingFragment(editingFragmentId)}
-            onJumpToAnchor={scrollToAnchor}
           />
         ) : (
           <InlineEditorPanel

@@ -6,7 +6,7 @@ import { formatDisplayDate } from '../lib/date';
 // Local constant for visual line numbers on pleading paper
 const PLEADING_LINE_COUNT = 28;
 
-export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null }) {
+export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, signatureType = 'default', hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null, debugLayout = false }) {
   const {
     leftFields = [],
     rightFields = [],
@@ -18,6 +18,11 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
   const normalizedLeft = leftFields.filter((value) => value.trim());
   const normalizedRight = rightFields.filter((value) => value.trim());
   const upperTitle = (title || '').trim().toUpperCase();
+  const debugMainStyle = debugLayout ? { outline: '2px dashed rgba(255,0,0,0.6)' } : undefined;
+  const debugBodyStyle = debugLayout ? { outline: '2px solid rgba(255,0,0,0.9)', position: 'relative' } : undefined;
+  const debugFooterStyle = debugLayout ? { outline: '2px dotted rgba(255,0,0,0.7)' } : undefined;
+  const debugHeaderStyle = debugLayout ? { outline: '1px dashed rgba(255,0,0,0.3)' } : undefined;
+
   return (
     <div className="page-surface markdown-fragment">
       <div className="pleading-paper">
@@ -26,10 +31,10 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
             <span key={`line-${index}`}>{index + 1}</span>
           ))}
         </div>
-        <div className="pleading-main">
+        <div className="pleading-main" style={debugMainStyle}>
           {firstPage && !hideHeaderBlocks && (
             <>
-              <header className="pleading-header">
+              <header className="pleading-header" style={debugHeaderStyle}>
                 <div className="pleading-contact">
                   {normalizedLeft.length ? (
                     normalizedLeft.map((value, index) => (
@@ -97,28 +102,40 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
             </>
           )}
 
-          <div className="pleading-body">{children}</div>
+          <div className="pleading-body" style={debugBodyStyle}>{children}</div>
           {(showSignature === true || (showSignature === null && pageNumber === totalPages)) && (
-            <div className="signature-row">
-              <div className="signature-date">Date: {formatDisplayDate(docDate)}</div>
-              <div className="signature-line">
-                <span className="signature-label">Signature:</span>
-                <img
-                  src="/sig.png"
-                  alt="Signature"
-                  className="signature-image"
-                  onError={(e) => {
-                    // Fallback to existing asset name if user's sig.png isn't present
-                    if (e.currentTarget && e.currentTarget.getAttribute('src') !== '/signature.png') {
-                      e.currentTarget.setAttribute('src', '/signature.png');
-                    }
-                  }}
-                />
-              </div>
-              <div className="signature-printed-name">{(plaintiffName || 'Michael James Romero').trim()}, Plaintiff in Pro Per</div>
-            </div>
+            <>
+              <div className="signature-gap" aria-hidden />
+              {signatureType === 'proposed-order' ? (
+                <div className="signature-row signature-po">
+                  <div className="po-ordered">IT IS SO ORDERED.</div>
+                  <div className="po-dated">Dated: ________________</div>
+                  <div className="po-judge-line">__________________________________</div>
+                  <div className="po-judge-title">JUDGE OF THE SUPERIOR COURT</div>
+                </div>
+              ) : (
+                <div className="signature-row">
+                  <div className="signature-date">Dated: {formatDisplayDate(docDate)}</div>
+                  <div className="signature-line">
+                    <span className="signature-label">Signature:</span>
+                    <img
+                      src="/sig.png"
+                      alt="Signature"
+                      className="signature-image"
+                      onError={(e) => {
+                        // Fallback to existing asset name if user's sig.png isn't present
+                        if (e.currentTarget && e.currentTarget.getAttribute('src') !== '/signature.png') {
+                          e.currentTarget.setAttribute('src', '/signature.png');
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="signature-printed-name">{(plaintiffName || 'Michael James Romero').trim()}, Plaintiff in Pro Per</div>
+                </div>
+              )}
+            </>
           )}
-          <div className="page-footer" aria-hidden>
+          <div className="page-footer" aria-hidden style={debugFooterStyle}>
             <span>
               Page {pageNumber} of {totalPages}
             </span>

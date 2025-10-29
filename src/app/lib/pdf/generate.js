@@ -14,7 +14,7 @@ export const PLEADING_LINE_COUNT = 28;
 export const PLEADING_BODY_LINE_HEIGHT =
   (LETTER_HEIGHT - PLEADING_TOP_MARGIN - PLEADING_BOTTOM_MARGIN) / PLEADING_LINE_COUNT;
 
-export async function appendMarkdownFragment(pdfDoc, content, heading, fragmentTitle, docDate, formatDisplayDate) {
+export async function appendMarkdownFragment(pdfDoc, content, heading, fragmentTitle, docDate, formatDisplayDate, signatureType = 'default') {
   const clean = removeMarkdown(content || '').trim();
   const {
     leftFields = [],
@@ -286,74 +286,120 @@ export async function appendMarkdownFragment(pdfDoc, content, heading, fragmentT
     page = preparePage();
     cursorY = LETTER_HEIGHT - PLEADING_TOP_MARGIN;
   }
-  const sigDate = typeof formatDisplayDate === 'function' ? formatDisplayDate(docDate) : (docDate || '__________');
-  const dateLabel = `Date: ${sigDate}`;
-  const sigLabelText = 'Signature:';
-  const dateY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 2;
-  const sigY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 1;
-  page.drawText(dateLabel, { x: textLeftX, y: dateY, size: 11, font: footerFont });
+  if ((signatureType || 'default') === 'proposed-order') {
+    // Proposed Order variant: 4 lines, no image, no plaintiff name
+    // Lines from top to bottom within the reserved block
+    let orderedY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 3;
+    let datedY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 2;
+    let judgeLineY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 1;
+    let judgeTitleY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 0;
 
-  // Try to draw image signature next to the label; fallback to underline if unavailable
-  const labelWidth = footerFont.widthOfTextAtSize(sigLabelText, 11) + 8;
-  let drewImageSignature = false;
-  try {
-    // Helper: fetch signature bytes, prefer /sig.png then /signature.png
-    const fetchSig = async (path) => {
-      try {
-        const res = await fetch(path);
-        if (!res || !res.ok) return null;
-        const mime = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
-        const buf = await res.arrayBuffer();
-        return { bytes: new Uint8Array(buf), mime };
-      } catch (_) {
-        return null;
-      }
-    };
-    let sig = await fetchSig('/sig.png');
-    if (!sig) sig = await fetchSig('/signature.png');
-    if (sig && sig.bytes && sig.bytes.length) {
-      let img = null;
-      const mime = (sig.mime || '').toLowerCase();
-      try {
-        if (mime.includes('png') || !mime) {
-          img = await pdfDoc.embedPng(sig.bytes);
-        } else if (mime.includes('jpeg') || mime.includes('jpg')) {
-          img = await pdfDoc.embedJpg(sig.bytes);
-        } else {
-          // Try PNG first then JPG as a fallback
-          try { img = await pdfDoc.embedPng(sig.bytes); } catch (_) { img = await pdfDoc.embedJpg(sig.bytes); }
-        }
-      } catch (_) {
-        img = null;
-      }
-      if (img) {
-        // Draw the label, then image scaled to ~2.5in width (180pt) preserving aspect ratio
-        page.drawText(sigLabelText, { x: textLeftX, y: sigY, size: 11, font: footerFont });
-        const targetW = 180; // 2.5 inches
-        const scale = Math.min(1, targetW / img.width);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        const xImg = textLeftX + labelWidth;
-        const yImg = sigY - h + 10; // nudge so baseline aligns visually
-        page.drawImage(img, { x: xImg, y: yImg, width: w, height: h });
-        drewImageSignature = true;
+    // Cap gap based on the top of the block (orderedY)
+    const MAX_SIGNATURE_GAP_PT = 72 * 1.0;
+    const currentGap = Math.max(0, cursorY - orderedY);
+    if (currentGap > MAX_SIGNATURE_GAP_PT) {
+      const delta = currentGap - MAX_SIGNATURE_GAP_PT;
+      orderedY += delta;
+      datedY += delta;
+      judgeLineY += delta;
+      judgeTitleY += delta;
+      const maxTopY = cursorY - PLEADING_BODY_LINE_HEIGHT * 0.5;
+      if (orderedY > maxTopY) {
+        const overshoot = orderedY - maxTopY;
+        orderedY -= overshoot;
+        datedY -= overshoot;
+        judgeLineY -= overshoot;
+        judgeTitleY -= overshoot;
       }
     }
-  } catch (_) {
-    // ignore and fallback
-  }
-  if (!drewImageSignature) {
-    // Fallback to text line if image isn't available
-    const sigFallback = 'Signature: ______________________________';
-    page.drawText(sigFallback, { x: textLeftX, y: sigY, size: 11, font: footerFont });
-  }
-  // Printed name after the signature
-  try {
-    const printedName = `${(plaintiffName && plaintiffName.trim()) || 'Michael James Romero'}, Plaintiff in Pro Per`;
-    const nameY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 0; // bottom-most reserved line
-    page.drawText(printedName, { x: textLeftX, y: nameY, size: 11, font: footerFont });
-  } catch (_) {
-    // ignore
+
+    page.drawText('IT IS SO ORDERED.', { x: textLeftX, y: orderedY, size: 11, font: footerFont });
+    page.drawText('Dated: ________________', { x: textLeftX, y: datedY, size: 11, font: footerFont });
+    page.drawText('__________________________________', { x: textLeftX, y: judgeLineY, size: 11, font: footerFont });
+    page.drawText('JUDGE OF THE SUPERIOR COURT', { x: textLeftX, y: judgeTitleY, size: 11, font: footerFont });
+  } else {
+    const sigDate = typeof formatDisplayDate === 'function' ? formatDisplayDate(docDate) : (docDate || '__________');
+    const dateLabel = `Date: ${sigDate}`;
+    const sigLabelText = 'Signature:';
+    let dateY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 2;
+    let sigY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 1;
+    let nameY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 0;
+
+    // Cap the visual gap between the end of body content (cursorY) and the signature block
+    const MAX_SIGNATURE_GAP_PT = 72 * 1.0;
+    const currentGap = Math.max(0, cursorY - dateY);
+    if (currentGap > MAX_SIGNATURE_GAP_PT) {
+      const delta = currentGap - MAX_SIGNATURE_GAP_PT;
+      dateY += delta;
+      sigY += delta;
+      nameY += delta;
+      const maxDateY = cursorY - PLEADING_BODY_LINE_HEIGHT * 0.5;
+      if (dateY > maxDateY) {
+        const overshoot = dateY - maxDateY;
+        dateY -= overshoot;
+        sigY -= overshoot;
+        nameY -= overshoot;
+      }
+    }
+    page.drawText(dateLabel, { x: textLeftX, y: dateY, size: 11, font: footerFont });
+
+    // Try to draw image signature next to the label; fallback to underline if unavailable
+    const labelWidth = footerFont.widthOfTextAtSize(sigLabelText, 11) + 8;
+    let drewImageSignature = false;
+    try {
+      // Helper: fetch signature bytes, prefer /sig.png then /signature.png
+      const fetchSig = async (path) => {
+        try {
+          const res = await fetch(path);
+          if (!res || !res.ok) return null;
+          const mime = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+          const buf = await res.arrayBuffer();
+          return { bytes: new Uint8Array(buf), mime };
+        } catch (_) {
+          return null;
+        }
+      };
+      let sig = await fetchSig('/sig.png');
+      if (!sig) sig = await fetchSig('/signature.png');
+      if (sig && sig.bytes && sig.bytes.length) {
+        let img = null;
+        const mime = (sig.mime || '').toLowerCase();
+        try {
+          if (mime.includes('png') || !mime) {
+            img = await pdfDoc.embedPng(sig.bytes);
+          } else if (mime.includes('jpeg') || mime.includes('jpg')) {
+            img = await pdfDoc.embedJpg(sig.bytes);
+          } else {
+            try { img = await pdfDoc.embedPng(sig.bytes); } catch (_) { img = await pdfDoc.embedJpg(sig.bytes); }
+          }
+        } catch (_) {
+          img = null;
+        }
+        if (img) {
+          page.drawText(sigLabelText, { x: textLeftX, y: sigY, size: 11, font: footerFont });
+          const targetW = 180; // 2.5 inches
+          const scale = Math.min(1, targetW / img.width);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          const xImg = textLeftX + labelWidth;
+          const yImg = sigY - h + 10;
+          page.drawImage(img, { x: xImg, y: yImg, width: w, height: h });
+          drewImageSignature = true;
+        }
+      }
+    } catch (_) {
+      // ignore and fallback
+    }
+    if (!drewImageSignature) {
+      const sigFallback = 'Signature: ______________________________';
+      page.drawText(sigFallback, { x: textLeftX, y: sigY, size: 11, font: footerFont });
+    }
+    try {
+      const printedName = `${(plaintiffName && plaintiffName.trim()) || 'Michael James Romero'}, Plaintiff in Pro Per`;
+      page.drawText(printedName, { x: textLeftX, y: nameY, size: 11, font: footerFont });
+    } catch (_) {
+      // ignore
+    }
   }
 }
 

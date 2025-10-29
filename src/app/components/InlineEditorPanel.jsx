@@ -38,6 +38,18 @@ function InlineEditorPanel({ fragment, onCancel, onChange, onDelete }) {
           value={fragment.title || ''}
           onChange={(e) => onChange && onChange(fragment.id, { title: e.target.value })}
         />
+        <div>
+          <label className="heading-label" htmlFor="section-signature-type">Signature type</label>
+          <select
+            id="section-signature-type"
+            className="heading-input"
+            value={(fragment.signatureType || 'default')}
+            onChange={(e) => onChange && onChange(fragment.id, { signatureType: e.target.value })}
+          >
+            <option value="default">Default</option>
+            <option value="proposed-order">Proposed order</option>
+          </select>
+        </div>
         <textarea
           className="markdown-editor editor-fullscreen-textarea"
           placeholder="## Title\n\nDraft your content here..."

@@ -54,6 +54,7 @@ function ensureFragment(fragment) {
     type: 'markdown',
     title: ensureString(fragment.title),
     content: ensureString(fragment.content),
+    signatureType: ensureString(fragment.signatureType),
   };
 }
 
@@ -61,6 +62,7 @@ export function ensureSnapshot(snapshot, fallback = {}) {
   const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const fallbackFragments = ensureArray(fallback.fragments, []);
   return {
+    docTitle: ensureString(base.docTitle, fallback.docTitle),
     docDate: ensureString(base.docDate, fallback.docDate),
     leftHeadingFields: ensureArray(base.leftHeadingFields, fallback.leftHeadingFields || []).map((line) => ensureString(line)),
     rightHeadingFields: ensureArray(base.rightHeadingFields, fallback.rightHeadingFields || []).map((line) => ensureString(line)),
@@ -95,7 +97,7 @@ export function snapshotForStorage(snapshot) {
                 isGroupHeader: Boolean(ex.isGroupHeader),
               })),
             }
-          : { id: fragment.id, type: 'markdown', title: fragment.title, content: fragment.content }
+          : { id: fragment.id, type: 'markdown', title: fragment.title, content: fragment.content, signatureType: ensureString(fragment.signatureType) }
     )),
   };
 }

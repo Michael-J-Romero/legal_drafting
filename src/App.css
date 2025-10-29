@@ -654,20 +654,28 @@ button:not(:disabled):active {
 }
 
 .pleading-body {
-  flex: 1;
+  /* Let body size to its content so we can control the gap above the signature */
+  flex: 0 0 auto;
   /* margin-top: 0.05in; */
   display: flex;
   flex-direction: column;
   color: #111827;
 }
 
+/* Gap limiter above signature: takes leftover space up to a max, then stops */
+.signature-gap {
+  flex: 1 1 auto;
+  max-height: var(--signature-max-gap, 1in);
+}
+
 /* Signature row appears above the page footer on the last page */
 .signature-row {
-  margin-top: auto;
-  margin-bottom: 0.5in; /* reserve space so footer never overlaps */
+  /* margin-top is controlled by the flexible signature-gap above */
+  margin-top: 0;
+  margin-bottom: 0.3in;  
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.08in;
+  /* grid-template-columns: 1fr; */
+  gap: 0.0in;
   padding-top: 0.08in;
 }
 .signature-date,
@@ -694,6 +702,29 @@ button:not(:disabled):active {
   width: auto;
   object-fit: contain;
   image-rendering: -webkit-optimize-contrast;
+}
+
+/* Proposed Order variant */
+.signature-po .po-ordered,
+.signature-po .po-dated,
+.signature-po .po-judge-line,
+.signature-po .po-judge-title {
+  font-size: 11pt;
+  line-height: 1.2;
+}
+.signature-po .po-ordered {
+  font-weight: 700;
+  margin-bottom: 0.04in;
+}
+.signature-po .po-dated {
+  margin: 0.04in 0;
+}
+.signature-po .po-judge-line {
+  margin-top: 0.08in;
+}
+.signature-po .po-judge-title {
+  margin-top: 0.02in;
+  font-weight: 700;
 }
 
 .pleading-body p {

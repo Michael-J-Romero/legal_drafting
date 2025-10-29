@@ -53,6 +53,7 @@ function syncFragmentCounterFromList(fragments) {
 
 function createInitialDocState() {
   return {
+    docTitle: '',
     docDate: (() => {
       try {
         return new Date().toISOString().slice(0, 10);
@@ -108,6 +109,7 @@ export default function App() {
   const [editingFragmentId, setEditingFragmentId] = useState(null);
 
   const {
+    docTitle,
     docDate,
     leftHeadingFields,
     rightHeadingFields,
@@ -174,6 +176,15 @@ export default function App() {
       return { ...current, docDate: nextValue };
     });
   }, [mark, updatePresent]);
+
+  const setDocTitle = useCallback((valueOrUpdater) => {
+    mark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.docTitle) : valueOrUpdater;
+      return { ...current, docTitle: nextValue };
+    });
+  }, [mark, updatePresent]);
+
 
   const setPlaintiffName = useCallback((valueOrUpdater) => {
     maybeMark();
@@ -269,7 +280,7 @@ export default function App() {
   }, [updatePresent, mark]);
 
   // react-to-print v3: use `contentRef` instead of the deprecated `content` callback
-  const handlePrint = useReactToPrint({ contentRef: previewRef, documentTitle: PRINT_DOCUMENT_TITLE });
+  const handlePrint = useReactToPrint({ contentRef: previewRef, documentTitle: (docTitle && docTitle.trim()) || PRINT_DOCUMENT_TITLE });
  
   const handleReorderFragments = useCallback((fromIndex, toIndex) => {
     if (fromIndex === toIndex) return;
@@ -535,6 +546,7 @@ export default function App() {
     const doc = parsed && parsed.doc ? parsed.doc : parsed; // allow raw doc or wrapped
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.fragments)) throw new Error('Invalid format: missing fragments');
     const safeDoc = {
+      docTitle: typeof doc.docTitle === 'string' ? doc.docTitle : '',
       docDate: doc.docDate || '',
       leftHeadingFields: Array.isArray(doc.leftHeadingFields) ? doc.leftHeadingFields : [],
       rightHeadingFields: Array.isArray(doc.rightHeadingFields) ? doc.rightHeadingFields : [],
@@ -600,7 +612,9 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'legal-drafting-document.json';
+      const raw = (clone.docTitle || '').trim();
+      const base = raw ? raw.replace(/[^\w\s-]+/g, '').replace(/[\s]+/g, '-').replace(/-+/g, '-').slice(0, 80) : 'legal-drafting-document';
+      a.download = `${base}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -619,6 +633,7 @@ export default function App() {
 
       // Minimal shape sanitization
       const safeDoc = {
+        docTitle: typeof doc.docTitle === 'string' ? doc.docTitle : '',
         docDate: doc.docDate || '',
         leftHeadingFields: Array.isArray(doc.leftHeadingFields) ? doc.leftHeadingFields : [],
         rightHeadingFields: Array.isArray(doc.rightHeadingFields) ? doc.rightHeadingFields : [],
@@ -661,7 +676,7 @@ export default function App() {
 
     for (const fragment of fragments) {
       if (fragment.type === 'markdown') {
-        await appendMarkdownFragmentPdf(pdfDoc, fragment.content, headingSettings, fragment.title, docDate, formatDisplayDate);
+        await appendMarkdownFragmentPdf(pdfDoc, fragment.content, headingSettings, fragment.title, docDate, formatDisplayDate, fragment.signatureType || 'default');
       } else if (fragment.type === 'pdf') {
         let bytes = null;
         if (fragment.data) {
@@ -842,6 +857,8 @@ export default function App() {
   return (
     <div className="app-shell">
       <EditorPanel
+        docTitle={docTitle}
+        setDocTitle={setDocTitle}
         docDate={docDate}
         setDocDate={setDocDate}
         headingExpanded={headingExpanded}
