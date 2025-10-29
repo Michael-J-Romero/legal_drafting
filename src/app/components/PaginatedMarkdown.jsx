@@ -68,7 +68,7 @@ export default function PaginatedMarkdown({
   }, []);
 
   const splitInlineElement = useCallback(
-    (phantom, element, allowedHeight) => {
+    (phantom, element, allowedHeight, nextPageCapacity = null) => {
       if (!phantom || !element) return { fit: null, remainder: element };
 
       const clone = element.cloneNode(true);
@@ -77,6 +77,7 @@ export default function PaginatedMarkdown({
       const computed = window.getComputedStyle(clone);
       const marginTop = parseFloat(computed.marginTop) || 0;
       if (allowedHeight <= marginTop + MEASURE_TOLERANCE) {
+        console.log(`test1: [splitInlineElement] Not enough space for margin (${marginTop.toFixed(2)}px)`);
         return { fit: null, remainder: element };
       }
 
@@ -87,11 +88,15 @@ export default function PaginatedMarkdown({
         : computeLineHeight(clone);
 
       if (!resolvedLineHeight || resolvedLineHeight <= 0) {
+        console.log(`test1: [splitInlineElement] Could not determine line height`);
         return { fit: null, remainder: element };
       }
 
       const maxLines = Math.floor((availableContent + MEASURE_TOLERANCE) / resolvedLineHeight);
+      console.log(`test1: [splitInlineElement] Line height: ${resolvedLineHeight.toFixed(2)}px, Available space: ${availableContent.toFixed(2)}px, Max lines that fit: ${maxLines}`);
+      
       if (maxLines <= 0) {
+        console.log(`test1: [splitInlineElement] No lines can fit`);
         return { fit: null, remainder: element };
       }
 
@@ -194,12 +199,18 @@ export default function PaginatedMarkdown({
       }
 
       const totalLines = lineBoundaries.length;
+      console.log(`test1: [splitInlineElement] Total lines in element: ${totalLines}, Max lines that fit: ${maxLines}`);
+      
       if (totalLines <= maxLines) {
+        console.log(`test1: [splitInlineElement] ✓ All lines fit on current page`);
         return { fit: element, remainder: null };
       }
 
+      console.log(`test1: [splitInlineElement] Need to split: ${maxLines} lines on current page, ${totalLines - maxLines} lines to next page`);
+
       const boundary = lineBoundaries[Math.max(0, maxLines - 1)];
       if (!boundary) {
+        console.log(`test1: [splitInlineElement] Could not find boundary for splitting`);
         return { fit: null, remainder: element };
       }
 
@@ -222,8 +233,64 @@ export default function PaginatedMarkdown({
       remainderElement.style.marginTop = '0px';
 
       if (!remainderElement.textContent?.trim()) {
+        console.log(`test1: [splitInlineElement] Remainder is empty after split`);
         return { fit: fitElement, remainder: null };
       }
+
+      // Check for widow prevention: ensure remainder has at least 2 lines
+      if (nextPageCapacity !== null && resolvedLineHeight > 0) {
+        // Count lines in remainder by measuring it
+        phantom.replaceChildren(remainderElement.cloneNode(true));
+        const remainderClone = phantom.firstChild;
+        if (remainderClone) {
+          const remainderStyle = window.getComputedStyle(remainderClone);
+          const remainderMarginTop = parseFloat(remainderStyle.marginTop) || 0;
+          const remainderMarginBottom = parseFloat(remainderStyle.marginBottom) || 0;
+          const remainderRect = remainderClone.getBoundingClientRect();
+          const remainderContentHeight = remainderRect.height - remainderMarginTop - remainderMarginBottom;
+          const estimatedRemainderLines = Math.round(remainderContentHeight / resolvedLineHeight);
+          
+          console.log(`test1: [splitInlineElement] Widow check - remainder has ~${estimatedRemainderLines} lines`);
+          
+          // If remainder would be only 1 line (widow), try to move one more line to it
+          if (estimatedRemainderLines < 2 && maxLines > 1) {
+            console.log(`test1: [splitInlineElement] ⚠ Widow detected! Adjusting split to move one more line to next page`);
+            // Try splitting at one line earlier
+            const newBoundary = lineBoundaries[Math.max(0, maxLines - 2)];
+            if (newBoundary) {
+              const newFitRange = document.createRange();
+              newFitRange.setStart(clone, 0);
+              newFitRange.setEnd(newBoundary.node, newBoundary.offset);
+              const newFitFragment = newFitRange.cloneContents();
+
+              const newRemainderRange = document.createRange();
+              newRemainderRange.setStart(newBoundary.node, newBoundary.offset);
+              newRemainderRange.setEnd(clone, clone.childNodes.length);
+              const newRemainderFragment = newRemainderRange.cloneContents();
+
+              const newFitElement = element.cloneNode(false);
+              newFitElement.appendChild(newFitFragment);
+              newFitElement.style.marginBottom = '0px';
+
+              const newRemainderElement = element.cloneNode(false);
+              newRemainderElement.appendChild(newRemainderFragment);
+              newRemainderElement.style.marginTop = '0px';
+
+              if (newRemainderElement.textContent?.trim()) {
+                console.log(`test1: [splitInlineElement] ✓ Adjusted split: ${maxLines - 1} lines on current page, ${totalLines - (maxLines - 1)} lines on next page`);
+                if (newRemainderElement.tagName?.toLowerCase() === 'p') {
+                  newRemainderElement.classList.add(CONTINUED_BLOCK_CLASS);
+                }
+                return { fit: newFitElement, remainder: newRemainderElement };
+              }
+            }
+          } else {
+            console.log(`test1: [splitInlineElement] ✓ No widow - remainder has sufficient lines`);
+          }
+        }
+      }
+
+      console.log(`test1: [splitInlineElement] Final split: ${maxLines} lines on current page, ${totalLines - maxLines} lines on next page`);
 
       if (remainderElement.tagName?.toLowerCase() === 'p') {
         remainderElement.classList.add(CONTINUED_BLOCK_CLASS);
@@ -234,7 +301,7 @@ export default function PaginatedMarkdown({
     [computeLineHeight, measureElementHeight],
   );
 
-  const splitListElement = useCallback((phantom, element, allowedHeight, splitInline) => {
+  const splitListElement = useCallback((phantom, element, allowedHeight, splitInline, nextPageCapacity = null) => {
     if (!phantom || !element) return { fit: null, remainder: element };
     const computed = window.getComputedStyle(element);
     const marginTop = parseFloat(computed.marginTop) || 0;
@@ -283,7 +350,7 @@ export default function PaginatedMarkdown({
         break;
       }
 
-      const { fit, remainder } = splitInline(phantom, child, remainingHeight);
+      const { fit, remainder } = splitInline(phantom, child, remainingHeight, nextPageCapacity);
       if (fit) {
         if (isOrdered) {
           fit.setAttribute('value', String(numberCursor));
@@ -354,6 +421,13 @@ export default function PaginatedMarkdown({
     const subsequentCapacity = Math.max(0, Math.min(pageCapacityPx, rawFollowCapacity));
     const capacityByPage = [firstCapacity || pageCapacityPx, subsequentCapacity || pageCapacityPx];
 
+    console.log(`test1: ===== Starting pagination =====`);
+    console.log(`test1: Line height: ${lineHeight.toFixed(2)}px, Target capacity: ${pageCapacityPx.toFixed(2)}px (28 lines)`);
+    console.log(`test1: First page capacity: ${capacityByPage[0].toFixed(2)}px`);
+    console.log(`test1: Subsequent page capacity: ${capacityByPage[1].toFixed(2)}px`);
+    console.log(`test1: Total blocks to process: ${sourceBody.children.length}`);
+    console.log(`test1: ================================`);
+
     const phantom = followBody.cloneNode(false);
     phantom.style.position = 'absolute';
     phantom.style.visibility = 'hidden';
@@ -388,27 +462,74 @@ export default function PaginatedMarkdown({
         finalizePage();
       };
 
-      const processBlock = (node) => {
+      const processBlock = (node, blockIndex, allBlocks) => {
         if (!node) return;
         let working = node.cloneNode(true);
+        const tag = (working.tagName || '').toLowerCase();
+        const isHeading = /^h[1-6]$/.test(tag);
+        
+        const elementText = (node.textContent || '').substring(0, 50).replace(/\n/g, ' ');
+        console.log(`test1: ===== Processing block ${blockIndex}: ${tag} - "${elementText}..." =====`);
+        console.log(`test1: Page ${pageIndex + 1}, Remaining space: ${remaining.toFixed(2)}px`);
+        
+        // Check for consecutive headings that should stay together
+        let consecutiveHeadings = [];
+        if (isHeading) {
+          consecutiveHeadings.push(node);
+          // Look ahead for consecutive headings
+          for (let i = blockIndex + 1; i < allBlocks.length; i += 1) {
+            const nextBlock = allBlocks[i];
+            const nextTag = (nextBlock.tagName || '').toLowerCase();
+            if (/^h[1-6]$/.test(nextTag)) {
+              consecutiveHeadings.push(nextBlock);
+            } else {
+              break;
+            }
+          }
+        }
+        
+        // If we have consecutive headings, check if they should move together
+        if (consecutiveHeadings.length > 1 && currentHtml.length > 0) {
+          console.log(`test1: Found ${consecutiveHeadings.length} consecutive headings`);
+          // Calculate total height of consecutive headings
+          let totalHeadingHeight = 0;
+          for (const heading of consecutiveHeadings) {
+            totalHeadingHeight += measureElementHeight(phantom, heading.cloneNode(true));
+          }
+          console.log(`test1: Total heading height: ${totalHeadingHeight.toFixed(2)}px, Remaining: ${remaining.toFixed(2)}px`);
+          
+          // If headings don't fit on current page, move them all to next page
+          if (totalHeadingHeight > remaining + MEASURE_TOLERANCE) {
+            console.log(`test1: Moving ${consecutiveHeadings.length} consecutive headings to next page`);
+            ensureSpace();
+          }
+        }
+        
         while (working) {
           const height = measureElementHeight(phantom, working.cloneNode(true));
+          const nextPageCapacity = capacityByPage[Math.min(pageIndex + 1, 1)] || pageCapacityPx;
+          
+          console.log(`test1: Element height: ${height.toFixed(2)}px, Remaining: ${remaining.toFixed(2)}px`);
+          
           if (height <= remaining + MEASURE_TOLERANCE) {
+            console.log(`test1: ✓ Element fits on current page`);
             currentHtml.push(working.outerHTML);
             remaining -= height;
             working = null;
           } else if (remaining <= MEASURE_TOLERANCE) {
+            console.log(`test1: No space remaining, moving to next page`);
             ensureSpace();
           } else {
-            const tag = (working.tagName || '').toLowerCase();
+            console.log(`test1: Element doesn't fit, attempting to split...`);
             let splitResult = null;
             if (tag === 'p' || tag === 'blockquote' || tag === 'pre' || tag === 'code' || /^h[1-6]$/.test(tag)) {
-              splitResult = splitInlineElement(phantom, working, remaining);
+              splitResult = splitInlineElement(phantom, working, remaining, nextPageCapacity);
             } else if (tag === 'ul' || tag === 'ol') {
-              splitResult = splitListElement(phantom, working, remaining, splitInlineElement);
+              splitResult = splitListElement(phantom, working, remaining, splitInlineElement, nextPageCapacity);
             }
 
             if (!splitResult || (!splitResult.fit && !splitResult.remainder)) {
+              console.log(`test1: Split failed, moving entire element to next page`);
               ensureSpace();
               const capacityLimit = capacityByPage[Math.min(pageIndex, 1)] || pageCapacityPx;
               if (remaining === capacityLimit) {
@@ -425,23 +546,29 @@ export default function PaginatedMarkdown({
             } else {
               const { fit, remainder } = splitResult;
               if (fit) {
+                const fitHeight = measureElementHeight(phantom, fit.cloneNode(true));
+                console.log(`test1: ✓ Split successful - fit portion height: ${fitHeight.toFixed(2)}px`);
                 currentHtml.push(fit.outerHTML);
-                remaining -= measureElementHeight(phantom, fit.cloneNode(true));
+                remaining -= fitHeight;
               }
               ensureSpace();
               working = remainder;
               if (working && !working.textContent?.trim()) {
+                console.log(`test1: Remainder is empty, discarding`);
                 working = null;
+              } else if (working) {
+                console.log(`test1: Processing remainder on next page...`);
               }
             }
           }
           if (remaining <= MEASURE_TOLERANCE && working === null && currentHtml.length) {
+            console.log(`test1: Finalizing page ${pageIndex + 1}`);
             finalizePage();
           }
         }
       };
 
-      blocks.forEach(processBlock);
+      blocks.forEach((block, index) => processBlock(block, index, blocks));
       if (currentHtml.length) {
         pagesHtml.push(currentHtml.join(''));
       }
