@@ -22,6 +22,12 @@ const MARKDOWN_COMPONENTS = {
 
 const CONTINUATION_CLASS = 'pleading-continued-li';
 
+const snapToLineHeight = (value, lineHeight) => {
+  if (!lineHeight) return value;
+  if (value <= 0) return 0;
+  return Math.ceil(value / lineHeight) * lineHeight;
+};
+
 // Paginate Markdown across multiple pleading pages for on-screen preview
 export default function PaginatedMarkdown({
   content,
@@ -66,7 +72,7 @@ export default function PaginatedMarkdown({
     return rect.height + marginTop + marginBottom;
   }, []);
 
-  const splitInlineElement = useCallback((phantom, element, allowedHeight) => {
+  const splitInlineElement = useCallback((phantom, element, allowedHeight, lineHeight) => {
     if (!phantom || !element) return { fit: null, remainder: element };
     const clone = element.cloneNode(true);
     phantom.replaceChildren(clone);
@@ -76,6 +82,15 @@ export default function PaginatedMarkdown({
       return { fit: null, remainder: element };
     }
     const availableContent = allowedHeight - marginTop;
+    if (!lineHeight) {
+      return { fit: null, remainder: element };
+    }
+    const allowedLines = Math.floor((availableContent + MEASURE_TOLERANCE) / lineHeight);
+    if (allowedLines <= 0) {
+      return { fit: null, remainder: element };
+    }
+    const cloneRect = clone.getBoundingClientRect();
+    const allowedBottom = cloneRect.top + allowedLines * lineHeight;
     const range = document.createRange();
     range.setStart(clone, 0);
     let lastGood = null;
@@ -92,8 +107,8 @@ export default function PaginatedMarkdown({
       if (!textNode) break;
       const nodeLength = textNode.textContent.length;
       range.setEnd(textNode, nodeLength);
-      const height = range.getBoundingClientRect().height;
-      if (height <= availableContent + MEASURE_TOLERANCE) {
+      const rect = range.getBoundingClientRect();
+      if (rect.bottom <= allowedBottom + MEASURE_TOLERANCE) {
         lastGood = { node: textNode, offset: nodeLength };
         continue;
       }
@@ -103,8 +118,8 @@ export default function PaginatedMarkdown({
       while (low < high) {
         const mid = Math.max(1, Math.floor((low + high) / 2));
         range.setEnd(textNode, mid);
-        const midHeight = range.getBoundingClientRect().height;
-        if (midHeight <= availableContent + MEASURE_TOLERANCE) {
+        const midRect = range.getBoundingClientRect();
+        if (midRect.bottom <= allowedBottom + MEASURE_TOLERANCE) {
           lastGood = { node: textNode, offset: mid };
           low = mid + 1;
         } else {
@@ -141,7 +156,7 @@ export default function PaginatedMarkdown({
     return { fit: fitElement, remainder: remainderElement };
   }, []);
 
-  const splitListElement = useCallback((phantom, element, allowedHeight, splitInline) => {
+  const splitListElement = useCallback((phantom, element, allowedHeight, lineHeight, splitInline) => {
     if (!phantom || !element) return { fit: null, remainder: element };
     const computed = window.getComputedStyle(element);
     const marginTop = parseFloat(computed.marginTop) || 0;
@@ -166,13 +181,14 @@ export default function PaginatedMarkdown({
       measureWrapper.style.marginBottom = '0px';
       measureWrapper.appendChild(child.cloneNode(true));
       const childHeight = measureElementHeight(phantom, measureWrapper);
-      if (consumed + childHeight <= allowedHeight + MEASURE_TOLERANCE) {
+      const snappedChildHeight = snapToLineHeight(childHeight, lineHeight);
+      if (consumed + snappedChildHeight <= allowedHeight + MEASURE_TOLERANCE) {
         const childClone = child.cloneNode(true);
         if (isOrdered) {
           childClone.setAttribute('value', String(numberCursor));
         }
         listFit.appendChild(childClone);
-        consumed += childHeight;
+        consumed += snappedChildHeight;
         numberCursor += 1;
         continue;
       }
@@ -190,7 +206,7 @@ export default function PaginatedMarkdown({
         break;
       }
 
-      const { fit, remainder } = splitInline(phantom, child, remainingHeight);
+      const { fit, remainder } = splitInline(phantom, child, remainingHeight, lineHeight);
       if (fit) {
         if (isOrdered) {
           fit.setAttribute('value', String(numberCursor));
@@ -242,7 +258,8 @@ export default function PaginatedMarkdown({
     const lineHeight = computeLineHeight(firstBody);
     if (!lineHeight) return;
 
-    const pageCapacityPx = lineHeight * 28;
+    const pageCapacityLines = 28;
+    const pageCapacityPx = lineHeight * pageCapacityLines;
     const firstMainRect = firstMain.getBoundingClientRect();
     const firstBodyRect = firstBody.getBoundingClientRect();
     const firstFooterRect = firstMain.querySelector('.page-footer')?.getBoundingClientRect();
@@ -257,9 +274,17 @@ export default function PaginatedMarkdown({
     const followOffset = followBodyRect.top - followMainRect.top;
     const rawFollowCapacity = followMainRect.height - followOffset - followFooterHeight;
 
-    const firstCapacity = Math.max(0, Math.min(pageCapacityPx, rawFirstCapacity));
-    const subsequentCapacity = Math.max(0, Math.min(pageCapacityPx, rawFollowCapacity));
-    const capacityByPage = [firstCapacity || pageCapacityPx, subsequentCapacity || pageCapacityPx];
+    const resolveCapacity = (raw) => {
+      if (!lineHeight) return pageCapacityPx;
+      if (!Number.isFinite(raw) || raw <= 0) return pageCapacityPx;
+      const lines = Math.max(0, Math.min(pageCapacityLines, Math.floor((raw + MEASURE_TOLERANCE) / lineHeight)));
+      if (lines <= 0) return Math.min(pageCapacityPx, lineHeight);
+      return Math.min(pageCapacityPx, lines * lineHeight);
+    };
+
+    const firstCapacity = resolveCapacity(rawFirstCapacity);
+    const subsequentCapacity = resolveCapacity(rawFollowCapacity);
+    const capacityByPage = [firstCapacity, subsequentCapacity];
 
     const phantom = followBody.cloneNode(false);
     phantom.style.position = 'absolute';
@@ -300,9 +325,10 @@ export default function PaginatedMarkdown({
         let working = node.cloneNode(true);
         while (working) {
           const height = measureElementHeight(phantom, working.cloneNode(true));
-          if (height <= remaining + MEASURE_TOLERANCE) {
+          const snappedHeight = snapToLineHeight(height, lineHeight);
+          if (snappedHeight <= remaining + MEASURE_TOLERANCE) {
             currentHtml.push(working.outerHTML);
-            remaining -= height;
+            remaining = Math.max(0, remaining - snappedHeight);
             working = null;
           } else if (remaining <= MEASURE_TOLERANCE) {
             ensureSpace();
@@ -310,9 +336,9 @@ export default function PaginatedMarkdown({
             const tag = (working.tagName || '').toLowerCase();
             let splitResult = null;
             if (tag === 'p' || tag === 'blockquote' || tag === 'pre' || tag === 'code' || /^h[1-6]$/.test(tag)) {
-              splitResult = splitInlineElement(phantom, working, remaining);
+              splitResult = splitInlineElement(phantom, working, remaining, lineHeight);
             } else if (tag === 'ul' || tag === 'ol') {
-              splitResult = splitListElement(phantom, working, remaining, splitInlineElement);
+              splitResult = splitListElement(phantom, working, remaining, lineHeight, splitInlineElement);
             }
 
             if (!splitResult || (!splitResult.fit && !splitResult.remainder)) {
@@ -333,7 +359,9 @@ export default function PaginatedMarkdown({
               const { fit, remainder } = splitResult;
               if (fit) {
                 currentHtml.push(fit.outerHTML);
-                remaining -= measureElementHeight(phantom, fit.cloneNode(true));
+                const fitHeight = measureElementHeight(phantom, fit.cloneNode(true));
+                const snappedFitHeight = snapToLineHeight(fitHeight, lineHeight);
+                remaining = Math.max(0, remaining - snappedFitHeight);
               }
               ensureSpace();
               working = remainder;
