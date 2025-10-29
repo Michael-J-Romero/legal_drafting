@@ -198,15 +198,6 @@ export default function PaginatedMarkdown({
         return { fit: element, remainder: null };
       }
 
-      // Check if entire element would fit on next page
-      if (nextPageCapacity !== null) {
-        const fullHeight = measureElementHeight(phantom, clone.cloneNode(true));
-        if (fullHeight <= nextPageCapacity + MEASURE_TOLERANCE) {
-          // Element fits entirely on next page, don't split
-          return { fit: null, remainder: element };
-        }
-      }
-
       const boundary = lineBoundaries[Math.max(0, maxLines - 1)];
       if (!boundary) {
         return { fit: null, remainder: element };
@@ -450,10 +441,34 @@ export default function PaginatedMarkdown({
         const tag = (working.tagName || '').toLowerCase();
         const isHeading = /^h[1-6]$/.test(tag);
         
-        // Check if this is a heading followed by content
-        let nextBlock = null;
-        if (isHeading && blockIndex + 1 < allBlocks.length) {
-          nextBlock = allBlocks[blockIndex + 1];
+        // Check for consecutive headings that should stay together
+        let consecutiveHeadings = [];
+        if (isHeading) {
+          consecutiveHeadings.push(node);
+          // Look ahead for consecutive headings
+          for (let i = blockIndex + 1; i < allBlocks.length; i += 1) {
+            const nextBlock = allBlocks[i];
+            const nextTag = (nextBlock.tagName || '').toLowerCase();
+            if (/^h[1-6]$/.test(nextTag)) {
+              consecutiveHeadings.push(nextBlock);
+            } else {
+              break;
+            }
+          }
+        }
+        
+        // If we have consecutive headings, check if they should move together
+        if (consecutiveHeadings.length > 1 && currentHtml.length > 0) {
+          // Calculate total height of consecutive headings
+          let totalHeadingHeight = 0;
+          for (const heading of consecutiveHeadings) {
+            totalHeadingHeight += measureElementHeight(phantom, heading.cloneNode(true));
+          }
+          
+          // If headings don't fit on current page, move them all to next page
+          if (totalHeadingHeight > remaining + MEASURE_TOLERANCE) {
+            ensureSpace();
+          }
         }
         
         while (working) {
@@ -461,33 +476,9 @@ export default function PaginatedMarkdown({
           const nextPageCapacity = capacityByPage[Math.min(pageIndex + 1, 1)] || pageCapacityPx;
           
           if (height <= remaining + MEASURE_TOLERANCE) {
-            // For headings, check if they would be orphaned (last on page with no following content)
-            if (isHeading && nextBlock && currentHtml.length > 0) {
-              const nextHeight = measureElementHeight(phantom, nextBlock.cloneNode(true));
-              // If heading fits but next block doesn't even partially fit, move heading to next page
-              if (nextHeight > remaining - height + MEASURE_TOLERANCE) {
-                ensureSpace();
-                // Re-measure with new page capacity
-                if (height <= (capacityByPage[Math.min(pageIndex, 1)] || pageCapacityPx) + MEASURE_TOLERANCE) {
-                  currentHtml.push(working.outerHTML);
-                  remaining -= height;
-                  working = null;
-                } else {
-                  // Heading doesn't fit on new page either, just add it
-                  currentHtml.push(working.outerHTML);
-                  remaining -= height;
-                  working = null;
-                }
-              } else {
-                currentHtml.push(working.outerHTML);
-                remaining -= height;
-                working = null;
-              }
-            } else {
-              currentHtml.push(working.outerHTML);
-              remaining -= height;
-              working = null;
-            }
+            currentHtml.push(working.outerHTML);
+            remaining -= height;
+            working = null;
           } else if (remaining <= MEASURE_TOLERANCE) {
             ensureSpace();
           } else {
