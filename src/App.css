@@ -719,6 +719,14 @@ button:not(:disabled):active {
   line-height: calc((11in - 2in) / 28);
 }
 
+.pleading-body li[data-continued='true'] {
+  list-style-type: none;
+}
+
+.pleading-body li[data-continued='true']::marker {
+  content: '';
+}
+
 .pleading-body blockquote {
   border-left: 4px solid #0f172a;
   padding-left: 0.18in;
