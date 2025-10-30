@@ -18,6 +18,8 @@ export default function EditorPanel({
   plaintiffName,
   defendantName,
   courtTitle,
+  showPageNumbers,
+  setShowPageNumbers,
   onAddLeftField,
   onLeftFieldChange,
   onRemoveLeftField,
@@ -96,6 +98,21 @@ export default function EditorPanel({
           value={docDate}
           onChange={(e) => setDocDate(e.target.value)}
         />
+      </div>
+
+      <div className="card">
+        <label htmlFor="page-numbers-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            id="page-numbers-toggle"
+            type="checkbox"
+            checked={showPageNumbers !== false}
+            onChange={(e) => setShowPageNumbers && setShowPageNumbers(e.target.checked)}
+          />
+          Show page numbers in footer
+        </label>
+        <div className="help-text" style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>
+          Applies to on-screen preview, printing, and the compiled PDF.
+        </div>
       </div>
 
       <div className={`card heading-card${headingExpanded ? ' expanded' : ''}`}>

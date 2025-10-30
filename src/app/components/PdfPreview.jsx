@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { loadPdfjs, pushPdfjsLog } from '../lib/pdfjsLoader';
 
-export default function PdfPreview({ data, pageOffset = 0, totalPages }) {
+export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageNumbers = true }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages }) {
             footer.className = 'page-footer';
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + pageNum;
-            footer.innerHTML = `<span>Page ${number} of ${totalPages}</span>`;
+            footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
             pageWrapper.appendChild(footer);
           }
         }
@@ -76,7 +76,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages }) {
             footer.className = 'page-footer';
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + 1; // best-effort for fallback
-            footer.innerHTML = `<span>Page ${number} of ${totalPages}</span>`;
+            footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
             wrapper.appendChild(footer);
           }
           container.appendChild(wrapper);
@@ -98,7 +98,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages }) {
         try { URL.revokeObjectURL(objectUrl); } catch (_) {}
       }
     };
-  }, [data, pageOffset, totalPages]);
+  }, [data, pageOffset, totalPages, showPageNumbers]);
 
   return <div ref={containerRef} className="pdf-document" />;
 }

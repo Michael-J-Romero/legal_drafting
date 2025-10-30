@@ -6,7 +6,7 @@ import { formatDisplayDate } from '../lib/date';
 // Local constant for visual line numbers on pleading paper
 const PLEADING_LINE_COUNT = 28;
 
-export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, signatureType = 'default', hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null, debugLayout = false }) {
+export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, signatureType = 'default', hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null, debugLayout = false, showPageNumbers = true }) {
   const {
     leftFields = [],
     rightFields = [],
@@ -113,6 +113,27 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
                   <div className="po-judge-line">__________________________________</div>
                   <div className="po-judge-title">JUDGE OF THE SUPERIOR COURT</div>
                 </div>
+              ) : signatureType === 'declaration' ? (
+                <div className="signature-row">
+                  <div className="signature-date">
+                    Executed on {formatDisplayDate(docDate)}, at <strong>Los Angeles, California</strong>.
+                  </div>
+                  <div className="signature-line">
+                    <span className="signature-label">Signature:</span>
+                    <img
+                      src="/sig.png"
+                      alt="Signature"
+                      className="signature-image"
+                      onError={(e) => {
+                        // Fallback to existing asset name if user's sig.png isn't present
+                        if (e.currentTarget && e.currentTarget.getAttribute('src') !== '/signature.png') {
+                          e.currentTarget.setAttribute('src', '/signature.png');
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="signature-printed-name">{(plaintiffName || 'Michael James Romero').trim()}, Plaintiff in Pro Per</div>
+                </div>
               ) : (
                 <div className="signature-row">
                   <div className="signature-date">Dated: {formatDisplayDate(docDate)}</div>
@@ -136,9 +157,11 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
             </>
           )}
           <div className="page-footer" aria-hidden style={debugFooterStyle}>
-            <span>
-              Page {pageNumber} of {totalPages}
-            </span>
+            {showPageNumbers ? (
+              <span>
+                Page {pageNumber} of {totalPages}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

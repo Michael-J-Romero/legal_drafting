@@ -48,6 +48,7 @@ function InlineEditorPanel({ fragment, onCancel, onChange, onDelete }) {
           >
             <option value="default">Default</option>
             <option value="proposed-order">Proposed order</option>
+            <option value="declaration">Declaration (Executed on …)</option>
           </select>
         </div>
         <textarea

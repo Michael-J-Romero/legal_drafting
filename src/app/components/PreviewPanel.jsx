@@ -13,6 +13,7 @@ export default function PreviewPanel({
   fragments,
   headingSettings,
   docDate,
+  showPageNumbers = true,
   onPrint,
   onCompilePdf,
   onClearAll,
@@ -63,7 +64,7 @@ export default function PreviewPanel({
       })();
       return () => { cancelled = true; };
     }, [fileId, dataBase64]);
-    return bytes ? <PdfPreview data={bytes} pageOffset={pageOffset} totalPages={totalPages} /> : null;
+    return bytes ? <PdfPreview data={bytes} pageOffset={pageOffset} totalPages={totalPages} showPageNumbers={showPageNumbers} /> : null;
   }
 
   function ExhibitTextPage({ captions = [], content = '', pageNumber, totalPages, title = '', coverCentered = false }) {
@@ -105,7 +106,7 @@ export default function PreviewPanel({
               {/* Footer page number to match pleading pages (anchor to .pleading-paper for consistent position) */}
               {typeof pageNumber === 'number' && typeof totalPages === 'number' && (
                 <div className="page-footer" aria-hidden>
-                  <span>Page {pageNumber} of {totalPages}</span>
+                  {showPageNumbers ? <span>Page {pageNumber} of {totalPages}</span> : null}
                 </div>
               )}
             </div>
@@ -126,6 +127,7 @@ export default function PreviewPanel({
         preTitleCaptions={(captions || []).filter(Boolean)}
         suppressTitlePlaceholder={false}
         disableSignature
+        showPageNumbers={showPageNumbers}
       />
     );
   }
@@ -206,7 +208,7 @@ export default function PreviewPanel({
           <canvas ref={canvasRef} aria-label={alt || 'Exhibit'} />
           {(typeof pageNumber === 'number' && typeof totalPages === 'number') ? (
             <div className="page-footer" aria-hidden>
-              <span>Page {pageNumber} of {totalPages}</span>
+              {showPageNumbers ? <span>Page {pageNumber} of {totalPages}</span> : null}
             </div>
           ) : null}
         </div>
@@ -327,6 +329,7 @@ export default function PreviewPanel({
                 signatureType={fragment.signatureType || 'default'}
                 pageOffset={cursor}
                 totalOverride={globalTotalPages}
+                showPageNumbers={showPageNumbers}
                 onPageCount={(n) => setMdCounts((prev) => (prev[fragment.id] === n ? prev : { ...prev, [fragment.id]: n }))}
               />
             </div>
@@ -349,8 +352,11 @@ export default function PreviewPanel({
         // Compute starting page number for each exhibit label based on the render order below
         const imageItems = flattenImageExhibitsWithLabels(groups);
         const pdfItems = flattenPdfExhibitsWithLabels(groups);
-        const labelStartPage = {}; // e.g., { 'A': 5, 'A1': 7 }
-        let simCursor = cursor + 1; // first page after the index page
+  const labelStartPage = {}; // e.g., { 'A': 5, 'A1': 7 }
+  // The index itself consumes one page. Covers start on the next page.
+  // cursor is the 0-based offset to the index page; visible page numbers are 1-based.
+  // After rendering the index (Page cursor+1), the first cover is Page cursor+2.
+  let simCursor = cursor + 2; // first exhibit cover page number
         // Images render first: each image exhibit = cover (1) + image page (1)
         imageItems.forEach(({ label }) => {
           labelStartPage[label] = simCursor; // cover page is the start of the exhibit
@@ -455,7 +461,7 @@ export default function PreviewPanel({
       }
     });
     return items;
-  }, [fragments, headingSettings, docDate, setFullscreenFragmentId, pdfCounts, mdCounts, globalTotalPages]);
+  }, [fragments, headingSettings, docDate, setFullscreenFragmentId, pdfCounts, mdCounts, globalTotalPages, showPageNumbers]);
 
   return (
     <main className="preview-panel">
@@ -559,6 +565,7 @@ export default function PreviewPanel({
                   signatureType={frag.signatureType || 'default'}
                   pageOffset={overlayOffset}
                   totalOverride={globalTotalPages}
+                  showPageNumbers={showPageNumbers}
                   onPageCount={(n) => setMdCounts((prev) => (prev[frag.id] === n ? prev : { ...prev, [frag.id]: n }))}
                 />
               </div>

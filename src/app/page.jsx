@@ -66,6 +66,7 @@ function createInitialDocState() {
     plaintiffName: DEFAULT_PLAINTIFF_NAME,
     defendantName: DEFAULT_DEFENDANT_NAME,
     courtTitle: DEFAULT_COURT_TITLE,
+    showPageNumbers: true,
     fragments: [
       {
         id: createFragmentId(),
@@ -116,6 +117,7 @@ export default function App() {
     plaintiffName,
     defendantName,
     courtTitle,
+    showPageNumbers,
     fragments,
   } = docState;
 
@@ -207,6 +209,14 @@ export default function App() {
     updatePresent((current) => {
       const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.courtTitle) : valueOrUpdater;
       return { ...current, courtTitle: nextValue };
+    });
+  }, [maybeMark, updatePresent]);
+
+  const setShowPageNumbers = useCallback((valueOrUpdater) => {
+    maybeMark();
+    updatePresent((current) => {
+      const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(!!current.showPageNumbers) : !!valueOrUpdater;
+      return { ...current, showPageNumbers: nextValue };
     });
   }, [maybeMark, updatePresent]);
 
@@ -553,6 +563,7 @@ export default function App() {
       plaintiffName: doc.plaintiffName || '',
       defendantName: doc.defendantName || '',
       courtTitle: doc.courtTitle || '',
+      showPageNumbers: typeof doc.showPageNumbers === 'boolean' ? doc.showPageNumbers : true,
       fragments: Array.isArray(doc.fragments) ? doc.fragments : [],
     };
     // normalize exhibits arrays
@@ -640,6 +651,7 @@ export default function App() {
         plaintiffName: doc.plaintiffName || '',
         defendantName: doc.defendantName || '',
         courtTitle: doc.courtTitle || '',
+        showPageNumbers: typeof doc.showPageNumbers === 'boolean' ? doc.showPageNumbers : true,
         fragments: Array.isArray(doc.fragments) ? doc.fragments : [],
       };
 
@@ -785,10 +797,10 @@ export default function App() {
       }
     }
 
-    // Add page numbers at bottom center: "Page X of Y"
+    // Add page numbers at bottom center: "Page X of Y" (conditional)
     const totalPages = pdfDoc.getPageCount();
-    if (totalPages > 0) {
-      const footerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    if ((showPageNumbers !== false) && totalPages > 0) {
+  const footerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
       for (let i = 0; i < totalPages; i += 1) {
         const page = pdfDoc.getPage(i);
         const label = `Page ${i + 1} of ${totalPages}`;
@@ -868,6 +880,8 @@ export default function App() {
         plaintiffName={plaintiffName}
         defendantName={defendantName}
         courtTitle={courtTitle}
+        showPageNumbers={showPageNumbers !== false}
+        setShowPageNumbers={setShowPageNumbers}
         onAddLeftField={handleAddLeftField}
         onLeftFieldChange={handleLeftFieldChange}
         onRemoveLeftField={handleRemoveLeftField}
@@ -896,6 +910,7 @@ export default function App() {
         fragments={fragments}
         headingSettings={headingSettings}
         docDate={docDate}
+        showPageNumbers={showPageNumbers !== false}
         onPrint={handlePrint}
         onCompilePdf={handleCompilePdf}
         onClearAll={handleClearAll}

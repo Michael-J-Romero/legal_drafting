@@ -319,7 +319,10 @@ export async function appendMarkdownFragment(pdfDoc, content, heading, fragmentT
     page.drawText('JUDGE OF THE SUPERIOR COURT', { x: textLeftX, y: judgeTitleY, size: 11, font: footerFont });
   } else {
     const sigDate = typeof formatDisplayDate === 'function' ? formatDisplayDate(docDate) : (docDate || '__________');
-    const dateLabel = `Date: ${sigDate}`;
+    const sigType = (signatureType || 'default');
+    const dateLabel = (sigType === 'declaration')
+      ? `Executed on ${sigDate}, at Los Angeles, California.`
+      : `Date: ${sigDate}`;
     const sigLabelText = 'Signature:';
     let dateY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 2;
     let sigY = PLEADING_BOTTOM_MARGIN + PLEADING_BODY_LINE_HEIGHT * 1;

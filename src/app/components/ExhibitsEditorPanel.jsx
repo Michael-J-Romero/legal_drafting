@@ -20,6 +20,12 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
     if (fileInputRef.current) fileInputRef.current.click();
   };
 
+  const handleInsertClick = (index, position) => {
+    // position: 'before' | 'after'
+    pendingIndexRef.current = { action: 'insert', index, position };
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
   const handleFileChange = async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -29,7 +35,7 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
       const buffer = reader.result;
       const fileId = `${fragment.id}-ex-${Date.now()}`;
       await idbSetPdf(fileId, buffer);
-      const ex = {
+      let ex = {
         id: fileId,
         title: file.name.replace(/\.[^.]+$/, ''),
         name: file.name,
@@ -40,10 +46,19 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
         isGroupHeader: false,
       };
       const list = Array.isArray(fragment.exhibits) ? [...fragment.exhibits] : [];
-      if (pendingIndexRef.current === 'add') {
+      const pending = pendingIndexRef.current;
+      if (pending === 'add') {
         list.push(ex);
-      } else if (typeof pendingIndexRef.current === 'number') {
-        list[pendingIndexRef.current] = { ...ex, title: list[pendingIndexRef.current]?.title || ex.title, isCompound: Boolean(list[pendingIndexRef.current]?.isCompound), isGroupHeader: Boolean(list[pendingIndexRef.current]?.isGroupHeader) };
+      } else if (typeof pending === 'number') {
+        list[pending] = { ...ex, title: list[pending]?.title || ex.title, isCompound: Boolean(list[pending]?.isCompound), isGroupHeader: Boolean(list[pending]?.isGroupHeader) };
+      } else if (pending && typeof pending === 'object' && pending.action === 'insert') {
+        const refIdx = Math.max(0, Math.min(list.length - 1, pending.index));
+        const ref = list[refIdx] || {};
+        // If inserting after a header, or around a compound, inherit compound flag for convenience
+        const shouldBeCompound = (ref.isGroupHeader && pending.position === 'after') || Boolean(ref.isCompound);
+        ex = { ...ex, isCompound: shouldBeCompound };
+        const insertAt = pending.position === 'before' ? refIdx : (refIdx + 1);
+        list.splice(insertAt, 0, ex);
       }
       pendingIndexRef.current = null;
       onChange && onChange(fragment.id, { exhibits: list });
@@ -214,6 +229,22 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
                       onChange={(e) => updateTitle(index, e.target.value)}
                       style={{ flex: 1 }}
                     />
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'before' || val === 'after') {
+                          handleInsertClick(index, val);
+                        }
+                        // reset to placeholder
+                        e.target.value = '';
+                      }}
+                      title="Insert exhibit"
+                    >
+                      <option value="" disabled>Insert…</option>
+                      <option value="before">Insert exhibit before</option>
+                      <option value="after">Insert exhibit after</option>
+                    </select>
                     <button type="button" className="danger" onClick={() => removeExhibit(index)}>Remove</button>
                   </div>
                   <div style={{ marginTop: 8 }}>
@@ -245,6 +276,21 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
                       onChange={(e) => updateTitle(index, e.target.value)}
                       style={{ flex: 1 }}
                     />
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'before' || val === 'after') {
+                          handleInsertClick(index, val);
+                        }
+                        e.target.value = '';
+                      }}
+                      title="Insert exhibit"
+                    >
+                      <option value="" disabled>Insert…</option>
+                      <option value="before">Insert exhibit before</option>
+                      <option value="after">Insert exhibit after</option>
+                    </select>
                     <button type="button" className="danger" onClick={() => removeExhibit(index)}>Remove</button>
                   </div>
                   <div style={{ marginTop: 8 }}>
@@ -284,6 +330,21 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
                     Compound
                   </label>
                   <button type="button" className="secondary" onClick={() => handleReplaceClick(index)} disabled={false}>Replace file</button>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'before' || val === 'after') {
+                        handleInsertClick(index, val);
+                      }
+                      e.target.value = '';
+                    }}
+                    title="Insert exhibit"
+                  >
+                    <option value="" disabled>Insert…</option>
+                    <option value="before">Insert exhibit before</option>
+                    <option value="after">Insert exhibit after</option>
+                  </select>
                   <button type="button" className="danger" onClick={() => removeExhibit(index)}>Remove</button>
                 </div>
                 <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>{ex.name || ex.mimeType || ''}</div>
