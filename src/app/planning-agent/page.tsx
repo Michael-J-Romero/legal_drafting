@@ -13,6 +13,7 @@ export default function PlanningAgentPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Live browser UI removed
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,7 +51,7 @@ export default function PlanningAgentPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
+  const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
@@ -265,6 +266,7 @@ export default function PlanningAgentPage() {
           {isLoading ? 'Researching...' : 'Send'}
         </button>
       </form>
+
     </div>
   );
 }

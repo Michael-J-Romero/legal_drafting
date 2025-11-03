@@ -1,5 +1,6 @@
 import { Agent, tool, run } from '@openai/agents';
 import { z } from 'zod';
+import { load as loadHtml } from 'cheerio';
 
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
@@ -15,6 +16,8 @@ const browseSchema = z.object({
   url: z.string().describe('The URL to browse'),
   selector: z.string().default('').describe('CSS selector to extract specific content. Leave empty to get full page content.'),
 });
+
+// (Removed Browserless/Playwright helpers)
 
 // Search web tool implementation using Tavily API
 async function searchWeb(args: z.infer<typeof searchWebSchema>) {
@@ -49,37 +52,38 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
   }
 }
 
-// Browse tool implementation using Playwright via Browserless
+// Browse tool using simple HTTP fetch + Cheerio (no Browserless/Playwright)
 async function browse(args: z.infer<typeof browseSchema>) {
-  const browserlessWs = process.env.BROWSERLESS_WS;
-  
-  if (!browserlessWs) {
-    throw new Error('BROWSERLESS_WS is not configured');
-  }
-
   try {
-    // Use dynamic import to avoid bundling playwright-core
-    const { chromium } = await import('playwright-core');
-    
-    const browser = await chromium.connect(browserlessWs);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    
-    await page.goto(args.url, { waitUntil: 'networkidle' });
-    
-    let content;
-    if (args.selector && args.selector.trim() !== '') {
-      content = await page.locator(args.selector).textContent();
-    } else {
-      content = await page.content();
-    }
-    
-    await browser.close();
-    
-    return JSON.stringify({
-      url: args.url,
-      content: content,
+    const res = await fetch(args.url, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch URL (${res.status} ${res.statusText})`);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
+    const html = await res.text();
+
+    let content: string | null = html;
+    if (isHtml) {
+      const $ = loadHtml(html);
+      if (args.selector && args.selector.trim() !== '') {
+        const sel = $(args.selector);
+        content = sel.length ? sel.text().trim() : '';
+      } else {
+        content = $('body').text().replace(/\s+/g, ' ').trim();
+      }
+    }
+
+    return JSON.stringify({ url: args.url, content });
   } catch (error) {
     console.error('Error in browse:', error);
     throw error;
@@ -96,7 +100,7 @@ const searchWebTool = tool({
 
 const browseTool = tool({
   name: 'browse',
-  description: 'Browse a specific URL and extract its content using Playwright',
+  description: 'Fetch a URL and extract content with an optional CSS selector (no JS rendering)',
   parameters: browseSchema,
   execute: browse,
 });
@@ -114,7 +118,7 @@ export async function POST(request: Request) {
     const agent = new Agent({
       name: 'Research Assistant',
       model: 'gpt-4o',
-      instructions: `You are a helpful research assistant that can search the web and browse websites to gather information. 
+  instructions: `You are a helpful research assistant that can search the web and browse websites to gather information. 
       
 When the user asks you to research a topic:
 1. Use the search_web tool to find relevant sources
@@ -122,7 +126,11 @@ When the user asks you to research a topic:
 3. Synthesize the information into a clear, well-organized response
 4. Always cite your sources with URLs
 
-Be thorough but concise in your research.`,
+Be thorough but concise in your research.
+
+Important: Each time you call the browse tool, first emit a line in your response in the exact format:
+"BROWSING_URL: <the exact URL you are opening>"
+This helps the UI follow along.`,
       tools: [searchWebTool, browseTool],
     });
 

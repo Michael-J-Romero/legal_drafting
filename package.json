@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "setup:node": "powershell -ExecutionPolicy Bypass -File scripts/setup-node18.ps1",
-    "local:npm:install": ".\\.tools\\node18\\node.exe .\\.tools\\node18\\node_modules\\npm\\bin\\npm-cli.js install"
+    "local:npm:install": ".\\.tools\\node18\\node.exe .\\.tools\\node18\\node_modules\\npm\\bin\\npm-cli.js install",
+    "dev:local": ".\\.tools\\node18\\node.exe node_modules\\next\\dist\\bin\\next dev",
+    "build:local": ".\\.tools\\node18\\node.exe node_modules\\next\\dist\\bin\\next build",
+    "start:local": ".\\.tools\\node18\\node.exe node_modules\\next\\dist\\bin\\next start"
   },
   "dependencies": {
-  "@ungap/structured-clone": "^1.2.0",
     "@auth0/auth0-react": "^2.4.0",
     "@aws-sdk/client-s3": "^3.864.0",
     "@chakra-ui/react": "^3.24.2",
@@ -24,7 +26,9 @@
     "@sendgrid/mail": "^8.1.5",
     "@stripe/stripe-js": "^7.8.0",
     "@supabase/supabase-js": "^2.55.0",
+    "@ungap/structured-clone": "^1.2.0",
     "aws-amplify": "^6.15.5",
+  "cheerio": "1.0.0-rc.12",
     "framer-motion": "^12.23.12",
     "localforage": "^1.10.0",
     "next": "13.4.19",
@@ -32,7 +36,6 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.296",
     "persistent-history": "file:libs/persistent-history",
-    "playwright-core": "^1.56.1",
     "pusher-js": "^8.4.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
@@ -53,5 +56,11 @@
     "eslint": "^9.36.0",
     "prisma": "^6.18.0",
     "typescript": "^5.9.2"
+  },
+  "overrides": {
+    "undici": "5.28.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
   }
 }
