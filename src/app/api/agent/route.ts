@@ -198,27 +198,28 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
     // Create the agent with tools
     const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
-🤔 **THINKING:** Analyze the question, plan your approach
-🔍 **RESEARCH:** Use tools, explain what you're searching for
-🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps, decide if more research needed
-💡 **SYNTHESIS:** Organize findings, identify patterns
+🤔 **THINKING:** Analyze the question, plan your approach (be concise, 2-3 sentences)
+🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings briefly)
+🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (keep brief)
+💡 **SYNTHESIS:** Organize findings, identify patterns (concise summary)
 ✅ **ANSWER:** Clear response with citations
 
 **Iterative Process:**
 - After EACH research step, add REFLECTION
-- If confidence < 85% or gaps exist, return to RESEARCH
-- Continue until confidence >= 85% with no major gaps
-- Be transparent about reasoning and uncertainty
+- Limit to 2-3 research iterations maximum to stay concise
+- If confidence < 85% or critical gaps exist, do ONE more research iteration
+- Be transparent but concise - avoid overly verbose explanations
 
 **Research Phase:**
 - Use search_web for queries
 - Use browse for specific URLs (state: "BROWSING_URL: <url>")
-- Summarize key findings
+- Summarize ONLY the most relevant findings (not everything)
 
 **Answer Phase:**
 - Use headings and bullet points
-- Include URLs for citations
+- Include key URLs only (not every single source)
 - State final confidence level
+- Keep total response under 10,000 characters
 
 Always use the emoji markers to help users follow your thinking.`;
 
@@ -245,6 +246,8 @@ Always use the emoji markers to help users follow your thinking.`;
 
           // Accumulate full response for context extraction
           let fullResponse = '';
+          let responseTooLarge = false;
+          const MAX_RESPONSE_LENGTH = 200000; // 200k chars max (~50k tokens)
 
           // Stream the response chunks
           for await (const chunk of result) {
@@ -259,6 +262,14 @@ Always use the emoji markers to help users follow your thinking.`;
                 } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
                   fullResponse += (chunk.data as any).delta;
                 }
+              }
+              
+              // Check if response is getting too large
+              if (fullResponse.length > MAX_RESPONSE_LENGTH && !responseTooLarge) {
+                console.warn(`[RESPONSE] Response exceeding max length (${fullResponse.length} chars), stopping accumulation`);
+                responseTooLarge = true;
+                // Continue streaming but stop accumulating
+                fullResponse = fullResponse.substring(0, MAX_RESPONSE_LENGTH);
               }
             } catch (chunkError) {
               console.error('Error processing chunk:', chunkError);
