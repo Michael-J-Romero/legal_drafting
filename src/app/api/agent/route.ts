@@ -19,6 +19,16 @@ const browseSchema = z.object({
 
 // (Removed Browserless/Playwright helpers)
 
+const messageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  timestamp: z.string().optional(),
+});
+
+const requestSchema = z.object({
+  messages: z.array(messageSchema).min(1),
+});
+
 // Search web tool implementation using Tavily API
 async function searchWeb(args: z.infer<typeof searchWebSchema>) {
   const tavilyApiKey = process.env.TAVILY_API_KEY;
@@ -107,11 +117,31 @@ const browseTool = tool({
 
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const parsed = requestSchema.safeParse(body);
 
-    if (!message) {
-      return new Response('Message is required', { status: 400 });
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request body' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
+
+    const { messages } = parsed.data;
+    const lastMessage = messages[messages.length - 1];
+
+    if (lastMessage.role !== 'user') {
+      return new Response(
+        JSON.stringify({ error: 'Last message must be from the user' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const conversation = messages
+      .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
+      .join('\n');
+
+    const prompt = `${conversation}\nAssistant:`;
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
     // Create the agent with tools
@@ -139,7 +169,7 @@ This helps the UI follow along.`,
       async start(controller) {
         try {
           // Run the agent with streaming
-          const result = await run(agent, message, {
+          const result = await run(agent, prompt, {
             stream: true,
           });
 

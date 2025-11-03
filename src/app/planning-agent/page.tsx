@@ -34,24 +34,31 @@ export default function PlanningAgentPage() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput('');
     setIsLoading(true);
 
     try {
+      const serializedMessages = updatedMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp.toISOString(),
+      }));
+
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: input.trim() }),
+        body: JSON.stringify({ messages: serializedMessages }),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-  const reader = response.body?.getReader();
+      const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
