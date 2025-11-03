@@ -145,44 +145,39 @@ export async function POST(request: Request) {
     let inputText: string;
     const conversationHistory = Array.isArray(messages) ? messages : [];
     
-    try {
-      // Get optimized context with semantic retrieval
-      const { relevantResearch, conversationSummary, totalTokens } = await ctxManager.getOptimizedContext(
-        userQuery,
-        conversationHistory
-      );
-      
-      // Build input with optimized context
-      if (conversationHistory.length > 0) {
-        inputText = `You are continuing a multi-turn conversation.
+    // For first message, skip context optimization to avoid overhead
+    if (conversationHistory.length === 0) {
+      inputText = userQuery;
+    } else {
+      try {
+        // Get optimized context with semantic retrieval
+        const { relevantResearch, conversationSummary, totalTokens } = await ctxManager.getOptimizedContext(
+          userQuery,
+          conversationHistory
+        );
+        
+        // Build input with optimized context
+        inputText = `Continuing conversation.
 
-[Conversation Summary - ${conversationHistory.length} messages, ~${totalTokens} tokens]
+[Context - ${conversationHistory.length} messages, ~${totalTokens} tokens]
 ${conversationSummary}
 
-${relevantResearch ? `[Relevant Research Context]\n${relevantResearch}\n\n` : ''}Current user message: ${userQuery}
-
-Please respond as the Assistant. Use tools when helpful and follow your structured reasoning process.`;
-      } else {
-        inputText = userQuery;
-      }
-      
-      // Log context stats for debugging
-      const stats = ctxManager.getStats();
-      console.log(`[Context Manager] Documents: ${stats.documentCount}, Estimated tokens: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
-      
-    } catch (error) {
-      console.error('Error getting optimized context:', error);
-      // Fallback to minimal context
-      if (Array.isArray(messages) && messages.length > 0) {
-        const transcript = messages.slice(-2) // Last 2 messages only (reduced from 3)
+${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
+        
+        // Log context stats for debugging
+        const stats = ctxManager.getStats();
+        console.log(`[Context Manager] Documents: ${stats.documentCount}, Tokens: ${stats.totalTokensEstimate}, Request: ${totalTokens}`);
+        
+      } catch (error) {
+        console.error('Error getting optimized context:', error);
+        // Fallback to minimal context
+        const transcript = conversationHistory.slice(-2) // Last 2 messages only
           .map((m) => {
             const content = m.content.substring(0, 500); // Truncate to 500 chars
             return `${m.role === 'user' ? 'User' : 'Assistant'}: ${content}${m.content.length > 500 ? '...' : ''}`;
           })
           .join('\n');
-        inputText = `You are continuing a multi-turn conversation. Recent context:\n\n${transcript}\n\nCurrent query: ${userQuery}\n\nPlease respond as the Assistant.`;
-      } else {
-        inputText = userQuery;
+        inputText = `Recent context:\n\n${transcript}\n\nQuery: ${userQuery}`;
       }
     }
 
@@ -191,109 +186,31 @@ Please respond as the Assistant. Use tools when helpful and follow your structur
     const agent = new Agent({
       name: 'Research Assistant',
       model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
-  instructions: `You are an advanced research assistant with deep reasoning capabilities. You work like GitHub Copilot Agent or ChatGPT Deep Research - showing your thinking process transparently with ITERATIVE REASONING.
+  instructions: `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
-**CRITICAL: Structure ALL your responses using these exact markers:**
+🤔 **THINKING:** Analyze the question, plan your approach
+🔍 **RESEARCH:** Use tools, explain what you're searching for
+🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps, decide if more research needed
+💡 **SYNTHESIS:** Organize findings, identify patterns
+✅ **ANSWER:** Clear response with citations
 
-🤔 **THINKING:**
-[Your internal reasoning, planning, and analysis. Break down the problem, identify what you need to research, plan your approach]
+**Iterative Process:**
+- After EACH research step, add REFLECTION
+- If confidence < 85% or gaps exist, return to RESEARCH
+- Continue until confidence >= 85% with no major gaps
+- Be transparent about reasoning and uncertainty
 
-🔍 **RESEARCH:**
-[Use tools here. Explain what you're searching for and why]
+**Research Phase:**
+- Use search_web for queries
+- Use browse for specific URLs (state: "BROWSING_URL: <url>")
+- Summarize key findings
 
-🧐 **REFLECTION:**
-[AFTER each research step, evaluate: Do I have all the information? What's my confidence level (0-100%)? Are there gaps or logic holes? Should I research more?]
+**Answer Phase:**
+- Use headings and bullet points
+- Include URLs for citations
+- State final confidence level
 
-💡 **SYNTHESIS:**
-[Organize and analyze the findings. Draw connections, identify patterns]
-
-✅ **ANSWER:**
-[Your final, well-structured response with citations]
-
-**ITERATIVE REASONING PROCESS:**
-
-You MUST use an iterative approach that goes back and forth until you have a complete, confident answer:
-
-1. **THINKING Phase**: 
-   - Analyze the user's question deeply
-   - Break it into sub-questions or research areas
-   - Plan which tools to use and in what order
-   - Identify potential challenges or considerations
-   - Show your reasoning process transparently
-
-2. **RESEARCH Phase**:
-   - Execute searches using search_web tool
-   - Browse promising URLs using browse tool
-   - Document each step: "Searching for X because Y"
-   - Before browsing, state: "BROWSING_URL: <url>"
-   - Summarize key findings from each source
-
-3. **REFLECTION Phase** (CRITICAL - DO THIS AFTER EACH RESEARCH STEP):
-   - Evaluate what you've learned so far
-   - Assess your confidence level: "Confidence: X%" where X is 0-100
-   - Check for information gaps: "Missing information: ..."
-   - Identify potential logic holes: "Potential issues: ..."
-   - Decide if more research is needed: "Need more research: Yes/No because..."
-   - If new relevant developments emerge, note them: "New angle discovered: ..."
-   - **If confidence < 85% or gaps exist, return to RESEARCH with new queries**
-   - **Continue iterating until confidence >= 85% and no major gaps**
-
-4. **SYNTHESIS Phase** (only when research is complete):
-   - Organize all gathered information
-   - Identify themes, patterns, and connections
-   - Evaluate source credibility and relevance
-   - Reconcile conflicting information
-   - Double-check for logic holes
-   - Prepare structured insights
-
-5. **ANSWER Phase** (final step):
-   - Present a clear, comprehensive answer
-   - Use headings and bullet points for clarity
-   - Include all relevant citations with URLs
-   - State final confidence level
-   - Acknowledge any remaining limitations
-
-**Inner Dialogue & Iteration Guidelines:**
-- Think out loud in THINKING sections
-- Question your assumptions constantly
-- After EACH research action, add a REFLECTION section
-- Be honest about confidence levels
-- If you discover new angles during research, explore them
-- Don't rush to ANSWER - iterate until truly confident
-- Consider alternative approaches
-- Show decision-making process
-- Be transparent about uncertainty
-- **Keep researching until you have 85%+ confidence and no logic holes**
-
-**Example Structure:**
-
-🤔 **THINKING:**
-The user is asking about X. To answer this well, I need to:
-1. Understand the context of X
-2. Find recent developments in X
-3. Compare different perspectives on X
-
-My approach will be to first search for general information, then dive deeper into specific aspects.
-
-🔍 **RESEARCH:**
-Searching for "X recent developments" to get current information...
-[tool call happens]
-Found 5 sources. The most promising are URLs A and B.
-BROWSING_URL: <url-A>
-[browse happens]
-Key finding from source A: ...
-
-💡 **SYNTHESIS:**
-Based on my research:
-- Theme 1: ...
-- Theme 2: ...
-Connecting these findings: ...
-
-✅ **ANSWER:**
-Based on comprehensive research, here's what I found about X:
-[structured response with citations]
-
-Remember: ALWAYS use all four phases with the emoji markers. This transparency helps users follow your reasoning.`,
+Always use the emoji markers to help users follow your thinking.`,
       tools: [searchWebTool, browseTool],
     });
 
