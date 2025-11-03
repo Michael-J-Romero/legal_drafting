@@ -13,7 +13,7 @@ const searchWebSchema = z.object({
 // Define the browse tool schema
 const browseSchema = z.object({
   url: z.string().describe('The URL to browse'),
-  selector: z.string().optional().describe('Optional CSS selector to extract specific content'),
+  selector: z.string().default('').describe('CSS selector to extract specific content. Leave empty to get full page content.'),
 });
 
 // Search web tool implementation using Tavily API
@@ -68,7 +68,7 @@ async function browse(args: z.infer<typeof browseSchema>) {
     await page.goto(args.url, { waitUntil: 'networkidle' });
     
     let content;
-    if (args.selector) {
+    if (args.selector && args.selector.trim() !== '') {
       content = await page.locator(args.selector).textContent();
     } else {
       content = await page.content();
