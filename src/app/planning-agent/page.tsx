@@ -82,7 +82,11 @@ export default function PlanningAgentPage() {
                     const lastMessage = newMessages[newMessages.length - 1];
                     
                     if (lastMessage && lastMessage.role === 'assistant') {
-                      lastMessage.content = assistantMessage;
+                      // Create a new message object instead of mutating
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMessage,
+                        content: assistantMessage,
+                      };
                     } else {
                       newMessages.push({
                         role: 'assistant',
