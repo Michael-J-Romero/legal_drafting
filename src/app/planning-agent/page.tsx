@@ -8,10 +8,19 @@ interface Message {
   timestamp: Date;
 }
 
+interface UploadedDocument {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  base64: string;
+}
+
 export default function PlanningAgentPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Live browser UI removed
 
@@ -23,9 +32,62 @@ export default function PlanningAgentPage() {
     scrollToBottom();
   }, [messages]);
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+
+    const files = Array.from(fileList).filter((file) => file.type === 'application/pdf');
+    if (files.length === 0) {
+      return;
+    }
+
+    const fileReaders = files.map(
+      (file) =>
+        new Promise<UploadedDocument>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            if (typeof result === 'string') {
+              const base64 = result.includes(',') ? result.split(',').pop() ?? '' : result;
+              resolve({
+                id: `${file.name}-${file.lastModified}-${file.size}`,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                base64,
+              });
+            } else {
+              reject(new Error('Unsupported file reader result type'));
+            }
+          };
+          reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+          reader.readAsDataURL(file);
+        })
+    );
+
+    try {
+      const uploaded = await Promise.all(fileReaders);
+      setDocuments((prev) => {
+        const existingSignatures = new Set(prev.map((doc) => doc.id));
+        const deduped = uploaded.filter((doc) => !existingSignatures.has(doc.id));
+        return [...prev, ...deduped];
+      });
+    } catch (error) {
+      console.error('Failed to read uploaded files', error);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const removeDocument = (id: string) => {
+    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
@@ -34,24 +96,42 @@ export default function PlanningAgentPage() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput('');
     setIsLoading(true);
 
     try {
+      const serializedMessages = updatedMessages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp:
+          msg.timestamp instanceof Date
+            ? msg.timestamp.toISOString()
+            : new Date(msg.timestamp).toISOString(),
+      }));
+
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: input.trim() }),
+        body: JSON.stringify({
+          message: input.trim(),
+          messages: serializedMessages,
+          documents: documents.map((doc) => ({
+            name: doc.name,
+            type: doc.type,
+            content: doc.base64,
+          })),
+        }),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-  const reader = response.body?.getReader();
+      const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
@@ -166,9 +246,9 @@ export default function PlanningAgentPage() {
   };
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
       height: '100vh',
       maxWidth: '1200px',
       margin: '0 auto',
@@ -187,11 +267,64 @@ export default function PlanningAgentPage() {
         marginBottom: '20px',
         backgroundColor: '#f9fafb',
       }}>
+        <div style={{ marginBottom: '16px' }}>
+          <label
+            htmlFor="document-upload"
+            style={{
+              display: 'inline-block',
+              padding: '8px 16px',
+              backgroundColor: '#10b981',
+              color: '#fff',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            Upload PDF Context
+          </label>
+          <input
+            id="document-upload"
+            type="file"
+            accept="application/pdf"
+            multiple
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          {documents.length > 0 && (
+            <div style={{ marginTop: '12px', backgroundColor: '#ecfdf5', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ fontWeight: 600, marginBottom: '8px', color: '#047857' }}>Uploaded context</div>
+              <ul style={{ listStyle: 'disc', paddingLeft: '20px', margin: 0 }}>
+                {documents.map((doc) => (
+                  <li key={doc.id} style={{ marginBottom: '6px', color: '#064e3b' }}>
+                    <span>
+                      {doc.name} ({Math.round(doc.size / 1024)} KB)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeDocument(doc.id)}
+                      style={{
+                        marginLeft: '12px',
+                        background: 'none',
+                        border: 'none',
+                        color: '#dc2626',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
         {messages.length === 0 ? (
-          <div style={{ 
-            textAlign: 'center', 
-            color: '#6b7280', 
-            marginTop: '40px' 
+          <div style={{
+            textAlign: 'center',
+            color: '#6b7280',
+            marginTop: '40px'
           }}>
             <p>Start a conversation with the research agent.</p>
             <p style={{ marginTop: '10px', fontSize: '14px' }}>
