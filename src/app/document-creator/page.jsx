@@ -1,72 +1,14 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
-import { FiArrowLeft } from 'react-icons/fi';
+import { useRouter } from 'next/navigation';
 import '/src/App.css';
 
-import EditorPanel from './components/EditorPanel';
-import PreviewPanel from './components/PreviewPanel';
-import AppHeader from './components/AppHeader';
-import FullscreenOverlay from './components/FullscreenOverlay';
-import useDocumentEditor from './hooks/useDocumentEditor';
-
-const TOOLS = {
-  MENU: null,
-  DOCUMENT: 'document',
-  PLANNER: 'planner',
-};
-
-export default function App() {
-  const [activeTool, setActiveTool] = React.useState(TOOLS.MENU);
-
-  const handleOpenTool = React.useCallback((tool) => {
-    setActiveTool(tool);
-  }, []);
-
-  const handleBackToMenu = React.useCallback(() => {
-    setActiveTool(TOOLS.MENU);
-  }, []);
-
-  let content = null;
-  switch (activeTool) {
-    case TOOLS.DOCUMENT:
-      content = <DocumentBuilder onBack={handleBackToMenu} />;
-      break;
-    case TOOLS.PLANNER:
-      content = <PlannerAgent onBack={handleBackToMenu} />;
-      break;
-    default:
-      content = <MainMenu onSelectTool={handleOpenTool} />;
-  }
-
-  return (
-    <div className="app-root">
-      {content}
-    </div>
-  );
-}
-
-function MainMenu({ onSelectTool }) {
-  return (
-    <div className="menu-screen">
-      <div className="menu-card">
-        <div>
-          <h1>Legal Drafting Toolkit</h1>
-          <p>Choose a workspace to get started. More tools are coming soon.</p>
-        </div>
-        <div className="menu-options">
-          <Link href="/document-creator" className="menu-button">
-            Create document
-          </Link>
-          <Link href="/planning-agent" className="menu-button">
-            Planner agent
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
+import AppHeader from '../components/AppHeader';
+import EditorPanel from '../components/EditorPanel';
+import PreviewPanel from '../components/PreviewPanel';
+import FullscreenOverlay from '../components/FullscreenOverlay';
+import useDocumentEditor from '../hooks/useDocumentEditor';
 
 function DocumentBuilder({ onBack }) {
   const { editorProps, previewProps } = useDocumentEditor();
@@ -157,41 +99,7 @@ function DocumentBuilder({ onBack }) {
   );
 }
 
-function PlannerAgent({ onBack }) {
-  return (
-    <>
-      <PlannerHeader onBack={onBack} />
-      <div className="planner-layout">
-        <div className="planner-panel">
-          <h2>Chat</h2>
-          <div className="planner-placeholder">Chat experience coming soon.</div>
-        </div>
-        <div className="planner-panel">
-          <h2>Preview</h2>
-          <div className="planner-placeholder">Preview area</div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function PlannerHeader({ onBack }) {
-  return (
-    <header className="app-header" role="banner">
-      <div className="app-header-inner">
-        <div className="app-header-left">
-          <button
-            type="button"
-            className="app-back-button"
-            onClick={onBack}
-            aria-label="Back to main menu"
-            title="Back to main menu"
-          >
-            <FiArrowLeft />
-          </button>
-          <div className="app-title">Planner Agent</div>
-        </div>
-      </div>
-    </header>
-  );
+export default function DocumentCreatorPage() {
+  const router = useRouter();
+  return <DocumentBuilder onBack={() => router.push('/')} />;
 }

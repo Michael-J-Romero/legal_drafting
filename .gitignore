@@ -46,3 +46,6 @@ next-env.d.ts
 # prisma
 /prisma/migrations
 node_modules/.prisma
+
+# local portable runtimes/tools
+/.tools/

@@ -1,5 +1,25 @@
 This project creates printable legal packets with pages sized precisely for clean Print Preview and paper output. It focuses on correct page dimensions, margins, headers/footers, and controlled page breaks so documents render exactly as intended when printed to Letter or A4.
 
+## Project-local Node 18 (no global changes)
+
+Prisma requires Node.js >= 18.18. To avoid changing your system Node, this repo ships a setup that installs a portable Node 18 inside the project and configures the VS Code terminal to use it automatically.
+
+Steps:
+
+1) Install local Node 18 into `.tools/node18` (one-time):
+
+	 - PowerShell / Windows (inside this folder):
+		 - `npm run setup:node`
+
+2) Use one of the following to install dependencies with the local Node:
+
+	 - EITHER open a NEW VS Code terminal (PATH is auto-prepended via `.vscode/settings.json`) and run:
+		 - `npm install`
+	 - OR run directly via the portable Node without reopening terminal:
+		 - `npm run local:npm:install`
+
+This affects only this workspace. No PATH or global installs are modified.
+
 ## Copilot instructions (project intent)
 
 - Goal: Generate UIs and print styles that produce perfectly sized pages for legal packet PDFs and browser Print Preview.
