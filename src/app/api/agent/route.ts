@@ -12,9 +12,15 @@ const conversationMessageSchema = z.object({
   timestamp: z.string().optional(),
 });
 
+const uploadedFileSchema = z.object({
+  name: z.string(),
+  content: z.string(),
+});
+
 const conversationRequestSchema = z.object({
   message: z.string(),
   messages: z.array(conversationMessageSchema).optional(),
+  files: z.array(uploadedFileSchema).optional(),
 });
 
 // Define the search_web tool schema
@@ -132,7 +138,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { message, messages = [] } = parsed.data;
+    const { message, messages = [], files = [] } = parsed.data;
 
     if (!message) {
       return new Response('Message is required', { status: 400 });
@@ -159,6 +165,59 @@ This helps the UI follow along.`,
       tools: [searchWebTool, browseTool],
     });
 
+    // Lazily import pdfjs to avoid bundling it into the edge runtime and reuse the module across requests
+    const pdfjsLibPromise = (async () => {
+      if (files.length === 0) {
+        return null;
+      }
+
+      const module = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      module.GlobalWorkerOptions.workerSrc = 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+      return module;
+    })();
+
+    const documentContexts: string[] = [];
+
+    for (const file of files) {
+      try {
+        const pdfjsLib = await pdfjsLibPromise;
+
+        if (!pdfjsLib) {
+          continue;
+        }
+
+        const data = Buffer.from(file.content, 'base64');
+        const loadingTask = pdfjsLib.getDocument({ data });
+        const pdfDocument = await loadingTask.promise;
+
+        const pageTexts: string[] = [];
+
+        for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+          const page = await pdfDocument.getPage(pageNumber);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: unknown) => (typeof item === 'object' && item !== null && 'str' in item ? (item as { str: string }).str : ''))
+            .join(' ')
+            .trim();
+
+          if (pageText) {
+            pageTexts.push(`Page ${pageNumber}:\n${pageText}`);
+          }
+        }
+
+        await pdfDocument.destroy();
+
+        if (pageTexts.length > 0) {
+          documentContexts.push(`Document: ${file.name}\n${pageTexts.join('\n\n')}`);
+        } else {
+          documentContexts.push(`Document: ${file.name}\n[No extractable text found in this PDF]`);
+        }
+      } catch (error) {
+        console.error(`Error extracting PDF context from ${file.name}:`, error);
+        documentContexts.push(`Document: ${file.name}\n[Unable to extract text from this PDF: ${error instanceof Error ? error.message : 'Unknown error'}]`);
+      }
+    }
+
     // Create a readable stream for the response
     const stream = new ReadableStream({
       async start(controller) {
@@ -184,6 +243,10 @@ This helps the UI follow along.`,
                 lastMessage.role === 'assistant' ? 'Assistant' : 'User'
               } message:\n${lastMessage.content}`;
             }
+          }
+
+          if (documentContexts.length > 0) {
+            agentInput += `\n\nAdditional context from uploaded documents:\n${documentContexts.join('\n\n')}`;
           }
 
           // Run the agent with streaming
