@@ -1,0 +1,53 @@
+// This is your Prisma schema file for the web-research planning agent
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  title     String?
+  runs      AgentRun[]
+}
+
+model AgentRun {
+  id             String        @id @default(cuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  status         String        // 'running', 'completed', 'failed'
+  userMessage    String        @db.Text
+  finalResponse  String?       @db.Text
+  toolSteps      ToolStep[]
+  snippets       Snippet[]
+}
+
+model ToolStep {
+  id        String   @id @default(cuid())
+  runId     String
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  toolName  String
+  input     String   @db.Text
+  output    String?  @db.Text
+  status    String   // 'pending', 'completed', 'failed'
+}
+
+model Snippet {
+  id        String   @id @default(cuid())
+  runId     String
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  url       String
+  title     String?
+  content   String   @db.Text
+  metadata  String?  @db.Text // JSON string for additional metadata
+}
