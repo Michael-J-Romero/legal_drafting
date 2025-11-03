@@ -61,29 +61,84 @@ interface MessageSection {
   content: string;
 }
 
+// Section styles extracted to avoid creating new objects on each render
+const SECTION_STYLES: Record<MessageSection['type'], { bg: string; border: string; icon: string; title: string; color: string }> = {
+  thinking: {
+    bg: '#fef3c7',
+    border: '#fbbf24',
+    icon: '🤔',
+    title: 'Thinking',
+    color: '#92400e',
+  },
+  research: {
+    bg: '#dbeafe',
+    border: '#3b82f6',
+    icon: '🔍',
+    title: 'Research',
+    color: '#1e3a8a',
+  },
+  synthesis: {
+    bg: '#e0e7ff',
+    border: '#8b5cf6',
+    icon: '💡',
+    title: 'Synthesis',
+    color: '#4c1d95',
+  },
+  answer: {
+    bg: '#d1fae5',
+    border: '#10b981',
+    icon: '✅',
+    title: 'Answer',
+    color: '#064e3b',
+  },
+  plain: {
+    bg: 'transparent',
+    border: 'transparent',
+    icon: '',
+    title: '',
+    color: '#111827',
+  },
+};
+
+// Marker patterns with their corresponding types and removal regexes
+const PHASE_MARKERS = [
+  { 
+    type: 'thinking' as const, 
+    pattern: /🤔\s*\*\*THINKING:\*\*/gi,
+    removePattern: /^🤔\s*\*\*THINKING:\*\*\n?/i
+  },
+  { 
+    type: 'research' as const, 
+    pattern: /🔍\s*\*\*RESEARCH:\*\*/gi,
+    removePattern: /^🔍\s*\*\*RESEARCH:\*\*\n?/i
+  },
+  { 
+    type: 'synthesis' as const, 
+    pattern: /💡\s*\*\*SYNTHESIS:\*\*/gi,
+    removePattern: /^💡\s*\*\*SYNTHESIS:\*\*\n?/i
+  },
+  { 
+    type: 'answer' as const, 
+    pattern: /✅\s*\*\*ANSWER:\*\*/gi,
+    removePattern: /^✅\s*\*\*ANSWER:\*\*\n?/i
+  },
+];
+
 function parseMessageSections(content: string): MessageSection[] {
   const sections: MessageSection[] = [];
-  
-  // Regex patterns for each section
-  const thinkingPattern = /🤔\s*\*\*THINKING:\*\*/i;
-  const researchPattern = /🔍\s*\*\*RESEARCH:\*\*/i;
-  const synthesisPattern = /💡\s*\*\*SYNTHESIS:\*\*/i;
-  const answerPattern = /✅\s*\*\*ANSWER:\*\*/i;
-  
-  // Find all section markers
-  const markers = [
-    { pattern: thinkingPattern, type: 'thinking' as const },
-    { pattern: researchPattern, type: 'research' as const },
-    { pattern: synthesisPattern, type: 'synthesis' as const },
-    { pattern: answerPattern, type: 'answer' as const },
-  ];
-  
   let positions: Array<{ index: number; type: MessageSection['type'] }> = [];
   
-  markers.forEach(({ pattern, type }) => {
-    const match = content.match(pattern);
-    if (match && match.index !== undefined) {
+  // Find all occurrences of each marker
+  PHASE_MARKERS.forEach(({ pattern, type }) => {
+    const regex = new RegExp(pattern);
+    let match;
+    const testContent = content;
+    let lastIndex = 0;
+    
+    while ((match = regex.exec(testContent)) !== null) {
       positions.push({ index: match.index, type });
+      lastIndex = regex.lastIndex;
+      if (!pattern.global) break; // Safety check
     }
   });
   
@@ -109,13 +164,11 @@ function parseMessageSections(content: string): MessageSection[] {
     const end = i < positions.length - 1 ? positions[i + 1].index : content.length;
     const sectionContent = content.substring(start, end);
     
-    // Remove the marker line from the content
-    const contentWithoutMarker = sectionContent
-      .replace(/^🤔\s*\*\*THINKING:\*\*\n?/i, '')
-      .replace(/^🔍\s*\*\*RESEARCH:\*\*\n?/i, '')
-      .replace(/^💡\s*\*\*SYNTHESIS:\*\*\n?/i, '')
-      .replace(/^✅\s*\*\*ANSWER:\*\*\n?/i, '')
-      .trim();
+    // Find the appropriate removal pattern for this type
+    const marker = PHASE_MARKERS.find(m => m.type === positions[i].type);
+    const contentWithoutMarker = marker 
+      ? sectionContent.replace(marker.removePattern, '').trim()
+      : sectionContent.trim();
     
     if (contentWithoutMarker) {
       sections.push({
@@ -129,45 +182,7 @@ function parseMessageSections(content: string): MessageSection[] {
 }
 
 function renderMessageSection(section: MessageSection, key: number) {
-  const sectionStyles: Record<MessageSection['type'], { bg: string; border: string; icon: string; title: string; color: string }> = {
-    thinking: {
-      bg: '#fef3c7',
-      border: '#fbbf24',
-      icon: '🤔',
-      title: 'Thinking',
-      color: '#92400e',
-    },
-    research: {
-      bg: '#dbeafe',
-      border: '#3b82f6',
-      icon: '🔍',
-      title: 'Research',
-      color: '#1e3a8a',
-    },
-    synthesis: {
-      bg: '#e0e7ff',
-      border: '#8b5cf6',
-      icon: '💡',
-      title: 'Synthesis',
-      color: '#4c1d95',
-    },
-    answer: {
-      bg: '#d1fae5',
-      border: '#10b981',
-      icon: '✅',
-      title: 'Answer',
-      color: '#064e3b',
-    },
-    plain: {
-      bg: 'transparent',
-      border: 'transparent',
-      icon: '',
-      title: '',
-      color: '#111827',
-    },
-  };
-  
-  const style = sectionStyles[section.type];
+  const style = SECTION_STYLES[section.type];
   
   if (section.type === 'plain') {
     return (
@@ -197,6 +212,17 @@ function renderMessageSection(section: MessageSection, key: number) {
       </div>
     </div>
   );
+}
+
+// Memoized component for rendering message content
+function MessageContent({ content, role }: { content: string; role: 'user' | 'assistant' }) {
+  const sections = useMemo(() => {
+    return role === 'assistant' 
+      ? parseMessageSections(content) 
+      : [{ type: 'plain' as const, content }];
+  }, [content, role]);
+
+  return <>{sections.map((section, idx) => renderMessageSection(section, idx))}</>;
 }
 
 function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
@@ -666,16 +692,13 @@ export default function PlanningAgentPage() {
               <p style={{ marginTop: 10, fontSize: 14 }}>You can also upload files (PDF, .txt, .js, .json) to include in your messages.</p>
             </div>
           ) : (
-            messages.map((message, index) => {
-              const sections = message.role === 'assistant' ? parseMessageSections(message.content) : [{ type: 'plain' as const, content: message.content }];
-              
-              return (
-                <div
-                  key={index}
-                  style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none' }}
-                >
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
-                  {sections.map((section, idx) => renderMessageSection(section, idx))}
+            messages.map((message, index) => (
+              <div
+                key={index}
+                style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none' }}
+              >
+                <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
+                <MessageContent content={message.content} role={message.role} />
                   {message.files && message.files.length > 0 && (
                     <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {message.files.map((file) => (
@@ -704,8 +727,7 @@ export default function PlanningAgentPage() {
                   )}
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
                 </div>
-              );
-            })
+              ))
           )}
           <div ref={messagesEndRef} />
         </div>
