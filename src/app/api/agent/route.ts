@@ -5,6 +5,25 @@ import { load as loadHtml } from 'cheerio';
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
+// Schema definitions for request validation and tools
+const conversationMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  timestamp: z.string().optional(),
+});
+
+const uploadedContextSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  content: z.string(),
+});
+
+const conversationRequestSchema = z.object({
+  message: z.string(),
+  messages: z.array(conversationMessageSchema).optional(),
+  contexts: z.array(uploadedContextSchema).optional(),
+});
+
 // Define the search_web tool schema
 const searchWebSchema = z.object({
   query: z.string().describe('The search query to execute'),
@@ -107,7 +126,20 @@ const browseTool = tool({
 
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const parsed = conversationRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({
+          error: 'Invalid request body',
+          details: parsed.error.flatten(),
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { message, messages = [], contexts = [] } = parsed.data;
 
     if (!message) {
       return new Response('Message is required', { status: 400 });
@@ -138,8 +170,45 @@ This helps the UI follow along.`,
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Build agent input that includes serialized conversation history
+          let agentInput = message;
+
+          const contextPrefix = contexts.length
+            ? `Use the following uploaded documents as reference material when crafting your response. ` +
+              `Only rely on them when relevant and cite the filename when you do.\n\n${contexts
+                .map((context, index) => {
+                  const truncatedContent = context.content.length > 4000
+                    ? `${context.content.slice(0, 4000)}…`
+                    : context.content;
+                  return `Document ${index + 1}: ${context.name} (${context.type})\n${truncatedContent}`;
+                })
+                .join('\n\n')}\n\n`
+            : '';
+
+          if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            const previousMessages = messages.slice(0, -1);
+            const historyText = previousMessages
+              .map((msg) => `${msg.role === 'assistant' ? 'Assistant' : 'User'}: ${msg.content}`)
+              .join('\n');
+
+            const historyPrefix = `${contextPrefix}${
+              historyText ? `Conversation so far:\n${historyText}\n\n` : ''
+            }`;
+
+            if (lastMessage.role === 'user') {
+              agentInput = `${historyPrefix}Respond to the latest user message while keeping the previous context in mind.\n\nLatest user message:\n${lastMessage.content}`;
+            } else {
+              agentInput = `${historyPrefix}Continue the conversation based on the latest message below.\n\n${
+                lastMessage.role === 'assistant' ? 'Assistant' : 'User'
+              } message:\n${lastMessage.content}`;
+            }
+          } else {
+            agentInput = `${contextPrefix}${message}`;
+          }
+
           // Run the agent with streaming
-          const result = await run(agent, message, {
+          const result = await run(agent, agentInput, {
             stream: true,
           });
 
