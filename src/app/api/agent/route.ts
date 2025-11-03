@@ -145,9 +145,15 @@ export async function POST(request: Request) {
     let inputText: string;
     const conversationHistory = Array.isArray(messages) ? messages : [];
     
+    console.log('\n========== AGENT REQUEST DEBUG ==========');
+    console.log(`[REQUEST] User query length: ${userQuery.length} chars`);
+    console.log(`[REQUEST] Conversation history: ${conversationHistory.length} messages`);
+    
     // For first message, skip context optimization to avoid overhead
     if (conversationHistory.length === 0) {
       inputText = userQuery;
+      console.log(`[REQUEST] First message - no context optimization`);
+      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
     } else {
       try {
         // Get optimized context with semantic retrieval
@@ -155,6 +161,10 @@ export async function POST(request: Request) {
           userQuery,
           conversationHistory
         );
+        
+        console.log(`[CONTEXT] Summary tokens: ${totalTokens}`);
+        console.log(`[CONTEXT] Summary length: ${conversationSummary.length} chars`);
+        console.log(`[CONTEXT] Research context: ${relevantResearch ? relevantResearch.length : 0} chars`);
         
         // Build input with optimized context
         inputText = `Continuing conversation.
@@ -164,9 +174,11 @@ ${conversationSummary}
 
 ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
         
+        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        
         // Log context stats for debugging
         const stats = ctxManager.getStats();
-        console.log(`[Context Manager] Documents: ${stats.documentCount}, Tokens: ${stats.totalTokensEstimate}, Request: ${totalTokens}`);
+        console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
         
       } catch (error) {
         console.error('Error getting optimized context:', error);
@@ -178,15 +190,13 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
           })
           .join('\n');
         inputText = `Recent context:\n\n${transcript}\n\nQuery: ${userQuery}`;
+        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
       }
     }
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
     // Create the agent with tools
-    const agent = new Agent({
-      name: 'Research Assistant',
-      model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
-  instructions: `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
+    const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
 🤔 **THINKING:** Analyze the question, plan your approach
 🔍 **RESEARCH:** Use tools, explain what you're searching for
@@ -210,7 +220,17 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - Include URLs for citations
 - State final confidence level
 
-Always use the emoji markers to help users follow your thinking.`,
+Always use the emoji markers to help users follow your thinking.`;
+
+    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${Math.ceil(agentInstructions.length / 4)} tokens)`);
+    console.log(`[AGENT] Estimated total input tokens: ~${Math.ceil((agentInstructions.length + inputText.length) / 4)}`);
+    console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
+    console.log('=========================================\n');
+
+    const agent = new Agent({
+      name: 'Research Assistant',
+      model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
+      instructions: agentInstructions,
       tools: [searchWebTool, browseTool],
     });
 
@@ -248,23 +268,35 @@ Always use the emoji markers to help users follow your thinking.`,
 
           // Extract and store research findings for future context retrieval
           // Only store if response isn't too large to avoid memory issues
+          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${Math.ceil(fullResponse.length / 4)} tokens)`);
+          
           if (fullResponse && fullResponse.length < 50000) { // Limit to 50k chars
             try {
               ctxManager.extractResearchFindings(fullResponse);
+              console.log(`[RESPONSE] Research findings extracted and stored`);
             } catch (error) {
-              console.error('Error extracting research findings:', error);
+              console.error('[RESPONSE] Error extracting research findings:', error);
             }
           } else if (fullResponse.length >= 50000) {
-            console.warn('Response too large to extract findings:', fullResponse.length);
+            console.warn(`[RESPONSE] Response too large to extract findings: ${fullResponse.length} chars`);
           }
 
+          console.log('=========================================\n');
           controller.close();
         } catch (error) {
-          console.error('Error during agent run:', error);
+          console.error('\n========== AGENT ERROR ==========');
+          console.error('[ERROR] Error during agent run:', error);
+          console.error('[ERROR] Error type:', error?.constructor?.name);
+          if (error instanceof Error) {
+            console.error('[ERROR] Error message:', error.message);
+            console.error('[ERROR] Error stack:', error.stack);
+          }
+          console.error('=================================\n');
           
           // Handle context window exceeded error specifically
           let errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          if (errorMsg.includes('context window') || errorMsg.includes('exceeds')) {
+          if (errorMsg.includes('context window') || errorMsg.includes('exceeds') || errorMsg.includes('too large')) {
+            console.log(`[ERROR] Context window error detected. Original message: ${errorMsg}`);
             errorMsg = 'Context too large. Please start a new conversation or ask a simpler question.';
           }
           

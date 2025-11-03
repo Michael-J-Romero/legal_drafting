@@ -150,25 +150,38 @@ export class ContextManager {
     conversationSummary: string;
     totalTokens: number;
   }> {
+    console.log(`[CTX-MGR] getOptimizedContext called with ${conversationHistory.length} messages`);
+    
     const conversationSummary = this.summarizeConversation(conversationHistory);
+    console.log(`[CTX-MGR] Conversation summary: ${conversationSummary.length} chars`);
+    
     const relevantResearch = await this.getRelevantContext(query, 3); // Reduced from 5 to 3
+    console.log(`[CTX-MGR] Relevant research (3 chunks): ${relevantResearch.length} chars`);
     
     const totalTokens = this.countTokens(conversationSummary + relevantResearch);
+    console.log(`[CTX-MGR] Total tokens before optimization: ${totalTokens}`);
     
     // If still too large, reduce research chunks further
     if (totalTokens > this.maxContextTokens) {
+      console.log(`[CTX-MGR] Context too large (${totalTokens} > ${this.maxContextTokens}), reducing to 2 chunks`);
       const reducedResearch = await this.getRelevantContext(query, 2); // Reduced from 3 to 2
       const reducedTokens = this.countTokens(conversationSummary + reducedResearch);
+      console.log(`[CTX-MGR] Reduced research (2 chunks): ${reducedResearch.length} chars, ${reducedTokens} tokens`);
       
       // If STILL too large, just use conversation summary
       if (reducedTokens > this.maxContextTokens) {
+        console.log(`[CTX-MGR] Still too large (${reducedTokens} > ${this.maxContextTokens}), dropping research and truncating summary`);
+        const truncatedSummary = conversationSummary.substring(0, 1000);
+        const finalTokens = this.countTokens(truncatedSummary);
+        console.log(`[CTX-MGR] Final context: ${truncatedSummary.length} chars, ${finalTokens} tokens`);
         return {
           relevantResearch: '',
-          conversationSummary: conversationSummary.substring(0, 1000), // Hard truncate
-          totalTokens: this.countTokens(conversationSummary.substring(0, 1000)),
+          conversationSummary: truncatedSummary, // Hard truncate
+          totalTokens: finalTokens,
         };
       }
       
+      console.log(`[CTX-MGR] Final optimized context: ${reducedTokens} tokens`);
       return {
         relevantResearch: reducedResearch,
         conversationSummary,
@@ -176,6 +189,7 @@ export class ContextManager {
       };
     }
     
+    console.log(`[CTX-MGR] Context within limits: ${totalTokens} tokens`);
     return {
       relevantResearch,
       conversationSummary,
