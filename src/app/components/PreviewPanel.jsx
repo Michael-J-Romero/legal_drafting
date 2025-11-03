@@ -24,10 +24,9 @@ export default function PreviewPanel({
   fullscreenFragmentId,
   setFullscreenFragmentId,
   contentRef,
+  zoom = 1,
 }) {
-  const [rawOpen, setRawOpen] = React.useState(false);
-  const [rawText, setRawText] = React.useState('');
-  const [rawError, setRawError] = React.useState('');
+  // Toolbar moved to global header; raw editor handled in page component
 
 
   // Decode base64 PDF data for PdfPreview
@@ -204,7 +203,7 @@ export default function PreviewPanel({
     if (!url) return null;
     return (
       <div className="pdf-page" style={{ background: '#fff', position: 'relative' }}>
-        <div style={{ width: '8.5in', height: '11in', position: 'relative', background: '#fff' }}>
+        <div className="pdf-content">
           <canvas ref={canvasRef} aria-label={alt || 'Exhibit'} />
           {(typeof pageNumber === 'number' && typeof totalPages === 'number') ? (
             <div className="page-footer" aria-hidden>
@@ -463,62 +462,34 @@ export default function PreviewPanel({
     return items;
   }, [fragments, headingSettings, docDate, setFullscreenFragmentId, pdfCounts, mdCounts, globalTotalPages, showPageNumbers]);
 
+  // Fit-to-width scaling: compute scale based on available width vs 8.5in
+  useEffect(() => {
+    if (!contentRef || !contentRef.current) return;
+    const el = contentRef.current;
+    const INCH = 96; // CSS px per inch
+    const PAGE_W = 8.5 * INCH; // 8.5in in CSS px
+
+    let raf = null;
+    const update = () => {
+      raf = null;
+      try {
+        const w = el.clientWidth || 0;
+        const scale = Math.max(0.1, Math.min(1, w > 0 ? (w - 8) / PAGE_W : 1)); // keep a tiny gutter
+        el.style.setProperty('--page-scale', String(scale));
+        el.style.setProperty('--zoom-mult', String(zoom || 1));
+      } catch (_) {}
+    };
+    const ro = new ResizeObserver(() => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(update);
+    });
+    ro.observe(el);
+    update();
+    return () => { try { ro.disconnect(); } catch (_) {}; if (raf) cancelAnimationFrame(raf); };
+  }, [contentRef, zoom]);
+
   return (
     <main className="preview-panel">
-      <div className="toolbar">
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              const text = getRawJson ? await getRawJson() : '';
-              setRawText(text || '');
-              setRawError('');
-              setRawOpen(true);
-            } catch (e) {
-              // ignore
-            }
-          }}
-          className="secondary"
-          title="View and edit the document JSON (without large embedded data)"
-        >
-          Edit Raw
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const input = document.getElementById('import-json-input');
-            if (input) input.click();
-          }}
-          className="secondary"
-          title="Import a previously exported JSON file"
-        >
-          Import JSON
-        </button>
-        <input
-          id="import-json-input"
-          type="file"
-          accept="application/json,.json"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const file = e.target.files && e.target.files[0];
-            if (file && onImportBundle) onImportBundle(file);
-            // reset so selecting the same file again triggers change
-            e.target.value = '';
-          }}
-        />
-        <button type="button" onClick={onExportBundle} className="secondary" title="Export current document as a JSON bundle including assets">
-          Export JSON
-        </button>
-        <button type="button" onClick={onClearAll} className="danger" title="Remove all saved data and reload">
-          Clear All Local Data
-        </button>
-        <button type="button" onClick={onPrint} className="secondary">
-          Print or Save as PDF
-        </button>
-        <button type="button" onClick={onCompilePdf} className="primary">
-          Download Combined PDF
-        </button>
-      </div>
       <div className="preview-scroll" ref={contentRef}>
         {previewFragments.length ? (
           previewFragments
@@ -574,48 +545,7 @@ export default function PreviewPanel({
         </FullscreenOverlay>
       )}
 
-      {rawOpen && (
-        <FullscreenOverlay onClose={() => setRawOpen(false)}>
-          <div className="fullscreen-content-inner" style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
-            <div style={{ fontWeight: 700, fontSize: 18 }}>Edit Raw JSON</div>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <textarea
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                spellCheck={false}
-                style={{ width: '100%', height: '100%', minHeight: '60vh', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize: 12, lineHeight: 1.4, boxSizing: 'border-box' }}
-              />
-            </div>
-            {rawError ? (
-              <div style={{ color: '#c0392b' }}>{rawError}</div>
-            ) : null}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" className="ghost" onClick={() => setRawOpen(false)}>Cancel</button>
-              <button
-                type="button"
-                className="primary"
-                onClick={async () => {
-                  setRawError('');
-                  try {
-                    // simple client-side validation first
-                    JSON.parse(rawText);
-                  } catch (e) {
-                    setRawError('Invalid JSON: ' + (e?.message || '')); return;
-                  }
-                  try {
-                    if (onApplyRawJson) await onApplyRawJson(rawText);
-                    setRawOpen(false);
-                  } catch (e) {
-                    setRawError(e?.message || 'Failed to apply JSON');
-                  }
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </FullscreenOverlay>
-      )}
+      {null}
     </main>
   );
 }

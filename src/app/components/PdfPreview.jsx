@@ -38,7 +38,13 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
           const pageWrapper = document.createElement('div');
           pageWrapper.className = 'pdf-page';
           pageWrapper.style.position = 'relative';
-          pageWrapper.appendChild(canvas);
+          const content = document.createElement('div');
+          content.className = 'pdf-content';
+          content.style.width = '8.5in';
+          content.style.height = '11in';
+          content.style.position = 'relative';
+          content.appendChild(canvas);
+          pageWrapper.appendChild(content);
           container.appendChild(pageWrapper);
           pushPdfjsLog('renderPdf.pageStart', { pageNum, w: canvas.width, h: canvas.height });
           await page.render({ canvasContext: context, viewport }).promise;
@@ -51,7 +57,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + pageNum;
             footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
-            pageWrapper.appendChild(footer);
+            content.appendChild(footer);
           }
         }
         pushPdfjsLog('renderPdf.done');
@@ -70,15 +76,21 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
           const wrapper = document.createElement('div');
           wrapper.className = 'pdf-page';
           wrapper.style.position = 'relative';
-          wrapper.appendChild(iframe);
+          const content = document.createElement('div');
+          content.className = 'pdf-content';
+          content.style.width = '8.5in';
+          content.style.height = '11in';
+          content.style.position = 'relative';
+          content.appendChild(iframe);
           if (typeof totalPages === 'number' && Number.isFinite(totalPages)) {
             const footer = document.createElement('div');
             footer.className = 'page-footer';
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + 1; // best-effort for fallback
             footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
-            wrapper.appendChild(footer);
+            content.appendChild(footer);
           }
+          wrapper.appendChild(content);
           container.appendChild(wrapper);
           pushPdfjsLog('renderPdf.fallbackIframe', { urlCreated: !!objectUrl });
         } catch (fallbackErr) {
