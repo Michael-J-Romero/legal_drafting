@@ -2,6 +2,9 @@
 
 // Centralized PDF.js loading and debug logging utilities
 
+const FALLBACK_PDFJS_VERSION = '3.10.111';
+const FALLBACK_WORKER_SRC = `https://unpkg.com/pdfjs-dist@${FALLBACK_PDFJS_VERSION}/build/pdf.worker.min.js`;
+
 export function pushPdfjsLog(event, details) {
   try {
     // eslint-disable-next-line no-console
@@ -65,7 +68,50 @@ function loadScriptOnce(src, id) {
   });
 }
 
-async function loadPdfjsFromCdn(version = '3.10.111') {
+function setWorkerSrc(pdfjs, reason) {
+  if (!pdfjs || !pdfjs.GlobalWorkerOptions) {
+    pushPdfjsLog('workerSrc.skipNoGlobal', { reason });
+    return;
+  }
+
+  try {
+    if (pdfjs.GlobalWorkerOptions.workerSrc) {
+      pushPdfjsLog('workerSrc.alreadySet', {
+        reason,
+        workerSrc: pdfjs.GlobalWorkerOptions.workerSrc,
+      });
+      if (typeof window !== 'undefined') {
+        window.__pdfjsWorkerSrc = pdfjs.GlobalWorkerOptions.workerSrc;
+      }
+      return;
+    }
+
+    const workerSrc = (() => {
+      if (typeof window !== 'undefined' && window.__pdfjsWorkerSrc) {
+        return window.__pdfjsWorkerSrc;
+      }
+      return FALLBACK_WORKER_SRC;
+    })();
+
+    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+
+    if (typeof window !== 'undefined') {
+      window.__pdfjsWorkerSrc = workerSrc;
+    }
+
+    pushPdfjsLog('workerSrc.set', { reason, workerSrc });
+  } catch (error) {
+    pushPdfjsLog('workerSrc.error', {
+      reason,
+      error: {
+        message: String(error?.message || error),
+        stack: String(error?.stack || ''),
+      },
+    });
+  }
+}
+
+async function loadPdfjsFromCdn(version = FALLBACK_PDFJS_VERSION) {
   if (typeof window === 'undefined') throw new Error('no window');
   if (window.pdfjsLib && typeof window.pdfjsLib.getDocument === 'function') {
     return window.pdfjsLib;
@@ -75,11 +121,10 @@ async function loadPdfjsFromCdn(version = '3.10.111') {
   pushPdfjsLog('cdn.loadScript', { url });
   await loadScriptOnce(url, '__pdfjs_cdn_script');
   const pdfjs = window.pdfjsLib;
-  if (pdfjs && pdfjs.GlobalWorkerOptions) {
-    try {
-      pdfjs.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.js`;
-    } catch (_) {}
+  if (typeof window !== 'undefined') {
+    window.__pdfjsWorkerSrc = `${base}/pdf.worker.min.js`;
   }
+  setWorkerSrc(pdfjs, `cdn@${version}`);
   return pdfjs;
 }
 
@@ -102,6 +147,7 @@ export async function loadPdfjs() {
       pushPdfjsLog('loadPdfjs.loaded', { attempt: attempt.label, isEsModule, modKeys, hasDefault, defaultKeys, hasGetDoc: !!(candidate && candidate.getDocument) });
       if (candidate && typeof candidate.getDocument === 'function') {
         pushPdfjsLog('loadPdfjs.success', { attempt: attempt.label });
+        setWorkerSrc(candidate, `module:${attempt.label}`);
         return candidate;
       }
       const e = new Error('Loaded pdfjs module does not expose getDocument');
@@ -117,15 +163,23 @@ export async function loadPdfjs() {
     pushPdfjsLog('loadPdfjs.failAll', { errors: errors.map((e) => String(e && e.message ? e.message : e)) });
   }
   try {
-    pushPdfjsLog('loadPdfjs.cdnTry', { version: '3.10.111' });
-    const pdfjs = await loadPdfjsFromCdn('3.10.111');
+    pushPdfjsLog('loadPdfjs.cdnTry', { version: FALLBACK_PDFJS_VERSION });
+    const pdfjs = await loadPdfjsFromCdn(FALLBACK_PDFJS_VERSION);
     if (pdfjs && typeof pdfjs.getDocument === 'function') {
-      pushPdfjsLog('loadPdfjs.cdnSuccess', { version: '3.10.111' });
+      pushPdfjsLog('loadPdfjs.cdnSuccess', { version: FALLBACK_PDFJS_VERSION });
       return pdfjs;
     }
-    pushPdfjsLog('loadPdfjs.cdnMissingGetDocument', { version: '3.10.111' });
+    pushPdfjsLog('loadPdfjs.cdnMissingGetDocument', { version: FALLBACK_PDFJS_VERSION });
   } catch (cdnErr) {
-    pushPdfjsLog('loadPdfjs.cdnError', { message: String(cdnErr?.message || cdnErr) });
+    pushPdfjsLog('loadPdfjs.cdnError', {
+      version: FALLBACK_PDFJS_VERSION,
+      message: String(cdnErr?.message || cdnErr),
+    });
   }
   return null;
+}
+
+export function ensurePdfjsWorker(pdfjs, reason = 'manual') {
+  setWorkerSrc(pdfjs, reason);
+  return pdfjs;
 }

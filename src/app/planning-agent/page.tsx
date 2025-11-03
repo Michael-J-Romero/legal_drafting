@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, type ChangeEvent, type FormEvent } from 'react';
-import { loadPdfjs } from '../lib/pdfjsLoader';
+import { loadPdfjs, ensurePdfjsWorker } from '../lib/pdfjsLoader';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -18,13 +18,13 @@ interface UploadedContext {
 }
 
 async function extractTextFromPdf(file: File): Promise<string> {
-  const pdfjs = await loadPdfjs();
+  const pdfjs = ensurePdfjsWorker(await loadPdfjs(), 'component:extract');
   if (!pdfjs || typeof pdfjs.getDocument !== 'function') {
     throw new Error('Failed to load PDF parser');
   }
 
   const buffer = await file.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer), disableWorker: true });
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
   const doc = await loadingTask.promise;
 
   const pageTexts: string[] = [];
