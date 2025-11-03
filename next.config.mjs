@@ -2,7 +2,13 @@
 const nextConfig = {
   // Ensure certain server deps are not bundled, avoiding parser issues in node_modules
   experimental: {
-    serverComponentsExternalPackages: ['undici'],
+    serverComponentsExternalPackages: [
+      'undici',
+      '@langchain/core',
+      '@langchain/openai', 
+      '@langchain/textsplitters',
+      'tiktoken'
+    ],
   },
   webpack: (config, { isServer }) => {
     config.resolve.alias.canvas = false;
