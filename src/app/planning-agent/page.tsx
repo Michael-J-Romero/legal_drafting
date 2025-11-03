@@ -493,50 +493,69 @@ export default function PlanningAgentPage() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
+      let buffer = ''; // Buffer for incomplete lines
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.error) {
-                console.error('Stream error:', data.error);
-                assistantMessage += `\n\nError: ${data.error}`;
-              } else if (data.type === 'output_text_delta' && data.data?.delta) {
-                const content = data.data.delta;
-                assistantMessage += content;
-                updateActiveChatMessages((prev) => {
-                  const newMessages = [...prev];
-                  const last = newMessages[newMessages.length - 1];
-                  if (last && last.role === 'assistant') {
-                    newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
-                  } else {
-                    newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                  }
-                  return newMessages;
-                });
-              } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
-                const content = data.data.delta;
-                assistantMessage += content;
-                updateActiveChatMessages((prev) => {
-                  const newMessages = [...prev];
-                  const last = newMessages[newMessages.length - 1];
-                  if (last && last.role === 'assistant') {
-                    newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
-                  } else {
-                    newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                  }
-                  return newMessages;
-                });
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          
+          // Split by double newline (SSE message separator) to get complete messages
+          const messages = buffer.split('\n\n');
+          
+          // Keep the last incomplete message in the buffer
+          buffer = messages.pop() || '';
+          
+          for (const message of messages) {
+            const lines = message.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+              
+              try {
+                const data = JSON.parse(jsonStr);
+                if (data.error) {
+                  console.error('Stream error:', data.error);
+                  assistantMessage += `\n\nError: ${data.error}`;
+                } else if (data.type === 'output_text_delta' && data.data?.delta) {
+                  const content = data.data.delta;
+                  assistantMessage += content;
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                    } else {
+                      newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                    }
+                    return newMessages;
+                  });
+                } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
+                  const content = data.data.delta;
+                  assistantMessage += content;
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                    } else {
+                      newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                    }
+                    return newMessages;
+                  });
+                }
+              } catch (err) {
+                // Silently skip malformed JSON - likely an incomplete chunk
+                // Only log if it's a significant error
+                if (jsonStr.length > 10) {
+                  console.warn('Skipping malformed JSON chunk:', jsonStr.substring(0, 100));
+                }
               }
-            } catch (err) {
-              console.error('Error parsing chunk:', err);
             }
           }
         }
