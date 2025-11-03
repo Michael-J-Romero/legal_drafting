@@ -72,9 +72,9 @@ export async function POST(request: Request) {
     };
 
     const allowedMimeTypes = mimeTypeMap[fileExtension];
-    if (!allowedMimeTypes.includes(file.type)) {
+    if (!file.type || !allowedMimeTypes.includes(file.type)) {
       return NextResponse.json(
-        { error: `Invalid file type. Expected ${allowedMimeTypes.join(' or ')} for ${fileExtension} files, but got ${file.type}` },
+        { error: `Invalid file type. Expected ${allowedMimeTypes.join(' or ')} for ${fileExtension} files${file.type ? `, but got ${file.type}` : ''}` },
         { status: 400 }
       );
     }

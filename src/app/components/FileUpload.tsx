@@ -49,7 +49,7 @@ export default function FileUpload() {
 
       const data: UploadResponse = await response.json();
 
-      if (data.success && data.text) {
+      if (response.ok && data.success && data.text) {
         setExtractedText(data.text);
         setUploadInfo({
           fileName: data.fileName || '',
