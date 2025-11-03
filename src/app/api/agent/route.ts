@@ -1,9 +1,21 @@
 import { Agent, tool, run } from '@openai/agents';
 import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
+import { ContextManager } from './contextManager';
 
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
+
+// Context manager instance (in-memory, per-request)
+// In production, you might want to use Redis or similar for persistence
+let contextManager: ContextManager | null = null;
+
+function getContextManager(): ContextManager {
+  if (!contextManager) {
+    contextManager = new ContextManager(8000); // Max 8000 tokens for context
+  }
+  return contextManager;
+}
 
 // Define the search_web tool schema
 const searchWebSchema = z.object({
@@ -108,24 +120,67 @@ const browseTool = tool({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, messages } = body as {
+    const { message, messages, clearContext } = body as {
       message?: string;
       messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string | number | Date }>;
+      clearContext?: boolean;
     };
 
-    // Build a single input string that contains 100% of the conversation context
-    // This avoids relying on any server-side session state.
-    let inputText: string;
-    if (Array.isArray(messages) && messages.length > 0) {
-      const transcript = messages
-        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-        .join('\n');
+    // Get context manager instance
+    const ctxManager = getContextManager();
+    
+    // Clear context if requested (new conversation)
+    if (clearContext) {
+      ctxManager.clear();
+    }
 
-      inputText = `You are continuing a multi-turn conversation. Here is the full transcript so far:\n\n${transcript}\n\nPlease continue the conversation as the Assistant, responding to the most recent user message. Use tools when helpful and follow your browsing/citation instructions.`;
-    } else if (typeof message === 'string' && message.trim().length > 0) {
-      inputText = message.trim();
-    } else {
+    // Get the user's query
+    const userQuery = message?.trim() || (messages && messages.length > 0 ? messages[messages.length - 1].content : '');
+    
+    if (!userQuery) {
       return new Response('Message or messages array is required', { status: 400 });
+    }
+
+    // Build optimized context using LangChain
+    let inputText: string;
+    const conversationHistory = Array.isArray(messages) ? messages : [];
+    
+    try {
+      // Get optimized context with semantic retrieval
+      const { relevantResearch, conversationSummary, totalTokens } = await ctxManager.getOptimizedContext(
+        userQuery,
+        conversationHistory
+      );
+      
+      // Build input with optimized context
+      if (conversationHistory.length > 0) {
+        inputText = `You are continuing a multi-turn conversation.
+
+[Conversation Summary - ${conversationHistory.length} messages, ~${totalTokens} tokens]
+${conversationSummary}
+
+${relevantResearch ? `[Relevant Research Context]\n${relevantResearch}\n\n` : ''}Current user message: ${userQuery}
+
+Please respond as the Assistant. Use tools when helpful and follow your structured reasoning process.`;
+      } else {
+        inputText = userQuery;
+      }
+      
+      // Log context stats for debugging
+      const stats = ctxManager.getStats();
+      console.log(`[Context Manager] Documents: ${stats.documentCount}, Estimated tokens: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
+      
+    } catch (error) {
+      console.error('Error getting optimized context:', error);
+      // Fallback to simple context
+      if (Array.isArray(messages) && messages.length > 0) {
+        const transcript = messages.slice(-3) // Last 3 messages only
+          .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+          .join('\n');
+        inputText = `You are continuing a multi-turn conversation. Recent context:\n\n${transcript}\n\nPlease continue the conversation as the Assistant.`;
+      } else {
+        inputText = userQuery;
+      }
     }
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
@@ -248,10 +303,31 @@ Remember: ALWAYS use all four phases with the emoji markers. This transparency h
             stream: true,
           });
 
+          // Accumulate full response for context extraction
+          let fullResponse = '';
+
           // Stream the response chunks
           for await (const chunk of result) {
             const data = JSON.stringify(chunk);
             controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+            
+            // Accumulate text chunks for later processing
+            if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
+              if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
+                fullResponse += chunk.data.delta;
+              } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
+                fullResponse += (chunk.data as any).delta;
+              }
+            }
+          }
+
+          // Extract and store research findings for future context retrieval
+          if (fullResponse) {
+            try {
+              ctxManager.extractResearchFindings(fullResponse);
+            } catch (error) {
+              console.error('Error extracting research findings:', error);
+            }
           }
 
           controller.close();
