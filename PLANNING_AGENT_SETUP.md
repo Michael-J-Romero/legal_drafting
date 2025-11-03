@@ -33,18 +33,28 @@ Each phase is visually distinguished in the UI with colored backgrounds and emoj
    - Next.js Route Handler with Node.js runtime
    - Integrates OpenAI Agents SDK with advanced prompting
    - Uses Chain-of-Thought reasoning with structured phases
+   - **Context Manager** for optimized token usage (LangChain integration)
    - Implements two primary tools:
      - `search_web`: Web search via Tavily API
      - `browse`: Web page interaction via Cheerio (HTTP fetch + HTML parsing)
    - Streams responses back to the client in real-time
 
-2. **UI** (`src/app/planning-agent/page.tsx`)
+2. **Context Manager** (`src/app/api/agent/contextManager.ts`) **NEW**
+   - Hybrid LangChain integration for efficient context management
+   - Semantic search using OpenAI embeddings
+   - Document chunking with RecursiveCharacterTextSplitter
+   - Token counting with tiktoken (max 8000 tokens per request)
+   - Automatic extraction and storage of research findings
+   - Cosine similarity scoring for relevance ranking
+   - Conversation summarization (keeps last 3 messages)
+
+3. **UI** (`src/app/planning-agent/page.tsx`)
    - React chat interface with real-time streaming
    - Parses and visualizes agent's reasoning phases
    - Color-coded sections for different thinking stages
    - Clean, accessible design with visual feedback
 
-3. **Database Schema** (`prisma/schema.prisma`)
+4. **Database Schema** (`prisma/schema.prisma`)
    - PostgreSQL schema for persistence
    - Models: Conversation, AgentRun, ToolStep, Snippet
 
@@ -68,6 +78,11 @@ This will install all required dependencies including:
 - `@openai/agents` - OpenAI Agents SDK
 - `@openai/agents-openai` - OpenAI provider for Agents SDK
 - `zod` - Schema validation
+- `langchain` - LangChain framework for context management
+- `@langchain/openai` - OpenAI integrations for LangChain
+- `@langchain/core` - Core LangChain functionality
+- `@langchain/textsplitters` - Document chunking utilities
+- `tiktoken` - Token counting for efficient context management
 - `cheerio` - HTML parsing for web browsing
 - `@prisma/client` - Prisma database client
 - `prisma` (dev) - Prisma CLI
@@ -230,6 +245,23 @@ Potential improvements to consider:
 - Implement human-in-the-loop approval for certain actions
 
 ## Key Features
+
+### Optimized Context Management (NEW)
+
+The agent now uses LangChain for efficient token usage and intelligent context retrieval:
+
+- **Semantic Search**: Uses OpenAI embeddings to find the most relevant research findings for each query
+- **Smart Chunking**: Breaks down large documents into manageable chunks (1000 tokens with 200-token overlap)
+- **Token Optimization**: Automatically limits context to 8000 tokens, prioritizing the most relevant information
+- **Research Accumulation**: Stores findings from RESEARCH, REFLECTION, and SYNTHESIS phases for future reference
+- **Conversation Summarization**: Keeps only the last 3 messages to reduce context size
+- **Automatic Extraction**: Extracts and indexes research findings as the agent works
+
+**Benefits:**
+- Reduced API costs through efficient token usage
+- Better context relevance via semantic similarity
+- Maintains conversation continuity across sessions
+- Scales to longer research sessions without context overflow
 
 ### Transparent Reasoning Process
 
