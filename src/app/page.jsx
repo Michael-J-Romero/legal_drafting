@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { FiArrowLeft } from 'react-icons/fi';
 import '/src/App.css';
 
 import EditorPanel from './components/EditorPanel';
@@ -9,6 +8,7 @@ import PreviewPanel from './components/PreviewPanel';
 import AppHeader from './components/AppHeader';
 import FullscreenOverlay from './components/FullscreenOverlay';
 import useDocumentEditor from './hooks/useDocumentEditor';
+import PlannerAgent from './components/PlannerAgent';
 
 const TOOLS = {
   MENU: null,
@@ -156,41 +156,3 @@ function DocumentBuilder({ onBack }) {
   );
 }
 
-function PlannerAgent({ onBack }) {
-  return (
-    <>
-      <PlannerHeader onBack={onBack} />
-      <div className="planner-layout">
-        <div className="planner-panel">
-          <h2>Chat</h2>
-          <div className="planner-placeholder">Chat experience coming soon.</div>
-        </div>
-        <div className="planner-panel">
-          <h2>Preview</h2>
-          <div className="planner-placeholder">Preview area</div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function PlannerHeader({ onBack }) {
-  return (
-    <header className="app-header" role="banner">
-      <div className="app-header-inner">
-        <div className="app-header-left">
-          <button
-            type="button"
-            className="app-back-button"
-            onClick={onBack}
-            aria-label="Back to main menu"
-            title="Back to main menu"
-          >
-            <FiArrowLeft />
-          </button>
-          <div className="app-title">Planner Agent</div>
-        </div>
-      </div>
-    </header>
-  );
-}
