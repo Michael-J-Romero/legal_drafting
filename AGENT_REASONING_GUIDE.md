@@ -1,16 +1,16 @@
 # Agent Reasoning & Inner Dialogue Guide
 
-This guide explains the enhanced agent capabilities that make your chat act more like GitHub Copilot Agent or ChatGPT Deep Research.
+This guide explains the enhanced agent capabilities that make your chat act more like GitHub Copilot Agent or ChatGPT Deep Research with **iterative reasoning**.
 
 ## Overview
 
-The planning agent now demonstrates advanced reasoning capabilities with transparent "inner dialogue" and structured thinking processes. Instead of just providing answers, the agent shows you exactly how it thinks, plans, and arrives at conclusions.
+The planning agent now demonstrates advanced reasoning capabilities with transparent "inner dialogue" and **iterative structured thinking** processes. Instead of just providing answers, the agent shows you exactly how it thinks, plans, researches, reflects on confidence, and iterates until it arrives at a solid conclusion with no logic holes.
 
 ## Key Features
 
-### 1. Transparent Reasoning Process
+### 1. Iterative Reasoning Process
 
-The agent makes its thought process visible through four distinct phases:
+The agent makes its thought process visible through **five distinct phases** with automatic iteration:
 
 #### 🤔 **THINKING Phase**
 - **Purpose**: Planning and analysis
@@ -30,39 +30,64 @@ The agent makes its thought process visible through four distinct phases:
   - Key findings as they're discovered
 - **Example**: "Searching for 'latest AI developments' to get current information... Found 5 sources, examining URLs A and B..."
 
+#### 🧐 **REFLECTION Phase** (NEW - Critical for Iteration)
+- **Purpose**: Self-assessment and gap analysis
+- **What you see**:
+  - Confidence level (0-100%)
+  - Information gaps identified
+  - Logic hole detection
+  - Decision to research more or proceed
+  - New relevant angles discovered
+- **Example**: "Confidence: 65%. Missing information: Need more on recent developments from 2024. Potential issues: Sources conflict on timeline. Need more research: Yes, searching for 2024-specific data..."
+- **Iteration**: If confidence < 85% or gaps exist, agent returns to RESEARCH phase
+
 #### 💡 **SYNTHESIS Phase**
-- **Purpose**: Analysis and pattern recognition
+- **Purpose**: Analysis and pattern recognition (only after sufficient confidence)
 - **What you see**:
   - Information organization
   - Pattern identification
   - Connection between findings
   - Credibility assessment
-- **Example**: "Based on my research: Theme 1 emerges from sources A and C. Theme 2 contradicts earlier findings..."
+  - Final logic hole check
+- **Example**: "Based on my research: Theme 1 emerges from sources A and C. Theme 2 contradicts earlier findings but is resolved by source D..."
 
 #### ✅ **ANSWER Phase**
 - **Purpose**: Final comprehensive response
 - **What you see**:
   - Structured, clear answer
   - Proper citations with URLs
-  - Acknowledgment of limitations
-  - Next steps or recommendations
-- **Example**: "Based on comprehensive research across 8 sources, here's what I found... [structured response with citations]"
+  - Final confidence level
+  - Acknowledgment of any remaining limitations
+- **Example**: "Based on comprehensive research across 8 sources (Confidence: 92%), here's what I found... [structured response with citations]"
 
 ### 2. Visual Indicators
 
 Each phase is color-coded in the UI for easy navigation:
 - **Yellow background**: Thinking/Planning
 - **Blue background**: Research/Data gathering
+- **Pink background**: Reflection/Confidence checking (NEW)
 - **Purple background**: Synthesis/Analysis
 - **Green background**: Final answer/Conclusion
 
-### 3. Inner Dialogue
+### 3. Iterative Loop
+
+The agent **automatically iterates** between RESEARCH and REFLECTION phases:
+- After each research action, the agent reflects on confidence and gaps
+- If confidence < 85% or information gaps exist, it returns to RESEARCH
+- This loop continues until the agent is confident it has a solid answer
+- You'll see multiple RESEARCH → REFLECTION cycles for complex queries
+- The agent will note when new relevant information is discovered mid-research
+
+### 4. Inner Dialogue
 
 The agent demonstrates human-like reasoning by:
 - **Questioning assumptions**: "Should I focus on recent data or historical trends?"
 - **Considering alternatives**: "I could search for X, but Y might be more relevant because..."
 - **Being transparent about uncertainty**: "The sources conflict on this point, suggesting..."
 - **Explaining decisions**: "I'm choosing to browse this URL because it's from a reputable source..."
+- **Assessing confidence**: "Confidence: 70% - I need more information on aspect X"
+- **Identifying gaps**: "Missing: Recent data from 2024, technical specifications"
+- **Detecting logic holes**: "This conclusion assumes X, but I haven't verified that yet"
 
 ## How to Use
 

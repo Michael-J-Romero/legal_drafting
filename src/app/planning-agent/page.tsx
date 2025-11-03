@@ -57,7 +57,7 @@ function generateId() {
 }
 
 interface MessageSection {
-  type: 'thinking' | 'research' | 'synthesis' | 'answer' | 'plain';
+  type: 'thinking' | 'research' | 'reflection' | 'synthesis' | 'answer' | 'plain';
   content: string;
 }
 
@@ -76,6 +76,13 @@ const SECTION_STYLES: Record<MessageSection['type'], { bg: string; border: strin
     icon: '🔍',
     title: 'Research',
     color: '#1e3a8a',
+  },
+  reflection: {
+    bg: '#fce7f3',
+    border: '#ec4899',
+    icon: '🧐',
+    title: 'Reflection',
+    color: '#831843',
   },
   synthesis: {
     bg: '#e0e7ff',
@@ -111,6 +118,11 @@ const PHASE_MARKERS = [
     type: 'research' as const, 
     pattern: /🔍\s*\*\*RESEARCH:\*\*/gi,
     removePattern: /^🔍\s*\*\*RESEARCH:\*\*\n?/i
+  },
+  { 
+    type: 'reflection' as const, 
+    pattern: /🧐\s*\*\*REFLECTION:\*\*/gi,
+    removePattern: /^🧐\s*\*\*REFLECTION:\*\*\n?/i
   },
   { 
     type: 'synthesis' as const, 
@@ -680,15 +692,17 @@ export default function PlanningAgentPage() {
         <div style={{ flex: 1, overflowY: 'auto', padding: 20, backgroundColor: '#f9fafb' }}>
           {messages.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#6b7280', marginTop: 40 }}>
-              <p style={{ fontSize: 18, fontWeight: 600, color: '#111827', marginBottom: 16 }}>🧠 Advanced Research Agent with Deep Reasoning</p>
-              <p>This agent works like GitHub Copilot Agent or ChatGPT Deep Research.</p>
-              <p style={{ marginTop: 10 }}>You'll see the agent's complete thought process:</p>
+              <p style={{ fontSize: 18, fontWeight: 600, color: '#111827', marginBottom: 16 }}>🧠 Advanced Research Agent with Iterative Deep Reasoning</p>
+              <p>This agent uses iterative reasoning - it goes back and forth, checking confidence and logic holes until it has a solid answer.</p>
+              <p style={{ marginTop: 10 }}>You'll see the agent's complete iterative thought process:</p>
               <div style={{ marginTop: 20, display: 'inline-block', textAlign: 'left', backgroundColor: '#fff', padding: 20, borderRadius: 8, border: '1px solid #e5e7eb' }}>
                 <div style={{ marginBottom: 8 }}>🤔 <strong>Thinking</strong> - Planning and reasoning</div>
                 <div style={{ marginBottom: 8 }}>🔍 <strong>Research</strong> - Web search and browsing</div>
+                <div style={{ marginBottom: 8 }}>🧐 <strong>Reflection</strong> - Confidence check & gap analysis</div>
                 <div style={{ marginBottom: 8 }}>💡 <strong>Synthesis</strong> - Analyzing findings</div>
                 <div>✅ <strong>Answer</strong> - Final response with citations</div>
               </div>
+              <p style={{ marginTop: 20, fontSize: 14, fontWeight: 500 }}>The agent will iterate through Research → Reflection until confidence ≥ 85%</p>
               <p style={{ marginTop: 20, fontSize: 14 }}>Try asking: "Research the latest developments in AI agents and explain the key trends"</p>
               <p style={{ marginTop: 10, fontSize: 14 }}>You can also upload files (PDF, .txt, .js, .json) to include in your messages.</p>
             </div>
