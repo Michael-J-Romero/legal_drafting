@@ -101,6 +101,32 @@ export async function loadPdfjs() {
       const candidate = mod && (mod.getDocument ? mod : mod.default);
       pushPdfjsLog('loadPdfjs.loaded', { attempt: attempt.label, isEsModule, modKeys, hasDefault, defaultKeys, hasGetDoc: !!(candidate && candidate.getDocument) });
       if (candidate && typeof candidate.getDocument === 'function') {
+        try {
+          if (candidate.GlobalWorkerOptions) {
+            const hasWorkerSrc = Boolean(candidate.GlobalWorkerOptions.workerSrc);
+            if (!hasWorkerSrc) {
+              const version =
+                typeof candidate.version === 'string' && candidate.version.trim()
+                  ? candidate.version.trim()
+                  : '5.4.296';
+              const normalizedVersion = version.replace(/[^0-9.]/g, '') || '5.4.296';
+              const isLegacy = attempt.label === 'legacy/cjs';
+              const workerDir = isLegacy ? 'legacy/build' : 'build';
+              const workerFile = isLegacy ? 'pdf.worker.min.js' : 'pdf.worker.min.mjs';
+              const workerSrc = `https://unpkg.com/pdfjs-dist@${normalizedVersion}/${workerDir}/${workerFile}`;
+              candidate.GlobalWorkerOptions.workerSrc = workerSrc;
+              pushPdfjsLog('loadPdfjs.workerConfigured', {
+                attempt: attempt.label,
+                workerSrc,
+              });
+            }
+          }
+        } catch (workerErr) {
+          pushPdfjsLog('loadPdfjs.workerConfigError', {
+            attempt: attempt.label,
+            error: { message: String(workerErr?.message || workerErr) },
+          });
+        }
         pushPdfjsLog('loadPdfjs.success', { attempt: attempt.label });
         return candidate;
       }
