@@ -2,16 +2,36 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+interface UploadedFile {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  uploadedAt: Date;
+}
+
+interface StoredUploadedFile {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  uploadedAt: string; // ISO
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  files?: UploadedFile[];
 }
 
 interface StoredMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string; // ISO
+  files?: StoredUploadedFile[];
 }
 
 interface ChatSession {
@@ -39,7 +59,11 @@ function generateId() {
 function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
   return stored.map((c) => ({
     ...c,
-    messages: (c.messages || []).map((m) => ({ ...m, timestamp: new Date(m.timestamp) })),
+    messages: (c.messages || []).map((m) => ({ 
+      ...m, 
+      timestamp: new Date(m.timestamp),
+      files: m.files?.map(f => ({ ...f, uploadedAt: new Date(f.uploadedAt) }))
+    })),
   }));
 }
 
@@ -49,7 +73,11 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
     title: c.title,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
-    messages: c.messages.map((m) => ({ ...m, timestamp: m.timestamp.toISOString() })),
+    messages: c.messages.map((m) => ({ 
+      ...m, 
+      timestamp: m.timestamp.toISOString(),
+      files: m.files?.map(f => ({ ...f, uploadedAt: f.uploadedAt.toISOString() }))
+    })),
   }));
 }
 
@@ -60,6 +88,10 @@ export default function PlanningAgentPage() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -171,13 +203,91 @@ export default function PlanningAgentPage() {
     setInput('');
   }
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success && data.text) {
+        const uploadedFile: UploadedFile = {
+          id: generateId(),
+          fileName: data.fileName,
+          fileType: data.fileType,
+          size: data.size,
+          text: data.text,
+          uploadedAt: new Date(),
+        };
+        setUploadedFiles((prev) => [...prev, uploadedFile]);
+      } else {
+        alert(data.error || 'Failed to upload file');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'An error occurred during upload');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDeleteFile = (fileId: string) => {
+    const file = uploadedFiles.find(f => f.id === fileId);
+    if (!file) return;
+    
+    const ok = window.confirm(`Delete ${file.fileName}? This cannot be undone.`);
+    if (!ok) return;
+    
+    setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  const openFilePreview = (file: UploadedFile) => {
+    const blob = new Blob([file.text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    // Clean up the URL after a delay
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return bytes + ' bytes';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !activeChat) return;
 
-    const userMessage: Message = { role: 'user', content: input.trim(), timestamp: new Date() };
+    const userMessage: Message = { 
+      role: 'user', 
+      content: input.trim(), 
+      timestamp: new Date(),
+      files: uploadedFiles.length > 0 ? [...uploadedFiles] : undefined
+    };
 
-    const conversationToSend = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+    // Include file content in the message sent to the API
+    let messageContent = input.trim();
+    if (uploadedFiles.length > 0) {
+      messageContent += '\n\n[Attached Files]:\n';
+      uploadedFiles.forEach(file => {
+        messageContent += `\n--- ${file.fileName} (${file.fileType}) ---\n${file.text}\n`;
+      });
+    }
+
+    const conversationToSend = [...messages, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
 
     updateActiveChatMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0) {
@@ -186,6 +296,7 @@ export default function PlanningAgentPage() {
     }
 
     setInput('');
+    setUploadedFiles([]); // Clear uploaded files after sending
     setIsLoading(true);
 
     try {
@@ -401,6 +512,7 @@ export default function PlanningAgentPage() {
             <div style={{ textAlign: 'center', color: '#6b7280', marginTop: 40 }}>
               <p>Start a conversation with the research agent.</p>
               <p style={{ marginTop: 10, fontSize: 14 }}>Try asking: "Research the latest developments in AI agents"</p>
+              <p style={{ marginTop: 10, fontSize: 14 }}>You can also upload files (PDF, .txt, .js, .json) to include in your messages.</p>
             </div>
           ) : (
             messages.map((message, index) => (
@@ -410,6 +522,32 @@ export default function PlanningAgentPage() {
               >
                 <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
                 <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{message.content}</div>
+                {message.files && message.files.length > 0 && (
+                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {message.files.map((file) => (
+                      <div
+                        key={file.id}
+                        onClick={() => openFilePreview(file)}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#fff',
+                          border: '1px solid #d1d5db',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                        title={`Click to preview ${file.fileName}`}
+                      >
+                        <span>📎</span>
+                        <span>{file.fileName}</span>
+                        <span style={{ color: '#6b7280', fontSize: 11 }}>({formatFileSize(file.size)})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
               </div>
             ))
@@ -417,23 +555,108 @@ export default function PlanningAgentPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 10, padding: 16, borderTop: '1px solid #e5e7eb' }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask the agent to research something..."
-            disabled={isLoading || !activeChat}
-            style={{ flex: 1, padding: 12, border: '1px solid #d1d5db', borderRadius: 8, fontSize: 16, outline: 'none' }}
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim() || !activeChat}
-            style={{ padding: '12px 24px', backgroundColor: isLoading || !input.trim() || !activeChat ? '#d1d5db' : '#3b82f6', color: 'white', border: 'none', borderRadius: 8, fontSize: 16, cursor: isLoading || !input.trim() || !activeChat ? 'not-allowed' : 'pointer', fontWeight: 500 }}
-          >
-            {isLoading ? 'Researching...' : 'Send'}
-          </button>
-        </form>
+        <div style={{ borderTop: '1px solid #e5e7eb', padding: 16 }}>
+          {uploadedFiles.length > 0 && (
+            <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {uploadedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  onMouseEnter={() => setHoveredFileId(file.id)}
+                  onMouseLeave={() => setHoveredFileId(null)}
+                  style={{
+                    position: 'relative',
+                    padding: '6px 12px',
+                    backgroundColor: '#f3f4f6',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <span>📎</span>
+                  <span 
+                    onClick={() => openFilePreview(file)}
+                    style={{ cursor: 'pointer' }}
+                    title={`Click to preview ${file.fileName}`}
+                  >
+                    {file.fileName}
+                  </span>
+                  <span style={{ color: '#6b7280', fontSize: 11 }}>({formatFileSize(file.size)})</span>
+                  {hoveredFileId === file.id && (
+                    <button
+                      onClick={() => handleDeleteFile(file.id)}
+                      style={{
+                        position: 'absolute',
+                        top: -6,
+                        right: -6,
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        backgroundColor: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 'bold',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                      }}
+                      title="Delete file"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          
+          <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              accept=".pdf,.txt,.js,.json"
+              style={{ display: 'none' }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading || isLoading || !activeChat}
+              style={{
+                padding: '12px 16px',
+                backgroundColor: '#fff',
+                border: '1px solid #d1d5db',
+                borderRadius: 8,
+                fontSize: 16,
+                cursor: isUploading || isLoading || !activeChat ? 'not-allowed' : 'pointer',
+                color: '#374151',
+              }}
+              title="Upload file"
+            >
+              {isUploading ? '⏳' : '📎'}
+            </button>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask the agent to research something..."
+              disabled={isLoading || !activeChat}
+              style={{ flex: 1, padding: 12, border: '1px solid #d1d5db', borderRadius: 8, fontSize: 16, outline: 'none' }}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim() || !activeChat}
+              style={{ padding: '12px 24px', backgroundColor: isLoading || !input.trim() || !activeChat ? '#d1d5db' : '#3b82f6', color: 'white', border: 'none', borderRadius: 8, fontSize: 16, cursor: isLoading || !input.trim() || !activeChat ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+            >
+              {isLoading ? 'Researching...' : 'Send'}
+            </button>
+          </form>
+        </div>
       </main>
     </div>
   );
