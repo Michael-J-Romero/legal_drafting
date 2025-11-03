@@ -71,9 +71,35 @@ export default function PlanningAgentPage() {
                 if (data.error) {
                   console.error('Stream error:', data.error);
                   assistantMessage += `\n\nError: ${data.error}`;
-                } else if (data.type === 'text' || data.content) {
-                  // Handle different possible chunk formats
-                  const content = data.content || data.text || '';
+                } else if (data.type === 'output_text_delta' && data.data?.delta) {
+                  // Handle OpenAI Agents SDK output_text_delta format
+                  const content = data.data.delta;
+                  assistantMessage += content;
+                  
+                  // Update the assistant message in real-time
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMessage = newMessages[newMessages.length - 1];
+                    
+                    if (lastMessage && lastMessage.role === 'assistant') {
+                      // Create a new message object instead of mutating
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMessage,
+                        content: assistantMessage,
+                      };
+                    } else {
+                      newMessages.push({
+                        role: 'assistant',
+                        content: assistantMessage,
+                        timestamp: new Date(),
+                      });
+                    }
+                    
+                    return newMessages;
+                  });
+                } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
+                  // Handle raw model stream events with delta
+                  const content = data.data.delta;
                   assistantMessage += content;
                   
                   // Update the assistant message in real-time
