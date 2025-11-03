@@ -106,10 +106,20 @@ body {
   gap: 16px;
 }
 
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .app-title {
   font-weight: 800;
   font-size: 1.1rem;
   color: #0f172a;
+}
+
+.back-btn {
+  border-radius: 12px;
 }
 
 .app-header-actions {
@@ -1301,4 +1311,123 @@ margin-top: 0in;
   .pdf-page > * {
     transform: none !important;
   }
+}
+
+/* Main menu */
+.main-menu-root {
+  background: radial-gradient(circle at top, #eff6ff, #e2e8f0 55%, #cbd5f5);
+}
+
+.main-menu-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.main-menu-card {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 24px;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+  max-width: 720px;
+  width: 100%;
+  padding: 48px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  text-align: center;
+  backdrop-filter: blur(12px);
+}
+
+.main-menu-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.main-menu-subtitle {
+  font-size: 1rem;
+  color: #475569;
+  margin: 0;
+}
+
+.main-menu-actions {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.main-menu-button {
+  border: none;
+  border-radius: 18px;
+  padding: 20px 18px;
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  text-align: left;
+}
+
+.main-menu-button.secondary {
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+}
+
+.main-menu-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 36px rgba(79, 70, 229, 0.28);
+}
+
+.main-menu-button span {
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Planner layout */
+.planner-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.planner-panel {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.planner-panel h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.planner-placeholder {
+  flex: 1;
+  border: 2px dashed #cbd5f5;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-weight: 600;
+  background: #f8fafc;
 }

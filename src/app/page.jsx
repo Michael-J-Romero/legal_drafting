@@ -9,7 +9,12 @@ import AppHeader from './components/AppHeader';
 import FullscreenOverlay from './components/FullscreenOverlay';
 import useDocumentEditor from './hooks/useDocumentEditor';
 
-export default function App() {
+const TOOLS = {
+  DOCUMENT_BUILDER: 'document-builder',
+  PLANNER_AGENT: 'planner-agent',
+};
+
+function DocumentBuilderView({ onBack }) {
   const { editorProps, previewProps } = useDocumentEditor();
 
   // Raw JSON editor state (moved from PreviewPanel toolbar to global header)
@@ -24,7 +29,7 @@ export default function App() {
   const handleZoomOut = React.useCallback(() => setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.5, 3)), []);
   const handleZoomReset = React.useCallback(() => setZoom(1), []);
 
-  async function handleOpenRaw() {
+  const handleOpenRaw = React.useCallback(async () => {
     try {
       const text = previewProps.getRawJson ? await previewProps.getRawJson() : '';
       setRawText(text || '');
@@ -33,11 +38,13 @@ export default function App() {
     } catch (_) {
       // ignore
     }
-  }
+  }, [previewProps]);
 
   return (
     <div className="app-root">
       <AppHeader
+        title="Document Builder"
+        onBack={onBack}
         onOpenRaw={handleOpenRaw}
         onImportBundle={previewProps.onImportBundle}
         onExportBundle={previewProps.onExportBundle}
@@ -78,7 +85,8 @@ export default function App() {
                   try {
                     JSON.parse(rawText);
                   } catch (e) {
-                    setRawError('Invalid JSON: ' + (e?.message || '')); return;
+                    setRawError('Invalid JSON: ' + (e?.message || ''));
+                    return;
                   }
                   try {
                     if (previewProps.onApplyRawJson) await previewProps.onApplyRawJson(rawText);
@@ -96,4 +104,79 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function PlannerAgentView({ onBack }) {
+  return (
+    <div className="app-root">
+      <AppHeader title="Planner Agent" onBack={onBack} actionsEnabled={false} />
+      <div className="planner-main">
+        <div className="planner-panel">
+          <h2>Conversation</h2>
+          <div className="planner-placeholder" style={{ minHeight: 240 }}>
+            Chat interface coming soon
+          </div>
+        </div>
+        <div className="planner-panel">
+          <h2>Preview</h2>
+          <div className="planner-placeholder">Preview area</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MainMenu({ onSelectTool }) {
+  return (
+    <div className="app-root main-menu-root">
+      <div className="main-menu-container">
+        <div className="main-menu-card">
+          <div>
+            <div className="main-menu-title">Legal Drafting Workspace</div>
+            <p className="main-menu-subtitle">Choose a tool to get started</p>
+          </div>
+          <div className="main-menu-actions">
+            <button
+              type="button"
+              className="main-menu-button"
+              onClick={() => onSelectTool(TOOLS.DOCUMENT_BUILDER)}
+            >
+              Create document
+              <span>Structure and generate legal pleadings with the document builder.</span>
+            </button>
+            <button
+              type="button"
+              className="main-menu-button secondary"
+              onClick={() => onSelectTool(TOOLS.PLANNER_AGENT)}
+            >
+              Planner agent
+              <span>Collaborate with a planning assistant and review outputs side-by-side.</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [activeTool, setActiveTool] = React.useState(null);
+
+  const handleSelectTool = React.useCallback((tool) => {
+    setActiveTool(tool);
+  }, []);
+
+  const handleBackToMenu = React.useCallback(() => {
+    setActiveTool(null);
+  }, []);
+
+  if (activeTool === TOOLS.DOCUMENT_BUILDER) {
+    return <DocumentBuilderView onBack={handleBackToMenu} />;
+  }
+
+  if (activeTool === TOOLS.PLANNER_AGENT) {
+    return <PlannerAgentView onBack={handleBackToMenu} />;
+  }
+
+  return <MainMenu onSelectTool={handleSelectTool} />;
 }
