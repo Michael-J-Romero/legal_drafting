@@ -1,9 +1,10 @@
 'use client';
 
 import React from 'react';
-import { FiPrinter, FiDownload, FiMoreVertical, FiCode, FiUpload, FiTrash2, FiZoomIn, FiZoomOut } from 'react-icons/fi';
+import { FiPrinter, FiDownload, FiMoreVertical, FiCode, FiUpload, FiTrash2, FiZoomIn, FiZoomOut, FiArrowLeft } from 'react-icons/fi';
 
 export default function AppHeader({
+  onBack,
   onOpenRaw,
   onImportBundle,
   onExportBundle,
@@ -13,6 +14,7 @@ export default function AppHeader({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  title = 'Legal Drafting',
 }) {
   const fileInputRef = React.useRef(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -30,7 +32,19 @@ export default function AppHeader({
   return (
     <header className="app-header" role="banner">
       <div className="app-header-inner">
-        <div className="app-title">Legal Drafting</div>
+        <div className="app-header-left">
+          {onBack ? (
+            <button
+              type="button"
+              className="icon-btn back-button"
+              onClick={onBack}
+              aria-label="Go back to main menu"
+            >
+              <FiArrowLeft />
+            </button>
+          ) : null}
+          <div className="app-title">{title}</div>
+        </div>
         <div className="app-header-actions" ref={menuRef}>
           {/* Zoom controls */}
           <button
