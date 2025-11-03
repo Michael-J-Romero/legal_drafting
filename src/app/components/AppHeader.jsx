@@ -1,9 +1,21 @@
 'use client';
 
 import React from 'react';
-import { FiPrinter, FiDownload, FiMoreVertical, FiCode, FiUpload, FiTrash2, FiZoomIn, FiZoomOut } from 'react-icons/fi';
+import {
+  FiPrinter,
+  FiDownload,
+  FiMoreVertical,
+  FiCode,
+  FiUpload,
+  FiTrash2,
+  FiZoomIn,
+  FiZoomOut,
+  FiArrowLeft,
+} from 'react-icons/fi';
 
 export default function AppHeader({
+  title = 'Legal Drafting',
+  onBack,
   onOpenRaw,
   onImportBundle,
   onExportBundle,
@@ -13,25 +25,41 @@ export default function AppHeader({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  showDocumentActions = true,
 }) {
   const fileInputRef = React.useRef(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef(null);
 
   React.useEffect(() => {
+    if (!showDocumentActions) return undefined;
     function onDocClick(e) {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(e.target)) setMenuOpen(false);
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+  }, [showDocumentActions]);
 
   return (
     <header className="app-header" role="banner">
       <div className="app-header-inner">
-        <div className="app-title">Legal Drafting</div>
-        <div className="app-header-actions" ref={menuRef}>
+        <div className="app-header-left">
+          {onBack ? (
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={onBack}
+              aria-label="Back to menu"
+              title="Back to menu"
+            >
+              <FiArrowLeft />
+            </button>
+          ) : null}
+          <div className="app-title">{title}</div>
+        </div>
+        {showDocumentActions ? (
+          <div className="app-header-actions" ref={menuRef}>
           {/* Zoom controls */}
           <button
             type="button"
@@ -137,7 +165,10 @@ export default function AppHeader({
               if (e.target) e.target.value = '';
             }}
           />
-        </div>
+          </div>
+        ) : (
+          <div className="app-header-actions" aria-hidden />
+        )}
       </div>
     </header>
   );
