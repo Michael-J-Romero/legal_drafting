@@ -5,6 +5,24 @@ import { load as loadHtml } from 'cheerio';
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
+// Schema definitions for request validation and tools
+const conversationMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  timestamp: z.string().optional(),
+});
+
+const uploadedFileSchema = z.object({
+  name: z.string(),
+  content: z.string(),
+});
+
+const conversationRequestSchema = z.object({
+  message: z.string(),
+  messages: z.array(conversationMessageSchema).optional(),
+  files: z.array(uploadedFileSchema).optional(),
+});
+
 // Define the search_web tool schema
 const searchWebSchema = z.object({
   query: z.string().describe('The search query to execute'),
@@ -107,7 +125,20 @@ const browseTool = tool({
 
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const parsed = conversationRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({
+          error: 'Invalid request body',
+          details: parsed.error.flatten(),
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { message, messages = [], files = [] } = parsed.data;
 
     if (!message) {
       return new Response('Message is required', { status: 400 });
@@ -134,12 +165,92 @@ This helps the UI follow along.`,
       tools: [searchWebTool, browseTool],
     });
 
+    // Lazily import pdfjs to avoid bundling it into the edge runtime and reuse the module across requests
+    const pdfjsLibPromise = (async () => {
+      if (files.length === 0) {
+        return null;
+      }
+
+      const module = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      module.GlobalWorkerOptions.workerSrc = 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+      return module;
+    })();
+
+    const documentContexts: string[] = [];
+
+    for (const file of files) {
+      try {
+        const pdfjsLib = await pdfjsLibPromise;
+
+        if (!pdfjsLib) {
+          continue;
+        }
+
+        const data = Buffer.from(file.content, 'base64');
+        const loadingTask = pdfjsLib.getDocument({ data });
+        const pdfDocument = await loadingTask.promise;
+
+        const pageTexts: string[] = [];
+
+        for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+          const page = await pdfDocument.getPage(pageNumber);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: unknown) => (typeof item === 'object' && item !== null && 'str' in item ? (item as { str: string }).str : ''))
+            .join(' ')
+            .trim();
+
+          if (pageText) {
+            pageTexts.push(`Page ${pageNumber}:\n${pageText}`);
+          }
+        }
+
+        await pdfDocument.destroy();
+
+        if (pageTexts.length > 0) {
+          documentContexts.push(`Document: ${file.name}\n${pageTexts.join('\n\n')}`);
+        } else {
+          documentContexts.push(`Document: ${file.name}\n[No extractable text found in this PDF]`);
+        }
+      } catch (error) {
+        console.error(`Error extracting PDF context from ${file.name}:`, error);
+        documentContexts.push(`Document: ${file.name}\n[Unable to extract text from this PDF: ${error instanceof Error ? error.message : 'Unknown error'}]`);
+      }
+    }
+
     // Create a readable stream for the response
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Build agent input that includes serialized conversation history
+          let agentInput = message;
+
+          if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            const previousMessages = messages.slice(0, -1);
+            const historyText = previousMessages
+              .map((msg) => `${msg.role === 'assistant' ? 'Assistant' : 'User'}: ${msg.content}`)
+              .join('\n');
+
+            const historyPrefix = historyText
+              ? `Conversation so far:\n${historyText}\n\n`
+              : '';
+
+            if (lastMessage.role === 'user') {
+              agentInput = `${historyPrefix}Respond to the latest user message while keeping the previous context in mind.\n\nLatest user message:\n${lastMessage.content}`;
+            } else {
+              agentInput = `${historyPrefix}Continue the conversation based on the latest message below.\n\n${
+                lastMessage.role === 'assistant' ? 'Assistant' : 'User'
+              } message:\n${lastMessage.content}`;
+            }
+          }
+
+          if (documentContexts.length > 0) {
+            agentInput += `\n\nAdditional context from uploaded documents:\n${documentContexts.join('\n\n')}`;
+          }
+
           // Run the agent with streaming
-          const result = await run(agent, message, {
+          const result = await run(agent, agentInput, {
             stream: true,
           });
 

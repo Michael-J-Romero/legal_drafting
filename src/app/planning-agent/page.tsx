@@ -1,6 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, ChangeEvent } from 'react';
+
+interface UploadedFile {
+  name: string;
+  size: number;
+  base64: string;
+}
 
 interface Message {
   role: 'user' | 'assistant';
@@ -12,6 +18,8 @@ export default function PlanningAgentPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Live browser UI removed
 
@@ -23,9 +31,68 @@ export default function PlanningAgentPage() {
     scrollToBottom();
   }, [messages]);
 
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const fileList = event.target.files;
+
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+
+    setUploadError(null);
+
+    const filesArray = Array.from(fileList);
+
+    try {
+      const processedFiles = await Promise.all(
+        filesArray.map(async (file) => {
+          if (file.type !== 'application/pdf') {
+            throw new Error('Only PDF files are supported');
+          }
+
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (typeof reader.result !== 'string') {
+                reject(new Error('Failed to read file'));
+                return;
+              }
+
+              const [, encoded] = reader.result.split(',');
+              if (!encoded) {
+                reject(new Error('Could not extract base64 content'));
+                return;
+              }
+
+              resolve(encoded);
+            };
+            reader.onerror = () => reject(new Error('Error reading file'));
+            reader.readAsDataURL(file);
+          });
+
+          return {
+            name: file.name,
+            size: file.size,
+            base64,
+          } satisfies UploadedFile;
+        })
+      );
+
+      setUploadedFiles((prev) => [...prev, ...processedFiles]);
+    } catch (error) {
+      console.error('Error processing uploaded files:', error);
+      setUploadError(error instanceof Error ? error.message : 'Failed to process uploaded file');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
@@ -34,24 +101,44 @@ export default function PlanningAgentPage() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput('');
     setIsLoading(true);
 
     try {
+      const serializedMessages = updatedMessages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp:
+          msg.timestamp instanceof Date
+            ? msg.timestamp.toISOString()
+            : new Date(msg.timestamp).toISOString(),
+      }));
+
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: input.trim() }),
+        body: JSON.stringify({
+          message: input.trim(),
+          messages: serializedMessages,
+          files:
+            uploadedFiles.length > 0
+              ? uploadedFiles.map(({ name, base64 }) => ({
+                  name,
+                  content: base64,
+                }))
+              : undefined,
+        }),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-  const reader = response.body?.getReader();
+      const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
 
@@ -166,9 +253,9 @@ export default function PlanningAgentPage() {
   };
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
       height: '100vh',
       maxWidth: '1200px',
       margin: '0 auto',
@@ -266,6 +353,61 @@ export default function PlanningAgentPage() {
           {isLoading ? 'Researching...' : 'Send'}
         </button>
       </form>
+
+      <div style={{
+        marginTop: '16px',
+        padding: '16px',
+        border: '1px dashed #9ca3af',
+        borderRadius: '8px',
+        backgroundColor: '#f3f4f6',
+      }}>
+        <label
+          htmlFor="context-upload"
+          style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#1f2937' }}
+        >
+          Add contextual documents (PDF only)
+        </label>
+        <input
+          id="context-upload"
+          type="file"
+          accept="application/pdf"
+          multiple
+          onChange={handleFileChange}
+          disabled={isLoading}
+        />
+        {uploadError ? (
+          <p style={{ color: '#dc2626', marginTop: '8px' }}>{uploadError}</p>
+        ) : (
+          <p style={{ color: '#6b7280', marginTop: '8px', fontSize: '14px' }}>
+            Uploaded documents will be shared with the agent as additional context.
+          </p>
+        )}
+        {uploadedFiles.length > 0 && (
+          <ul style={{ marginTop: '12px', paddingLeft: '20px', color: '#1f2937' }}>
+            {uploadedFiles.map((file, index) => (
+              <li key={`${file.name}-${index}`} style={{ marginBottom: '6px' }}>
+                <span>
+                  {file.name} ({Math.round(file.size / 1024)} KB)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveFile(index)}
+                  style={{
+                    marginLeft: '8px',
+                    background: 'none',
+                    border: 'none',
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                  }}
+                  disabled={isLoading}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
     </div>
   );
