@@ -4,13 +4,6 @@ import pdfParse from 'pdf-parse';
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
-// Configure the route to handle larger file uploads (10MB limit)
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
     const data = await pdfParse(buffer);
