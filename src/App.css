@@ -1,3 +1,11 @@
+/* Global reset to prevent page scroll and use full viewport */
+html, body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  overflow: hidden; /* contain scroll to inner panels */
+}
 
 /* Fragment List Styles - Flattened for compatibility */
 .fragment-list {
@@ -73,13 +81,103 @@
 }
 
 
-.app-shell {
+/* App frame */
+.app-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f4f6fb;
+  overflow: hidden; /* prevent outer scroll */
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 24px;
+  gap: 16px;
+}
+
+.app-title {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Icon-only header buttons */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.icon-btn:hover { background: #f3f4f6; box-shadow: 0 4px 12px rgba(15,23,42,0.08); }
+.icon-btn:active { transform: translateY(0.5px); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+.header-menu-wrap { position: relative; }
+.header-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  padding: 6px;
+  z-index: 30;
+}
+.header-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: #0f172a;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.header-menu .menu-item:hover { background: #f3f4f6; }
+.header-menu .menu-item svg { width: 16px; height: 16px; }
+.header-menu .menu-item.danger { color: #b91c1c; }
+.header-menu .menu-item.danger:hover { background: #fee2e2; }
+
+.app-main {
   display: grid;
   grid-template-columns: 4fr 5fr;
-  height: 100vh;
-  padding: 24px;
-  gap: 24px;
+  /* gap: 24px; */
+  /* padding: 24px; */
+  flex: 1;
+  min-height: 0; /* allow children to scroll */
+  overflow: hidden; /* contain scroll to children */
 }
+
+/* Allow grid children to shrink; prevents subtle horizontal overflow */
+.app-main > * { min-width: 0; }
 
 .editor-panel {
   background: #ffffff;
@@ -92,6 +190,32 @@
   min-height: 0;
   overflow: auto;
 }
+/* Left panel tabs */
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+.tab {
+  border: 1px solid transparent;
+  background: #f3f4f6;
+  color: #111827;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.tab:hover { background: #e5e7eb; }
+.tab.active {
+  background: #e0e7ff;
+  color: #1e3a8a;
+  border-color: #c7d2fe;
+}
+.tab-panel { padding: 8px 12px 16px; display: flex; flex-direction: column; gap: 16px; }
 
 .editor-panel h1 {
   font-size: 1.5rem;
@@ -369,13 +493,10 @@ button:not(:disabled):active {
   gap: 16px;
   height: 100%;
   min-height: 0;
+  min-width: 0; /* prevent grid-induced overflow */
 }
 
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-}
+/* old .toolbar removed in favor of .app-header-actions */
 
 .preview-scroll {
   position: relative;
@@ -383,15 +504,22 @@ button:not(:disabled):active {
   background: #fff;
   border-radius: 0;
   overflow: auto;
+  overflow-x: auto; /* allow horizontal scroll when zoomed in */
   display: flex;
   flex-direction: column;
   gap: 0.1in; /* small gaps between groups */
   flex: 1;
   min-height: 0;
+  /* Fit-to-width scaling variable (set via JS in PreviewPanel) */
+  --page-scale: 1;
+  /* Additional zoom multiplier from header controls */
+  --zoom-mult: 1;
+  /* Combined effective scale for transforms and footprint reservations */
+  --effective-scale: calc(var(--page-scale) * var(--zoom-mult));
 }
 
 .page-surface {
-  width: 8.5in;
+  width: 8.5in; /* fixed page width for stable scaling */
   min-height: 11in;
   margin: 0 auto;
   background: #fff;
@@ -420,8 +548,17 @@ button:not(:disabled):active {
 /* Wrapper to position the fullscreen toggle over each markdown page */
 .page-wrapper {
   position: relative;
-  width: 8.5in;
-  margin: 0 auto 0.12in; /* small visual gap */
+  /* Reserve scaled page footprint so layout doesn't shift */
+  width: calc(8.5in * var(--effective-scale));
+  max-width: calc(8.5in * var(--effective-scale));
+  height: calc(11in * var(--effective-scale));
+  margin: 0 auto calc(0.12in * var(--effective-scale)); /* gap scales too */
+}
+
+/* Visually scale page content while keeping layout footprint above */
+.page-wrapper > .page-surface {
+  transform: scale(var(--effective-scale));
+  transform-origin: top left;
 }
 
 .fullscreen-toggle {
@@ -443,7 +580,8 @@ button:not(:disabled):active {
 
 /* Fragment toolbar (fullscreen per fragment) */
 .fragment-wrapper {
-  width: 8.5in;
+  width: 100%;
+  max-width: 8.5in;
   margin: 0 auto;
 }
 .fragment-toolbar {
@@ -454,7 +592,8 @@ button:not(:disabled):active {
 
 .pleading-paper {
   position: relative;
-  width: 8.5in;
+  width: 100%;
+  max-width: 8.5in;
   height: 11in;
   margin: 0 auto;
   padding: .5in 0.5in .5in .5in;
@@ -622,7 +761,7 @@ button:not(:disabled):active {
   gap: 0.08in;
   font-size: 11pt;
   font-weight: 400;
-  letter-spacing: 0.05em;
+
   font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
 }
 
@@ -877,14 +1016,26 @@ margin-top: 0in;
 .pdf-document {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: calc(0.12in * var(--effective-scale));
 }
 
 .pdf-page {
-  width: 8.5in;
+  /* Reserve scaled paper footprint and scale inner content like markdown pages */
+  width: calc(8.5in * var(--effective-scale));
+  height: calc(11in * var(--effective-scale));
   margin: 0 auto;
   background: #fff;
   page-break-after: always;
+}
+
+/* Inner content that is scaled, mirroring .page-wrapper > .page-surface */
+.pdf-content {
+  width: 8.5in;
+  height: 11in;
+  position: relative;
+  background: #fff;
+  transform: scale(var(--effective-scale));
+  transform-origin: top left;
 }
 
 .pdf-page:last-child {
@@ -893,10 +1044,20 @@ margin-top: 0in;
 
 .pdf-page canvas {
   display: block;
-  width: 8.5in;
-  height: 11in;
+  /* Base to physical page size; actual on-screen size comes from transform on parent */
+  width: 8.5in !important;
+  height: 11in !important;
   border-radius: 0;
   box-shadow: none;
+}
+
+/* Ensure iframe fallback matches physical page size before scaling */
+.pdf-page iframe,
+.pdf-content iframe {
+  display: block;
+  width: 8.5in !important;
+  height: 11in !important;
+  border: none;
 }
 
 /* Fullscreen overlay */
@@ -1009,9 +1170,7 @@ margin-top: 0in;
 }
 
 @media (max-width: 1100px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
+  .app-main { grid-template-columns: 1fr; }
 
   .preview-scroll {
     height: auto;
@@ -1019,14 +1178,9 @@ margin-top: 0in;
 }
 
 @media (max-width: 768px) {
-  .app-shell {
-    padding: 16px;
-  }
+  .app-main { padding: 16px; }
 
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
+  .app-header-actions { flex-wrap: wrap; justify-content: flex-end; }
 
   button.primary,
   button.secondary {
@@ -1056,12 +1210,9 @@ margin-top: 0in;
     print-color-adjust: exact;
   }
 
-  .app-shell {
-    display: block;
-    padding: 0;
-  }
+  .app-main { display: block; padding: 0; }
 
-  .editor-panel, .toolbar {
+  .editor-panel, .app-header {
     display: none !important;
   }
 
@@ -1071,6 +1222,7 @@ margin-top: 0in;
     background: none !important;
     height: auto !important;
     gap: 0 !important; /* remove flex gaps between pages */
+    --page-scale: 1 !important; /* ensure no scaling in print */
   }
 
   /* Prevent flex rounding inside PDF previews during print */
@@ -1138,9 +1290,15 @@ margin-top: 0in;
     overflow: hidden !important;
     page-break-after: always;
     break-inside: avoid-page !important;
+    transform: none !important; /* no scaling in print */
   }
 
   .pdf-page:last-child {
     page-break-after: auto;
+  }
+
+  /* Ensure inner elements are not transformed during print */
+  .pdf-page > * {
+    transform: none !important;
   }
 }
