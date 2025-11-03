@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { FiArrowLeft } from 'react-icons/fi';
 import '/src/App.css';
 
 import EditorPanel from './components/EditorPanel';
@@ -9,22 +10,77 @@ import AppHeader from './components/AppHeader';
 import FullscreenOverlay from './components/FullscreenOverlay';
 import useDocumentEditor from './hooks/useDocumentEditor';
 
+const TOOLS = {
+  MENU: null,
+  DOCUMENT: 'document',
+  PLANNER: 'planner',
+};
+
 export default function App() {
+  const [activeTool, setActiveTool] = React.useState(TOOLS.MENU);
+
+  const handleOpenTool = React.useCallback((tool) => {
+    setActiveTool(tool);
+  }, []);
+
+  const handleBackToMenu = React.useCallback(() => {
+    setActiveTool(TOOLS.MENU);
+  }, []);
+
+  let content = null;
+  switch (activeTool) {
+    case TOOLS.DOCUMENT:
+      content = <DocumentBuilder onBack={handleBackToMenu} />;
+      break;
+    case TOOLS.PLANNER:
+      content = <PlannerAgent onBack={handleBackToMenu} />;
+      break;
+    default:
+      content = <MainMenu onSelectTool={handleOpenTool} />;
+  }
+
+  return (
+    <div className="app-root">
+      {content}
+    </div>
+  );
+}
+
+function MainMenu({ onSelectTool }) {
+  return (
+    <div className="menu-screen">
+      <div className="menu-card">
+        <div>
+          <h1>Legal Drafting Toolkit</h1>
+          <p>Choose a workspace to get started. More tools are coming soon.</p>
+        </div>
+        <div className="menu-options">
+          <button type="button" className="menu-button" onClick={() => onSelectTool(TOOLS.DOCUMENT)}>
+            Create document
+          </button>
+          <button type="button" className="menu-button" onClick={() => onSelectTool(TOOLS.PLANNER)}>
+            Planner agent
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocumentBuilder({ onBack }) {
   const { editorProps, previewProps } = useDocumentEditor();
 
-  // Raw JSON editor state (moved from PreviewPanel toolbar to global header)
   const [rawOpen, setRawOpen] = React.useState(false);
   const [rawText, setRawText] = React.useState('');
   const [rawError, setRawError] = React.useState('');
 
-  // Zoom state for right-side preview (multiplier applied to fit-to-width scale)
   const [zoom, setZoom] = React.useState(1);
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
   const handleZoomIn = React.useCallback(() => setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.5, 3)), []);
   const handleZoomOut = React.useCallback(() => setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.5, 3)), []);
   const handleZoomReset = React.useCallback(() => setZoom(1), []);
 
-  async function handleOpenRaw() {
+  const handleOpenRaw = React.useCallback(async () => {
     try {
       const text = previewProps.getRawJson ? await previewProps.getRawJson() : '';
       setRawText(text || '');
@@ -33,11 +89,13 @@ export default function App() {
     } catch (_) {
       // ignore
     }
-  }
+  }, [previewProps]);
 
   return (
-    <div className="app-root">
+    <>
       <AppHeader
+        title="Document Builder"
+        onBack={onBack}
         onOpenRaw={handleOpenRaw}
         onImportBundle={previewProps.onImportBundle}
         onExportBundle={previewProps.onExportBundle}
@@ -94,6 +152,45 @@ export default function App() {
           </div>
         </FullscreenOverlay>
       )}
-    </div>
+    </>
+  );
+}
+
+function PlannerAgent({ onBack }) {
+  return (
+    <>
+      <PlannerHeader onBack={onBack} />
+      <div className="planner-layout">
+        <div className="planner-panel">
+          <h2>Chat</h2>
+          <div className="planner-placeholder">Chat experience coming soon.</div>
+        </div>
+        <div className="planner-panel">
+          <h2>Preview</h2>
+          <div className="planner-placeholder">Preview area</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PlannerHeader({ onBack }) {
+  return (
+    <header className="app-header" role="banner">
+      <div className="app-header-inner">
+        <div className="app-header-left">
+          <button
+            type="button"
+            className="app-back-button"
+            onClick={onBack}
+            aria-label="Back to main menu"
+            title="Back to main menu"
+          >
+            <FiArrowLeft />
+          </button>
+          <div className="app-title">Planner Agent</div>
+        </div>
+      </div>
+    </header>
   );
 }
