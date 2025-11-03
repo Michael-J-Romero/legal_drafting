@@ -130,15 +130,16 @@ function parseMessageSections(content: string): MessageSection[] {
   
   // Find all occurrences of each marker
   PHASE_MARKERS.forEach(({ pattern, type }) => {
-    const regex = new RegExp(pattern);
+    // Reset lastIndex for global patterns
+    pattern.lastIndex = 0;
     let match;
-    const testContent = content;
-    let lastIndex = 0;
     
-    while ((match = regex.exec(testContent)) !== null) {
+    while ((match = pattern.exec(content)) !== null) {
       positions.push({ index: match.index, type });
-      lastIndex = regex.lastIndex;
-      if (!pattern.global) break; // Safety check
+      // Prevent infinite loop on zero-width matches
+      if (match.index === pattern.lastIndex) {
+        pattern.lastIndex++;
+      }
     }
   });
   
