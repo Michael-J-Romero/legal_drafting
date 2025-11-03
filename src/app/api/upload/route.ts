@@ -42,13 +42,39 @@ export async function POST(request: Request) {
 
     // Get file extension
     const fileName = file.name.toLowerCase();
-    const fileExtension = fileName.substring(fileName.lastIndexOf('.'));
+    const lastDotIndex = fileName.lastIndexOf('.');
+    
+    // Check if file has an extension
+    if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {
+      return NextResponse.json(
+        { error: 'File must have a valid extension' },
+        { status: 400 }
+      );
+    }
+    
+    const fileExtension = fileName.substring(lastDotIndex);
 
-    // Validate file type
+    // Validate file type by extension
     const supportedTypes = ['.pdf', '.txt', '.js', '.json'];
     if (!supportedTypes.includes(fileExtension)) {
       return NextResponse.json(
         { error: `Unsupported file type. Supported types: ${supportedTypes.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Validate MIME type
+    const mimeTypeMap: Record<string, string[]> = {
+      '.pdf': ['application/pdf'],
+      '.txt': ['text/plain'],
+      '.js': ['text/javascript', 'application/javascript', 'application/x-javascript'],
+      '.json': ['application/json', 'text/json'],
+    };
+
+    const allowedMimeTypes = mimeTypeMap[fileExtension];
+    if (!allowedMimeTypes.includes(file.type)) {
+      return NextResponse.json(
+        { error: `Invalid file type. Expected ${allowedMimeTypes.join(' or ')} for ${fileExtension} files, but got ${file.type}` },
         { status: 400 }
       );
     }
