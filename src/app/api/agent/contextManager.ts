@@ -29,13 +29,13 @@ export class ContextManager {
   private embeddings: OpenAIEmbeddings;
   private maxContextTokens: number;
   
-  constructor(maxContextTokens: number = 8000) {
+  constructor(maxContextTokens: number = 4000) { // Reduced from 8000 to be more conservative
     this.maxContextTokens = maxContextTokens;
     
     // Initialize text splitter for chunking large documents
     this.textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
+      chunkSize: 800, // Reduced from 1000
+      chunkOverlap: 150, // Reduced from 200
       separators: ['\n\n', '\n', '. ', '! ', '? ', ', ', ' ', ''],
     });
     
@@ -115,11 +115,15 @@ export class ContextManager {
    * Summarize conversation history efficiently
    */
   summarizeConversation(messages: ConversationMessage[]): string {
-    // Keep only essential parts of conversation
-    const recentMessages = messages.slice(-3); // Last 3 messages
+    // For very long conversations, only keep the last 2 messages
+    const recentMessages = messages.slice(-2); // Reduced from 3 to 2
     
     return recentMessages
-      .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.substring(0, 500)}${m.content.length > 500 ? '...' : ''}`)
+      .map(m => {
+        // Truncate individual messages to max 300 chars (reduced from 500)
+        const content = m.content.substring(0, 300);
+        return `${m.role === 'user' ? 'User' : 'Assistant'}: ${content}${m.content.length > 300 ? '...' : ''}`;
+      })
       .join('\n\n');
   }
   
@@ -147,17 +151,28 @@ export class ContextManager {
     totalTokens: number;
   }> {
     const conversationSummary = this.summarizeConversation(conversationHistory);
-    const relevantResearch = await this.getRelevantContext(query, 5);
+    const relevantResearch = await this.getRelevantContext(query, 3); // Reduced from 5 to 3
     
     const totalTokens = this.countTokens(conversationSummary + relevantResearch);
     
-    // If still too large, reduce research chunks
+    // If still too large, reduce research chunks further
     if (totalTokens > this.maxContextTokens) {
-      const reducedResearch = await this.getRelevantContext(query, 3);
+      const reducedResearch = await this.getRelevantContext(query, 2); // Reduced from 3 to 2
+      const reducedTokens = this.countTokens(conversationSummary + reducedResearch);
+      
+      // If STILL too large, just use conversation summary
+      if (reducedTokens > this.maxContextTokens) {
+        return {
+          relevantResearch: '',
+          conversationSummary: conversationSummary.substring(0, 1000), // Hard truncate
+          totalTokens: this.countTokens(conversationSummary.substring(0, 1000)),
+        };
+      }
+      
       return {
         relevantResearch: reducedResearch,
         conversationSummary,
-        totalTokens: this.countTokens(conversationSummary + reducedResearch),
+        totalTokens: reducedTokens,
       };
     }
     

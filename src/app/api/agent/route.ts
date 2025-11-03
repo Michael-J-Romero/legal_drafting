@@ -12,7 +12,7 @@ let contextManager: ContextManager | null = null;
 
 function getContextManager(): ContextManager {
   if (!contextManager) {
-    contextManager = new ContextManager(8000); // Max 8000 tokens for context
+    contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
   }
   return contextManager;
 }
@@ -172,12 +172,15 @@ Please respond as the Assistant. Use tools when helpful and follow your structur
       
     } catch (error) {
       console.error('Error getting optimized context:', error);
-      // Fallback to simple context
+      // Fallback to minimal context
       if (Array.isArray(messages) && messages.length > 0) {
-        const transcript = messages.slice(-3) // Last 3 messages only
-          .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        const transcript = messages.slice(-2) // Last 2 messages only (reduced from 3)
+          .map((m) => {
+            const content = m.content.substring(0, 500); // Truncate to 500 chars
+            return `${m.role === 'user' ? 'User' : 'Assistant'}: ${content}${m.content.length > 500 ? '...' : ''}`;
+          })
           .join('\n');
-        inputText = `You are continuing a multi-turn conversation. Recent context:\n\n${transcript}\n\nPlease continue the conversation as the Assistant.`;
+        inputText = `You are continuing a multi-turn conversation. Recent context:\n\n${transcript}\n\nCurrent query: ${userQuery}\n\nPlease respond as the Assistant.`;
       } else {
         inputText = userQuery;
       }
@@ -308,33 +311,48 @@ Remember: ALWAYS use all four phases with the emoji markers. This transparency h
 
           // Stream the response chunks
           for await (const chunk of result) {
-            const data = JSON.stringify(chunk);
-            controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
-            
-            // Accumulate text chunks for later processing
-            if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
-              if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
-                fullResponse += chunk.data.delta;
-              } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
-                fullResponse += (chunk.data as any).delta;
+            try {
+              const data = JSON.stringify(chunk);
+              controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+              
+              // Accumulate text chunks for later processing
+              if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
+                if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
+                  fullResponse += chunk.data.delta;
+                } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
+                  fullResponse += (chunk.data as any).delta;
+                }
               }
+            } catch (chunkError) {
+              console.error('Error processing chunk:', chunkError);
+              // Continue processing other chunks
             }
           }
 
           // Extract and store research findings for future context retrieval
-          if (fullResponse) {
+          // Only store if response isn't too large to avoid memory issues
+          if (fullResponse && fullResponse.length < 50000) { // Limit to 50k chars
             try {
               ctxManager.extractResearchFindings(fullResponse);
             } catch (error) {
               console.error('Error extracting research findings:', error);
             }
+          } else if (fullResponse.length >= 50000) {
+            console.warn('Response too large to extract findings:', fullResponse.length);
           }
 
           controller.close();
         } catch (error) {
           console.error('Error during agent run:', error);
+          
+          // Handle context window exceeded error specifically
+          let errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          if (errorMsg.includes('context window') || errorMsg.includes('exceeds')) {
+            errorMsg = 'Context too large. Please start a new conversation or ask a simpler question.';
+          }
+          
           const errorMessage = JSON.stringify({ 
-            error: error instanceof Error ? error.message : 'Unknown error' 
+            error: errorMsg
           });
           controller.enqueue(new TextEncoder().encode(`data: ${errorMessage}\n\n`));
           controller.close();
