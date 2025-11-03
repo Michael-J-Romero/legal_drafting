@@ -107,10 +107,25 @@ const browseTool = tool({
 
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const { message, messages } = body as {
+      message?: string;
+      messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string | number | Date }>;
+    };
 
-    if (!message) {
-      return new Response('Message is required', { status: 400 });
+    // Build a single input string that contains 100% of the conversation context
+    // This avoids relying on any server-side session state.
+    let inputText: string;
+    if (Array.isArray(messages) && messages.length > 0) {
+      const transcript = messages
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n');
+
+      inputText = `You are continuing a multi-turn conversation. Here is the full transcript so far:\n\n${transcript}\n\nPlease continue the conversation as the Assistant, responding to the most recent user message. Use tools when helpful and follow your browsing/citation instructions.`;
+    } else if (typeof message === 'string' && message.trim().length > 0) {
+      inputText = message.trim();
+    } else {
+      return new Response('Message or messages array is required', { status: 400 });
     }
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
@@ -139,7 +154,7 @@ This helps the UI follow along.`,
       async start(controller) {
         try {
           // Run the agent with streaming
-          const result = await run(agent, message, {
+          const result = await run(agent, inputText, {
             stream: true,
           });
 
