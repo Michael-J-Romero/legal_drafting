@@ -1,9 +1,21 @@
 import { Agent, tool, run } from '@openai/agents';
 import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
+import { ContextManager } from './contextManager';
 
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
+
+// Context manager instance (in-memory, per-request)
+// In production, you might want to use Redis or similar for persistence
+let contextManager: ContextManager | null = null;
+
+function getContextManager(): ContextManager {
+  if (!contextManager) {
+    contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
+  }
+  return contextManager;
+}
 
 // Define the search_web tool schema
 const searchWebSchema = z.object({
@@ -108,44 +120,118 @@ const browseTool = tool({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, messages } = body as {
+    const { message, messages, clearContext } = body as {
       message?: string;
       messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string | number | Date }>;
+      clearContext?: boolean;
     };
 
-    // Build a single input string that contains 100% of the conversation context
-    // This avoids relying on any server-side session state.
-    let inputText: string;
-    if (Array.isArray(messages) && messages.length > 0) {
-      const transcript = messages
-        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-        .join('\n');
+    // Get context manager instance
+    const ctxManager = getContextManager();
+    
+    // Clear context if requested (new conversation)
+    if (clearContext) {
+      ctxManager.clear();
+    }
 
-      inputText = `You are continuing a multi-turn conversation. Here is the full transcript so far:\n\n${transcript}\n\nPlease continue the conversation as the Assistant, responding to the most recent user message. Use tools when helpful and follow your browsing/citation instructions.`;
-    } else if (typeof message === 'string' && message.trim().length > 0) {
-      inputText = message.trim();
-    } else {
+    // Get the user's query
+    const userQuery = message?.trim() || (messages && messages.length > 0 ? messages[messages.length - 1].content : '');
+    
+    if (!userQuery) {
       return new Response('Message or messages array is required', { status: 400 });
+    }
+
+    // Build optimized context using LangChain
+    let inputText: string;
+    const conversationHistory = Array.isArray(messages) ? messages : [];
+    
+    console.log('\n========== AGENT REQUEST DEBUG ==========');
+    console.log(`[REQUEST] User query length: ${userQuery.length} chars`);
+    console.log(`[REQUEST] Conversation history: ${conversationHistory.length} messages`);
+    
+    // For first message, skip context optimization to avoid overhead
+    if (conversationHistory.length === 0) {
+      inputText = userQuery;
+      console.log(`[REQUEST] First message - no context optimization`);
+      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+    } else {
+      try {
+        // Get optimized context with semantic retrieval
+        const { relevantResearch, conversationSummary, totalTokens } = await ctxManager.getOptimizedContext(
+          userQuery,
+          conversationHistory
+        );
+        
+        console.log(`[CONTEXT] Summary tokens: ${totalTokens}`);
+        console.log(`[CONTEXT] Summary length: ${conversationSummary.length} chars`);
+        console.log(`[CONTEXT] Research context: ${relevantResearch ? relevantResearch.length : 0} chars`);
+        
+        // Build input with optimized context
+        inputText = `Continuing conversation.
+
+[Context - ${conversationHistory.length} messages, ~${totalTokens} tokens]
+${conversationSummary}
+
+${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
+        
+        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        
+        // Log context stats for debugging
+        const stats = ctxManager.getStats();
+        console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
+        
+      } catch (error) {
+        console.error('Error getting optimized context:', error);
+        // Fallback to minimal context
+        const transcript = conversationHistory.slice(-2) // Last 2 messages only
+          .map((m) => {
+            const content = m.content.substring(0, 500); // Truncate to 500 chars
+            return `${m.role === 'user' ? 'User' : 'Assistant'}: ${content}${m.content.length > 500 ? '...' : ''}`;
+          })
+          .join('\n');
+        inputText = `Recent context:\n\n${transcript}\n\nQuery: ${userQuery}`;
+        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+      }
     }
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
     // Create the agent with tools
+    const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
+
+🤔 **THINKING:** Analyze the question, plan your approach (be concise, 2-3 sentences)
+🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings briefly)
+🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (keep brief)
+💡 **SYNTHESIS:** Organize findings, identify patterns (concise summary)
+✅ **ANSWER:** Clear response with citations
+
+**Iterative Process:**
+- After EACH research step, add REFLECTION
+- Limit to 2-3 research iterations maximum to stay concise
+- If confidence < 85% or critical gaps exist, do ONE more research iteration
+- Be transparent but concise - avoid overly verbose explanations
+
+**Research Phase:**
+- Use search_web for queries
+- Use browse for specific URLs (state: "BROWSING_URL: <url>")
+- Summarize ONLY the most relevant findings (not everything)
+
+**Answer Phase:**
+- Use headings and bullet points
+- Include key URLs only (not every single source)
+- State final confidence level
+- Keep total response under 10,000 characters
+
+Always use the emoji markers to help users follow your thinking.`;
+
+    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${Math.ceil(agentInstructions.length / 4)} tokens)`);
+    console.log(`[AGENT] Estimated total input tokens: ~${Math.ceil((agentInstructions.length + inputText.length) / 4)}`);
+    console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
+    console.log('=========================================\n');
+
     const agent = new Agent({
       name: 'Research Assistant',
-      model: 'gpt-4o',
-  instructions: `You are a helpful research assistant that can search the web and browse websites to gather information. 
-      
-When the user asks you to research a topic:
-1. Use the search_web tool to find relevant sources
-2. Use the browse tool to extract detailed information from promising URLs
-3. Synthesize the information into a clear, well-organized response
-4. Always cite your sources with URLs
-
-Be thorough but concise in your research.
-
-Important: Each time you call the browse tool, first emit a line in your response in the exact format:
-"BROWSING_URL: <the exact URL you are opening>"
-This helps the UI follow along.`,
+      model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
+      instructions: agentInstructions,
       tools: [searchWebTool, browseTool],
     });
 
@@ -158,17 +244,75 @@ This helps the UI follow along.`,
             stream: true,
           });
 
+          // Accumulate full response for context extraction
+          let fullResponse = '';
+          let responseTooLarge = false;
+          const MAX_RESPONSE_LENGTH = 200000; // 200k chars max (~50k tokens)
+
           // Stream the response chunks
           for await (const chunk of result) {
-            const data = JSON.stringify(chunk);
-            controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+            try {
+              const data = JSON.stringify(chunk);
+              controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
+              
+              // Accumulate text chunks for later processing
+              if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
+                if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
+                  fullResponse += chunk.data.delta;
+                } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
+                  fullResponse += (chunk.data as any).delta;
+                }
+              }
+              
+              // Check if response is getting too large
+              if (fullResponse.length > MAX_RESPONSE_LENGTH && !responseTooLarge) {
+                console.warn(`[RESPONSE] Response exceeding max length (${fullResponse.length} chars), stopping accumulation`);
+                responseTooLarge = true;
+                // Continue streaming but stop accumulating
+                fullResponse = fullResponse.substring(0, MAX_RESPONSE_LENGTH);
+              }
+            } catch (chunkError) {
+              console.error('Error processing chunk:', chunkError);
+              // Continue processing other chunks
+            }
           }
 
+          // Extract and store research findings for future context retrieval
+          // Only store if response isn't too large to avoid memory issues
+          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${Math.ceil(fullResponse.length / 4)} tokens)`);
+          
+          if (fullResponse && fullResponse.length < 50000) { // Limit to 50k chars
+            try {
+              ctxManager.extractResearchFindings(fullResponse);
+              console.log(`[RESPONSE] Research findings extracted and stored`);
+            } catch (error) {
+              console.error('[RESPONSE] Error extracting research findings:', error);
+            }
+          } else if (fullResponse.length >= 50000) {
+            console.warn(`[RESPONSE] Response too large to extract findings: ${fullResponse.length} chars`);
+          }
+
+          console.log('=========================================\n');
           controller.close();
         } catch (error) {
-          console.error('Error during agent run:', error);
+          console.error('\n========== AGENT ERROR ==========');
+          console.error('[ERROR] Error during agent run:', error);
+          console.error('[ERROR] Error type:', error?.constructor?.name);
+          if (error instanceof Error) {
+            console.error('[ERROR] Error message:', error.message);
+            console.error('[ERROR] Error stack:', error.stack);
+          }
+          console.error('=================================\n');
+          
+          // Handle context window exceeded error specifically
+          let errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          if (errorMsg.includes('context window') || errorMsg.includes('exceeds') || errorMsg.includes('too large')) {
+            console.log(`[ERROR] Context window error detected. Original message: ${errorMsg}`);
+            errorMsg = 'Context too large. Please start a new conversation or ask a simpler question.';
+          }
+          
           const errorMessage = JSON.stringify({ 
-            error: error instanceof Error ? error.message : 'Unknown error' 
+            error: errorMsg
           });
           controller.enqueue(new TextEncoder().encode(`data: ${errorMessage}\n\n`));
           controller.close();

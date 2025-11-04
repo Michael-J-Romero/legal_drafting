@@ -56,6 +56,188 @@ function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+interface MessageSection {
+  type: 'thinking' | 'research' | 'reflection' | 'synthesis' | 'answer' | 'plain';
+  content: string;
+}
+
+// Section styles extracted to avoid creating new objects on each render
+const SECTION_STYLES: Record<MessageSection['type'], { bg: string; border: string; icon: string; title: string; color: string }> = {
+  thinking: {
+    bg: '#fef3c7',
+    border: '#fbbf24',
+    icon: '🤔',
+    title: 'Thinking',
+    color: '#92400e',
+  },
+  research: {
+    bg: '#dbeafe',
+    border: '#3b82f6',
+    icon: '🔍',
+    title: 'Research',
+    color: '#1e3a8a',
+  },
+  reflection: {
+    bg: '#fce7f3',
+    border: '#ec4899',
+    icon: '🧐',
+    title: 'Reflection',
+    color: '#831843',
+  },
+  synthesis: {
+    bg: '#e0e7ff',
+    border: '#8b5cf6',
+    icon: '💡',
+    title: 'Synthesis',
+    color: '#4c1d95',
+  },
+  answer: {
+    bg: '#d1fae5',
+    border: '#10b981',
+    icon: '✅',
+    title: 'Answer',
+    color: '#064e3b',
+  },
+  plain: {
+    bg: 'transparent',
+    border: 'transparent',
+    icon: '',
+    title: '',
+    color: '#111827',
+  },
+};
+
+// Marker patterns with their corresponding types and removal regexes
+const PHASE_MARKERS = [
+  { 
+    type: 'thinking' as const, 
+    pattern: /🤔\s*\*\*THINKING:\*\*/gi,
+    removePattern: /^🤔\s*\*\*THINKING:\*\*\n?/i
+  },
+  { 
+    type: 'research' as const, 
+    pattern: /🔍\s*\*\*RESEARCH:\*\*/gi,
+    removePattern: /^🔍\s*\*\*RESEARCH:\*\*\n?/i
+  },
+  { 
+    type: 'reflection' as const, 
+    pattern: /🧐\s*\*\*REFLECTION:\*\*/gi,
+    removePattern: /^🧐\s*\*\*REFLECTION:\*\*\n?/i
+  },
+  { 
+    type: 'synthesis' as const, 
+    pattern: /💡\s*\*\*SYNTHESIS:\*\*/gi,
+    removePattern: /^💡\s*\*\*SYNTHESIS:\*\*\n?/i
+  },
+  { 
+    type: 'answer' as const, 
+    pattern: /✅\s*\*\*ANSWER:\*\*/gi,
+    removePattern: /^✅\s*\*\*ANSWER:\*\*\n?/i
+  },
+];
+
+function parseMessageSections(content: string): MessageSection[] {
+  const sections: MessageSection[] = [];
+  let positions: Array<{ index: number; type: MessageSection['type'] }> = [];
+  
+  // Find all occurrences of each marker
+  PHASE_MARKERS.forEach(({ pattern, type }) => {
+    // Reset lastIndex for global patterns
+    pattern.lastIndex = 0;
+    let match;
+    
+    while ((match = pattern.exec(content)) !== null) {
+      positions.push({ index: match.index, type });
+      // Prevent infinite loop on zero-width matches
+      if (match.index === pattern.lastIndex) {
+        pattern.lastIndex++;
+      }
+    }
+  });
+  
+  // If no sections found, return plain content
+  if (positions.length === 0) {
+    return [{ type: 'plain', content }];
+  }
+  
+  // Sort positions by index
+  positions.sort((a, b) => a.index - b.index);
+  
+  // Add content before first section if any
+  if (positions[0].index > 0) {
+    sections.push({
+      type: 'plain',
+      content: content.substring(0, positions[0].index).trim(),
+    });
+  }
+  
+  // Extract each section
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i].index;
+    const end = i < positions.length - 1 ? positions[i + 1].index : content.length;
+    const sectionContent = content.substring(start, end);
+    
+    // Find the appropriate removal pattern for this type
+    const marker = PHASE_MARKERS.find(m => m.type === positions[i].type);
+    const contentWithoutMarker = marker 
+      ? sectionContent.replace(marker.removePattern, '').trim()
+      : sectionContent.trim();
+    
+    if (contentWithoutMarker) {
+      sections.push({
+        type: positions[i].type,
+        content: contentWithoutMarker,
+      });
+    }
+  }
+  
+  return sections;
+}
+
+function renderMessageSection(section: MessageSection, key: number) {
+  const style = SECTION_STYLES[section.type];
+  
+  if (section.type === 'plain') {
+    return (
+      <div key={key} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: style.color }}>
+        {section.content}
+      </div>
+    );
+  }
+  
+  return (
+    <div
+      key={key}
+      style={{
+        marginTop: key > 0 ? 12 : 0,
+        padding: 12,
+        backgroundColor: style.bg,
+        border: `2px solid ${style.border}`,
+        borderRadius: 8,
+      }}
+    >
+      <div style={{ fontWeight: 'bold', marginBottom: 8, color: style.color, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>{style.icon}</span>
+        <span>{style.title}</span>
+      </div>
+      <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: style.color }}>
+        {section.content}
+      </div>
+    </div>
+  );
+}
+
+// Memoized component for rendering message content
+function MessageContent({ content, role }: { content: string; role: 'user' | 'assistant' }) {
+  const sections = useMemo(() => {
+    return role === 'assistant' 
+      ? parseMessageSections(content) 
+      : [{ type: 'plain' as const, content }];
+  }, [content, role]);
+
+  return <>{sections.map((section, idx) => renderMessageSection(section, idx))}</>;
+}
+
 function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
   return stored.map((c) => ({
     ...c,
@@ -311,50 +493,69 @@ export default function PlanningAgentPage() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
+      let buffer = ''; // Buffer for incomplete lines
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.error) {
-                console.error('Stream error:', data.error);
-                assistantMessage += `\n\nError: ${data.error}`;
-              } else if (data.type === 'output_text_delta' && data.data?.delta) {
-                const content = data.data.delta;
-                assistantMessage += content;
-                updateActiveChatMessages((prev) => {
-                  const newMessages = [...prev];
-                  const last = newMessages[newMessages.length - 1];
-                  if (last && last.role === 'assistant') {
-                    newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
-                  } else {
-                    newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                  }
-                  return newMessages;
-                });
-              } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
-                const content = data.data.delta;
-                assistantMessage += content;
-                updateActiveChatMessages((prev) => {
-                  const newMessages = [...prev];
-                  const last = newMessages[newMessages.length - 1];
-                  if (last && last.role === 'assistant') {
-                    newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
-                  } else {
-                    newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                  }
-                  return newMessages;
-                });
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          
+          // Split by double newline (SSE message separator) to get complete messages
+          const messages = buffer.split('\n\n');
+          
+          // Keep the last incomplete message in the buffer
+          buffer = messages.pop() || '';
+          
+          for (const message of messages) {
+            const lines = message.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+              
+              try {
+                const data = JSON.parse(jsonStr);
+                if (data.error) {
+                  console.error('Stream error:', data.error);
+                  assistantMessage += `\n\nError: ${data.error}`;
+                } else if (data.type === 'output_text_delta' && data.data?.delta) {
+                  const content = data.data.delta;
+                  assistantMessage += content;
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                    } else {
+                      newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                    }
+                    return newMessages;
+                  });
+                } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
+                  const content = data.data.delta;
+                  assistantMessage += content;
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                    } else {
+                      newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                    }
+                    return newMessages;
+                  });
+                }
+              } catch (err) {
+                // Silently skip malformed JSON - likely an incomplete chunk
+                // Only log if it's a significant error
+                if (jsonStr.length > 10) {
+                  console.warn('Skipping malformed JSON chunk:', jsonStr.substring(0, 100));
+                }
               }
-            } catch (err) {
-              console.error('Error parsing chunk:', err);
             }
           }
         }
@@ -510,8 +711,18 @@ export default function PlanningAgentPage() {
         <div style={{ flex: 1, overflowY: 'auto', padding: 20, backgroundColor: '#f9fafb' }}>
           {messages.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#6b7280', marginTop: 40 }}>
-              <p>Start a conversation with the research agent.</p>
-              <p style={{ marginTop: 10, fontSize: 14 }}>Try asking: "Research the latest developments in AI agents"</p>
+              <p style={{ fontSize: 18, fontWeight: 600, color: '#111827', marginBottom: 16 }}>🧠 Advanced Research Agent with Iterative Deep Reasoning</p>
+              <p>This agent uses iterative reasoning - it goes back and forth, checking confidence and logic holes until it has a solid answer.</p>
+              <p style={{ marginTop: 10 }}>You'll see the agent's complete iterative thought process:</p>
+              <div style={{ marginTop: 20, display: 'inline-block', textAlign: 'left', backgroundColor: '#fff', padding: 20, borderRadius: 8, border: '1px solid #e5e7eb' }}>
+                <div style={{ marginBottom: 8 }}>🤔 <strong>Thinking</strong> - Planning and reasoning</div>
+                <div style={{ marginBottom: 8 }}>🔍 <strong>Research</strong> - Web search and browsing</div>
+                <div style={{ marginBottom: 8 }}>🧐 <strong>Reflection</strong> - Confidence check & gap analysis</div>
+                <div style={{ marginBottom: 8 }}>💡 <strong>Synthesis</strong> - Analyzing findings</div>
+                <div>✅ <strong>Answer</strong> - Final response with citations</div>
+              </div>
+              <p style={{ marginTop: 20, fontSize: 14, fontWeight: 500 }}>The agent will iterate through Research → Reflection until confidence ≥ 85%</p>
+              <p style={{ marginTop: 20, fontSize: 14 }}>Try asking: "Research the latest developments in AI agents and explain the key trends"</p>
               <p style={{ marginTop: 10, fontSize: 14 }}>You can also upload files (PDF, .txt, .js, .json) to include in your messages.</p>
             </div>
           ) : (
@@ -521,36 +732,36 @@ export default function PlanningAgentPage() {
                 style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none' }}
               >
                 <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
-                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{message.content}</div>
-                {message.files && message.files.length > 0 && (
-                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {message.files.map((file) => (
-                      <div
-                        key={file.id}
-                        onClick={() => openFilePreview(file)}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: '#fff',
-                          border: '1px solid #d1d5db',
-                          borderRadius: 6,
-                          fontSize: 13,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                        title={`Click to preview ${file.fileName}`}
-                      >
-                        <span>📎</span>
-                        <span>{file.fileName}</span>
-                        <span style={{ color: '#6b7280', fontSize: 11 }}>({formatFileSize(file.size)})</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
-              </div>
-            ))
+                <MessageContent content={message.content} role={message.role} />
+                  {message.files && message.files.length > 0 && (
+                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {message.files.map((file) => (
+                        <div
+                          key={file.id}
+                          onClick={() => openFilePreview(file)}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: '#fff',
+                            border: '1px solid #d1d5db',
+                            borderRadius: 6,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                          title={`Click to preview ${file.fileName}`}
+                        >
+                          <span>📎</span>
+                          <span>{file.fileName}</span>
+                          <span style={{ color: '#6b7280', fontSize: 11 }}>({formatFileSize(file.size)})</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
+                </div>
+              ))
           )}
           <div ref={messagesEndRef} />
         </div>
