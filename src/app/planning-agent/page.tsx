@@ -285,6 +285,32 @@ function parseMessageSections(content: string): MessageSection[] {
   return sections;
 }
 
+/**
+ * Cleans the conversation history by extracting only the ANSWER sections from assistant messages.
+ * This dramatically reduces token usage by removing verbose reasoning steps (THINKING, RESEARCH, etc.)
+ * while preserving the actual conversation context.
+ */
+function getCleanedHistory(messages: Message[]): Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> {
+  return messages.map(msg => {
+    // Keep user messages unchanged
+    if (msg.role === 'user') {
+      return { role: msg.role, content: msg.content, timestamp: msg.timestamp };
+    }
+    
+    // For assistant messages, extract only the ANSWER section
+    const sections = parseMessageSections(msg.content);
+    const answerSection = sections.find(section => section.type === 'answer');
+    
+    // If there's an ANSWER section, use only that; otherwise keep the full content
+    // (to handle edge cases where the response doesn't have the expected structure)
+    const cleanedContent = answerSection 
+      ? answerSection.content 
+      : msg.content;
+    
+    return { role: msg.role, content: cleanedContent, timestamp: msg.timestamp };
+  });
+}
+
 function renderMessageSection(section: MessageSection, key: number) {
   const style = SECTION_STYLES[section.type];
   
@@ -607,7 +633,10 @@ export default function PlanningAgentPage() {
       });
     }
 
-    const conversationToSend = [...messages, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
+    // Clean the conversation history to remove verbose reasoning steps
+    // This keeps only the ANSWER sections from assistant messages, dramatically reducing token usage
+    const cleanedHistory = getCleanedHistory(messages);
+    const conversationToSend = [...cleanedHistory, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
 
     updateActiveChatMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0) {
