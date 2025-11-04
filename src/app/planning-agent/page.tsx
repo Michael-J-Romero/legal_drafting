@@ -79,6 +79,7 @@ function generateId() {
 interface MessageSection {
   type: 'thinking' | 'research' | 'reflection' | 'synthesis' | 'answer' | 'plain';
   content: string;
+  estimatedTokens?: number;
 }
 
 // Section styles extracted to avoid creating new objects on each render
@@ -160,6 +161,9 @@ function parseMessageSections(content: string): MessageSection[] {
   const sections: MessageSection[] = [];
   let positions: Array<{ index: number; type: MessageSection['type'] }> = [];
   
+  // Helper function to estimate tokens (roughly 4 characters per token)
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+  
   // Find all occurrences of each marker
   PHASE_MARKERS.forEach(({ pattern, type }) => {
     // Reset lastIndex for global patterns
@@ -177,7 +181,7 @@ function parseMessageSections(content: string): MessageSection[] {
   
   // If no sections found, return plain content
   if (positions.length === 0) {
-    return [{ type: 'plain', content }];
+    return [{ type: 'plain', content, estimatedTokens: estimateTokens(content) }];
   }
   
   // Sort positions by index
@@ -185,9 +189,11 @@ function parseMessageSections(content: string): MessageSection[] {
   
   // Add content before first section if any
   if (positions[0].index > 0) {
+    const plainContent = content.substring(0, positions[0].index).trim();
     sections.push({
       type: 'plain',
-      content: content.substring(0, positions[0].index).trim(),
+      content: plainContent,
+      estimatedTokens: estimateTokens(plainContent),
     });
   }
   
@@ -207,6 +213,7 @@ function parseMessageSections(content: string): MessageSection[] {
       sections.push({
         type: positions[i].type,
         content: contentWithoutMarker,
+        estimatedTokens: estimateTokens(contentWithoutMarker),
       });
     }
   }
@@ -236,9 +243,23 @@ function renderMessageSection(section: MessageSection, key: number) {
         borderRadius: 8,
       }}
     >
-      <div style={{ fontWeight: 'bold', marginBottom: 8, color: style.color, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>{style.icon}</span>
-        <span>{style.title}</span>
+      <div style={{ fontWeight: 'bold', marginBottom: 8, color: style.color, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{style.icon}</span>
+          <span>{style.title}</span>
+        </div>
+        {section.estimatedTokens !== undefined && (
+          <details style={{ cursor: 'pointer', fontSize: 11 }}>
+            <summary style={{ listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', color: '#6b7280' }}>
+              <span>▸</span>
+              <span>{section.estimatedTokens.toLocaleString()} tokens</span>
+            </summary>
+            <div style={{ marginTop: 4, padding: 6, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 4, fontSize: 10 }}>
+              <div>Estimated output tokens for this section</div>
+              <div style={{ fontWeight: 600, marginTop: 2 }}>~{section.estimatedTokens.toLocaleString()} tokens</div>
+            </div>
+          </details>
+        )}
       </div>
       <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: style.color }}>
         {section.content}
@@ -839,6 +860,9 @@ export default function PlanningAgentPage() {
                         <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.inputTokens.toLocaleString()} tokens</span>
                         <span>Output:</span>
                         <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.outputTokens.toLocaleString()} tokens</span>
+                        <span style={{ fontSize: 10, gridColumn: '1 / -1', color: '#9ca3af', marginTop: 2 }}>
+                          (Includes all sections: Thinking, Research, Reflection, Synthesis, Answer)
+                        </span>
                         <span>Total:</span>
                         <span style={{ fontWeight: 600, color: '#059669' }}>{message.usage.totalTokens.toLocaleString()} tokens</span>
                       </div>
@@ -852,7 +876,7 @@ export default function PlanningAgentPage() {
                             <span style={{ fontWeight: 600 }}>{message.usage.breakdown.systemInstructionsTokens.toLocaleString()} tokens</span>
                             <span>Conversation Context:</span>
                             <span style={{ fontWeight: 600 }}>{message.usage.breakdown.conversationContextTokens.toLocaleString()} tokens</span>
-                            <span>Research Context:</span>
+                            <span>Stored Research (from context):</span>
                             <span style={{ fontWeight: 600 }}>{message.usage.breakdown.researchContextTokens.toLocaleString()} tokens</span>
                             <span>Stored Documents:</span>
                             <span style={{ fontWeight: 600 }}>
