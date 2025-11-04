@@ -562,13 +562,19 @@ export default function PlanningAgentPage() {
               
               try {
                 const data = JSON.parse(jsonStr);
+                
+                // Debug: Log all event types to understand what we're receiving
+                if (data.type) {
+                  console.log('[FRONTEND] Received event type:', data.type);
+                }
+                
                 if (data.error) {
                   console.error('Stream error:', data.error);
                   assistantMessage += `\n\nError: ${data.error}`;
                 } else if (data.type === 'usage_summary' && data.data) {
                   // Capture usage data
                   currentUsage = data.data;
-                  console.log('Usage data received:', currentUsage);
+                  console.log('[FRONTEND] Usage data received:', currentUsage);
                 } else if (data.type === 'output_text_delta' && data.data?.delta) {
                   const content = data.data.delta;
                   assistantMessage += content;

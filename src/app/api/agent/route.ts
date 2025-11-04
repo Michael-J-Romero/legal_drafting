@@ -303,25 +303,34 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
-              // Capture usage data from response_done event
-              if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
-                if ('type' in chunk.data && chunk.data.type === 'response_done' && 'usage' in chunk.data) {
-                  const rawUsage = chunk.data.usage as Record<string, unknown>;
+              // Capture usage data from response.completed event within raw_model_stream_event
+              if ('type' in chunk && chunk.type === 'raw_model_stream_event' && 'data' in chunk) {
+                const eventData = chunk.data as any;
+                
+                // Check if this is a response.completed event with usage data
+                if (eventData.type === 'response.completed' && eventData.response && eventData.response.usage) {
+                  const rawUsage = eventData.response.usage;
                   usageData = {
-                    inputTokens: (rawUsage.inputTokens as number) || 0,
-                    outputTokens: (rawUsage.outputTokens as number) || 0,
-                    totalTokens: (rawUsage.totalTokens as number) || 0,
-                    inputTokensDetails: rawUsage.inputTokensDetails as Record<string, number> | undefined,
-                    outputTokensDetails: rawUsage.outputTokensDetails as Record<string, number> | undefined,
+                    inputTokens: rawUsage.input_tokens || 0,
+                    outputTokens: rawUsage.output_tokens || 0,
+                    totalTokens: rawUsage.total_tokens || 0,
+                    inputTokensDetails: rawUsage.input_tokens_details,
+                    outputTokensDetails: rawUsage.output_tokens_details,
                   };
-                  console.log('[RESPONSE] Usage data captured:', usageData);
+                  console.log('[RESPONSE] Usage data captured from response.completed:', usageData);
                 }
                 
                 // Accumulate text chunks for later processing
-                if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
-                  fullResponse += chunk.data.delta;
-                } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
-                  fullResponse += String(chunk.data.delta || '');
+                if (eventData.type === 'output_text_delta' && eventData.delta) {
+                  fullResponse += String(eventData.delta || '');
+                }
+              }
+              
+              // Also check for text deltas at the top level (older format)
+              if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
+                const chunkData = chunk.data as any;
+                if (chunkData.type === 'output_text_delta' && 'delta' in chunkData) {
+                  fullResponse += String(chunkData.delta || '');
                 }
               }
               
