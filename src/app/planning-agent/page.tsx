@@ -290,14 +290,20 @@ function parseMessageSections(content: string): MessageSection[] {
  * This dramatically reduces token usage by removing verbose reasoning steps (THINKING, RESEARCH, etc.)
  * while preserving the actual conversation context.
  */
-function getCleanedHistory(messages: Message[]): Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> {
+function getCleanedHistory(messages: Message[]): Pick<Message, 'role' | 'content' | 'timestamp'>[] {
   return messages.map(msg => {
-    // Keep user messages unchanged
+    // Keep user messages unchanged - return a minimal object to avoid unnecessary copying
     if (msg.role === 'user') {
       return { role: msg.role, content: msg.content, timestamp: msg.timestamp };
     }
     
     // For assistant messages, extract only the ANSWER section
+    // Quick check: if the message doesn't contain the ANSWER marker, return as-is
+    if (!msg.content.includes('✅') && !msg.content.includes('ANSWER:')) {
+      return { role: msg.role, content: msg.content, timestamp: msg.timestamp };
+    }
+    
+    // Parse sections only if we detected the marker
     const sections = parseMessageSections(msg.content);
     const answerSection = sections.find(section => section.type === 'answer');
     
