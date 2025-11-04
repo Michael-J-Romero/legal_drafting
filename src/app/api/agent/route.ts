@@ -10,6 +10,31 @@ export const runtime = 'nodejs';
 // In production, you might want to use Redis or similar for persistence
 let contextManager: ContextManager | null = null;
 
+// Type definitions for usage data
+interface TokenUsageBreakdown {
+  userPromptTokens: number;
+  conversationContextTokens: number;
+  researchContextTokens: number;
+  systemInstructionsTokens: number;
+  toolDefinitionsTokens: number;
+  formattingOverheadTokens: number;
+  storedDocumentsCount: number;
+  storedDocumentsTokens: number;
+}
+
+interface UsageData {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTokensDetails?: Array<Record<string, number>>;
+  outputTokensDetails?: Array<Record<string, number>>;
+}
+
+// Helper function to estimate tokens from text
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 function getContextManager(): ContextManager {
   if (!contextManager) {
     contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
@@ -120,14 +145,32 @@ const browseTool = tool({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, messages, clearContext } = body as {
+    const { message, messages, clearContext, settings } = body as {
       message?: string;
       messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string | number | Date }>;
       clearContext?: boolean;
+      settings?: {
+        maxIterations?: number;
+        confidenceThreshold?: number;
+        maxResponseLength?: number;
+        contextWindowSize?: number;
+        summaryMode?: 'brief' | 'balanced' | 'detailed';
+        model?: string;
+      };
+    };
+    
+    // Apply settings with defaults
+    const agentSettings = {
+      maxIterations: settings?.maxIterations ?? 3,
+      confidenceThreshold: settings?.confidenceThreshold ?? 85,
+      maxResponseLength: settings?.maxResponseLength ?? 10000,
+      contextWindowSize: settings?.contextWindowSize ?? 4000,
+      summaryMode: settings?.summaryMode ?? 'balanced',
+      model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
-    // Get context manager instance
-    const ctxManager = getContextManager();
+    // Get context manager instance with configured context window
+    const ctxManager = new ContextManager(agentSettings.contextWindowSize);
     
     // Clear context if requested (new conversation)
     if (clearContext) {
@@ -145,15 +188,30 @@ export async function POST(request: Request) {
     let inputText: string;
     const conversationHistory = Array.isArray(messages) ? messages : [];
     
+    // Track token breakdown for detailed usage stats
+    let contextBreakdown = {
+      userPromptTokens: 0,
+      conversationContextTokens: 0,
+      researchContextTokens: 0,
+      systemInstructionsTokens: 0,
+      toolDefinitionsTokens: 0,
+      formattingOverheadTokens: 0,
+      storedDocumentsCount: 0,
+      storedDocumentsTokens: 0,
+    };
+    
     console.log('\n========== AGENT REQUEST DEBUG ==========');
     console.log(`[REQUEST] User query length: ${userQuery.length} chars`);
     console.log(`[REQUEST] Conversation history: ${conversationHistory.length} messages`);
+    
+    // Calculate user prompt tokens
+    contextBreakdown.userPromptTokens = estimateTokens(userQuery);
     
     // For first message, skip context optimization to avoid overhead
     if (conversationHistory.length === 0) {
       inputText = userQuery;
       console.log(`[REQUEST] First message - no context optimization`);
-      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
     } else {
       try {
         // Get optimized context with semantic retrieval
@@ -161,6 +219,15 @@ export async function POST(request: Request) {
           userQuery,
           conversationHistory
         );
+        
+        // Update context breakdown
+        contextBreakdown.conversationContextTokens = estimateTokens(conversationSummary);
+        contextBreakdown.researchContextTokens = relevantResearch ? estimateTokens(relevantResearch) : 0;
+        
+        // Get stored documents stats
+        const stats = ctxManager.getStats();
+        contextBreakdown.storedDocumentsCount = stats.documentCount;
+        contextBreakdown.storedDocumentsTokens = stats.totalTokensEstimate;
         
         console.log(`[CONTEXT] Summary tokens: ${totalTokens}`);
         console.log(`[CONTEXT] Summary length: ${conversationSummary.length} chars`);
@@ -174,10 +241,17 @@ ${conversationSummary}
 
 ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
         
-        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        // Calculate formatting overhead (labels, prefixes, structure)
+        const rawContentTokens = contextBreakdown.userPromptTokens + 
+                                 contextBreakdown.conversationContextTokens + 
+                                 contextBreakdown.researchContextTokens;
+        const actualInputTextTokens = estimateTokens(inputText);
+        contextBreakdown.formattingOverheadTokens = Math.max(0, actualInputTextTokens - rawContentTokens);
+        
+        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
+        console.log(`[REQUEST] Formatting overhead: ~${contextBreakdown.formattingOverheadTokens} tokens`);
         
         // Log context stats for debugging
-        const stats = ctxManager.getStats();
         console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
         
       } catch (error) {
@@ -190,47 +264,74 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
           })
           .join('\n');
         inputText = `Recent context:\n\n${transcript}\n\nQuery: ${userQuery}`;
-        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
       }
     }
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
     // Create the agent with tools
+    const verbosityGuidance = agentSettings.summaryMode === 'brief' 
+      ? 'Be extremely concise - 1-2 sentences per phase maximum.'
+      : agentSettings.summaryMode === 'detailed'
+      ? 'Provide comprehensive explanations with detailed reasoning.'
+      : 'Balance conciseness with clarity - 2-3 sentences per phase.';
+    
     const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
-🤔 **THINKING:** Analyze the question, plan your approach (be concise, 2-3 sentences)
-🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings briefly)
-🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (keep brief)
-💡 **SYNTHESIS:** Organize findings, identify patterns (concise summary)
+🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
+🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings ${agentSettings.summaryMode === 'brief' ? 'very briefly' : agentSettings.summaryMode === 'detailed' ? 'in detail' : 'concisely'})
+🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (${agentSettings.summaryMode === 'brief' ? 'keep minimal' : 'keep brief'})
+💡 **SYNTHESIS:** Organize findings, identify patterns (${agentSettings.summaryMode === 'detailed' ? 'comprehensive summary' : 'concise summary'})
 ✅ **ANSWER:** Clear response with citations
 
 **Iterative Process:**
 - After EACH research step, add REFLECTION
-- Limit to 2-3 research iterations maximum to stay concise
-- If confidence < 85% or critical gaps exist, do ONE more research iteration
-- Be transparent but concise - avoid overly verbose explanations
+- Limit to ${agentSettings.maxIterations} research iterations maximum
+- If confidence < ${agentSettings.confidenceThreshold}% or critical gaps exist, do ONE more research iteration
+- ${verbosityGuidance}
 
 **Research Phase:**
 - Use search_web for queries
 - Use browse for specific URLs (state: "BROWSING_URL: <url>")
-- Summarize ONLY the most relevant findings (not everything)
+- Summarize ${agentSettings.summaryMode === 'brief' ? 'ONLY the most critical findings' : agentSettings.summaryMode === 'detailed' ? 'all relevant findings comprehensively' : 'the most relevant findings'}
 
 **Answer Phase:**
 - Use headings and bullet points
-- Include key URLs only (not every single source)
+- Include ${agentSettings.summaryMode === 'brief' ? 'only essential URLs' : agentSettings.summaryMode === 'detailed' ? 'all relevant URLs with context' : 'key URLs'}
 - State final confidence level
-- Keep total response under 10,000 characters
+- Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;
 
-    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${Math.ceil(agentInstructions.length / 4)} tokens)`);
-    console.log(`[AGENT] Estimated total input tokens: ~${Math.ceil((agentInstructions.length + inputText.length) / 4)}`);
-    console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
+    // Calculate system instructions tokens
+    contextBreakdown.systemInstructionsTokens = estimateTokens(agentInstructions);
+    
+    // Estimate tool definitions tokens (search_web and browse tools)
+    // Tool definitions include schema, descriptions, parameters, etc.
+    const toolDefinitionsEstimate = JSON.stringify({
+      searchWebSchema: {
+        name: 'search_web',
+        description: 'Search the web for information',
+        parameters: searchWebSchema.shape
+      },
+      browseSchema: {
+        name: 'browse',
+        description: 'Browse a specific URL',
+        parameters: browseSchema.shape
+      }
+    });
+    contextBreakdown.toolDefinitionsTokens = estimateTokens(toolDefinitionsEstimate);
+
+    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${estimateTokens(agentInstructions)} tokens)`);
+    console.log(`[AGENT] Tool definitions estimate: ~${contextBreakdown.toolDefinitionsTokens} tokens`);
+    console.log(`[AGENT] Estimated total input tokens: ~${estimateTokens(agentInstructions + inputText)}`);
+    console.log(`[AGENT] Model: ${agentSettings.model}`);
+    console.log(`[AGENT] Settings: max_iterations=${agentSettings.maxIterations}, confidence=${agentSettings.confidenceThreshold}%, mode=${agentSettings.summaryMode}, max_length=${agentSettings.maxResponseLength}`);
     console.log('=========================================\n');
 
     const agent = new Agent({
       name: 'Research Assistant',
-      model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
+      model: agentSettings.model,
       instructions: agentInstructions,
       tools: [searchWebTool, browseTool],
     });
@@ -248,6 +349,7 @@ Always use the emoji markers to help users follow your thinking.`;
           let fullResponse = '';
           let responseTooLarge = false;
           const MAX_RESPONSE_LENGTH = 200000; // 200k chars max (~50k tokens)
+          let usageData: UsageData | null = null;
 
           // Stream the response chunks
           for await (const chunk of result) {
@@ -255,12 +357,44 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
-              // Accumulate text chunks for later processing
+              // Debug: Log chunk type
+              if ('type' in chunk) {
+                console.log(`[BACKEND] Chunk type: ${chunk.type}`);
+              }
+              
+              // Capture usage data from response.completed event within raw_model_stream_event
+              if ('type' in chunk && chunk.type === 'raw_model_stream_event' && 'data' in chunk) {
+                const eventData = chunk.data as any;
+                
+                // Log the event type within raw_model_stream_event
+                if (eventData.type) {
+                  console.log(`[BACKEND] raw_model_stream_event contains: ${eventData.type}`);
+                }
+                
+                // Check if this is a response.completed event with usage data
+                if (eventData.type === 'response.completed' && eventData.response && eventData.response.usage) {
+                  const rawUsage = eventData.response.usage;
+                  usageData = {
+                    inputTokens: rawUsage.input_tokens || 0,
+                    outputTokens: rawUsage.output_tokens || 0,
+                    totalTokens: rawUsage.total_tokens || 0,
+                    inputTokensDetails: rawUsage.input_tokens_details,
+                    outputTokensDetails: rawUsage.output_tokens_details,
+                  };
+                  console.log('[BACKEND] ✅ Usage data captured from response.completed:', JSON.stringify(usageData, null, 2));
+                }
+                
+                // Accumulate text chunks for later processing
+                if (eventData.type === 'output_text_delta' && eventData.delta) {
+                  fullResponse += String(eventData.delta || '');
+                }
+              }
+              
+              // Also check for text deltas at the top level (older format)
               if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
-                if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
-                  fullResponse += chunk.data.delta;
-                } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
-                  fullResponse += (chunk.data as any).delta;
+                const chunkData = chunk.data as any;
+                if (chunkData.type === 'output_text_delta' && 'delta' in chunkData) {
+                  fullResponse += String(chunkData.delta || '');
                 }
               }
               
@@ -276,10 +410,44 @@ Always use the emoji markers to help users follow your thinking.`;
               // Continue processing other chunks
             }
           }
+          
+          // After streaming completes, check if we can get usage from result.rawResponses
+          if (!usageData && result.rawResponses && result.rawResponses.length > 0) {
+            console.log('[BACKEND] Checking rawResponses for usage data');
+            const lastResponse = result.rawResponses[result.rawResponses.length - 1];
+            if (lastResponse && lastResponse.usage) {
+              console.log('[BACKEND] Found usage in rawResponses:', JSON.stringify(lastResponse.usage, null, 2));
+              usageData = {
+                inputTokens: lastResponse.usage.inputTokens || 0,
+                outputTokens: lastResponse.usage.outputTokens || 0,
+                totalTokens: lastResponse.usage.totalTokens || 0,
+                inputTokensDetails: lastResponse.usage.inputTokensDetails,
+                outputTokensDetails: lastResponse.usage.outputTokensDetails,
+              };
+              console.log('[BACKEND] ✅ Usage data extracted from rawResponses:', JSON.stringify(usageData, null, 2));
+            }
+          }
+          
+          // Send usage summary at the end if available
+          if (usageData) {
+            console.log('[BACKEND] ✅ Sending usage summary:', JSON.stringify(usageData, null, 2));
+            console.log('[BACKEND] ✅ Context breakdown:', JSON.stringify(contextBreakdown, null, 2));
+            const usageSummary = JSON.stringify({
+              type: 'usage_summary',
+              data: {
+                ...usageData,
+                breakdown: contextBreakdown
+              }
+            });
+            controller.enqueue(new TextEncoder().encode(`data: ${usageSummary}\n\n`));
+            console.log('[BACKEND] ✅ Usage summary sent to client');
+          } else {
+            console.log('[BACKEND] ⚠️ No usage data captured - usage summary not sent');
+          }
 
           // Extract and store research findings for future context retrieval
           // Only store if response isn't too large to avoid memory issues
-          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${Math.ceil(fullResponse.length / 4)} tokens)`);
+          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${estimateTokens(fullResponse)} tokens)`);
           
           if (fullResponse && fullResponse.length < 50000) { // Limit to 50k chars
             try {

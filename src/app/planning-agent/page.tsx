@@ -2,6 +2,68 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+interface ModelConfig {
+  name: string;
+  displayName: string;
+  maxContextTokens: number;
+  supportedContextSizes: number[];
+  description: string;
+}
+
+const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  'gpt-4o-2024-11-20': {
+    name: 'gpt-4o-2024-11-20',
+    displayName: 'GPT-4o (latest)',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'Latest GPT-4o with 128K context'
+  },
+  'gpt-4o': {
+    name: 'gpt-4o',
+    displayName: 'GPT-4o',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4o with 128K context'
+  },
+  'gpt-4-turbo': {
+    name: 'gpt-4-turbo',
+    displayName: 'GPT-4 Turbo',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4 Turbo with 128K context'
+  },
+  'gpt-3.5-turbo': {
+    name: 'gpt-3.5-turbo',
+    displayName: 'GPT-3.5 Turbo',
+    maxContextTokens: 16385,
+    supportedContextSizes: [2000, 4000, 8000, 16000],
+    description: 'GPT-3.5 Turbo with 16K context'
+  },
+  'o1-preview': {
+    name: 'o1-preview',
+    displayName: 'o1 (preview)',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'o1 reasoning model preview with 128K context'
+  },
+  'o1-mini': {
+    name: 'o1-mini',
+    displayName: 'o1-mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'o1-mini reasoning model with 128K context'
+  }
+};
+
+interface AgentSettings {
+  maxIterations: number;
+  confidenceThreshold: number;
+  maxResponseLength: number;
+  contextWindowSize: number;
+  summaryMode: 'brief' | 'balanced' | 'detailed';
+  model: string;
+}
+
 interface UploadedFile {
   id: string;
   fileName: string;
@@ -20,11 +82,32 @@ interface StoredUploadedFile {
   uploadedAt: string; // ISO
 }
 
+interface TokenUsageBreakdown {
+  userPromptTokens: number;
+  conversationContextTokens: number;
+  researchContextTokens: number;
+  systemInstructionsTokens: number;
+  toolDefinitionsTokens: number;
+  formattingOverheadTokens: number;
+  storedDocumentsCount: number;
+  storedDocumentsTokens: number;
+}
+
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+  breakdown?: TokenUsageBreakdown;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   files?: UploadedFile[];
+  usage?: TokenUsage;
 }
 
 interface StoredMessage {
@@ -32,6 +115,7 @@ interface StoredMessage {
   content: string;
   timestamp: string; // ISO
   files?: StoredUploadedFile[];
+  usage?: TokenUsage;
 }
 
 interface ChatSession {
@@ -59,6 +143,7 @@ function generateId() {
 interface MessageSection {
   type: 'thinking' | 'research' | 'reflection' | 'synthesis' | 'answer' | 'plain';
   content: string;
+  estimatedTokens?: number;
 }
 
 // Section styles extracted to avoid creating new objects on each render
@@ -140,6 +225,9 @@ function parseMessageSections(content: string): MessageSection[] {
   const sections: MessageSection[] = [];
   let positions: Array<{ index: number; type: MessageSection['type'] }> = [];
   
+  // Helper function to estimate tokens (roughly 4 characters per token)
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+  
   // Find all occurrences of each marker
   PHASE_MARKERS.forEach(({ pattern, type }) => {
     // Reset lastIndex for global patterns
@@ -157,7 +245,7 @@ function parseMessageSections(content: string): MessageSection[] {
   
   // If no sections found, return plain content
   if (positions.length === 0) {
-    return [{ type: 'plain', content }];
+    return [{ type: 'plain', content, estimatedTokens: estimateTokens(content) }];
   }
   
   // Sort positions by index
@@ -165,9 +253,11 @@ function parseMessageSections(content: string): MessageSection[] {
   
   // Add content before first section if any
   if (positions[0].index > 0) {
+    const plainContent = content.substring(0, positions[0].index).trim();
     sections.push({
       type: 'plain',
-      content: content.substring(0, positions[0].index).trim(),
+      content: plainContent,
+      estimatedTokens: estimateTokens(plainContent),
     });
   }
   
@@ -187,6 +277,7 @@ function parseMessageSections(content: string): MessageSection[] {
       sections.push({
         type: positions[i].type,
         content: contentWithoutMarker,
+        estimatedTokens: estimateTokens(contentWithoutMarker),
       });
     }
   }
@@ -216,9 +307,23 @@ function renderMessageSection(section: MessageSection, key: number) {
         borderRadius: 8,
       }}
     >
-      <div style={{ fontWeight: 'bold', marginBottom: 8, color: style.color, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>{style.icon}</span>
-        <span>{style.title}</span>
+      <div style={{ fontWeight: 'bold', marginBottom: 8, color: style.color, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{style.icon}</span>
+          <span>{style.title}</span>
+        </div>
+        {section.estimatedTokens !== undefined && (
+          <details style={{ cursor: 'pointer', fontSize: 11 }}>
+            <summary style={{ listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', color: '#6b7280' }}>
+              <span>▸</span>
+              <span>{section.estimatedTokens.toLocaleString()} tokens</span>
+            </summary>
+            <div style={{ marginTop: 4, padding: 6, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 4, fontSize: 10 }}>
+              <div>Estimated output tokens for this section</div>
+              <div style={{ fontWeight: 600, marginTop: 2 }}>~{section.estimatedTokens.toLocaleString()} tokens</div>
+            </div>
+          </details>
+        )}
       </div>
       <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: style.color }}>
         {section.content}
@@ -274,6 +379,17 @@ export default function PlanningAgentPage() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  
+  // Agent settings with defaults
+  const [settings, setSettings] = useState<AgentSettings>({
+    maxIterations: 3,
+    confidenceThreshold: 85,
+    maxResponseLength: 10000,
+    contextWindowSize: 4000,
+    summaryMode: 'balanced',
+    model: 'gpt-4o-2024-11-20'
+  });
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -315,6 +431,28 @@ export default function PlanningAgentPage() {
 
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
+
+  const totalUsage = useMemo(() => {
+    const messagesWithUsage = messages.filter(m => m.usage);
+    
+    if (messagesWithUsage.length === 0) {
+      return null;
+    }
+    
+    const total = messagesWithUsage.reduce(
+      (acc, m) => ({
+        inputTokens: acc.inputTokens + (m.usage?.inputTokens || 0),
+        outputTokens: acc.outputTokens + (m.usage?.outputTokens || 0),
+        totalTokens: acc.totalTokens + (m.usage?.totalTokens || 0),
+      }),
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    );
+    
+    return {
+      ...total,
+      messageCount: messagesWithUsage.length,
+    };
+  }, [messages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -485,7 +623,10 @@ export default function PlanningAgentPage() {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: conversationToSend }),
+        body: JSON.stringify({ 
+          messages: conversationToSend,
+          settings: settings
+        }),
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -494,6 +635,7 @@ export default function PlanningAgentPage() {
       const decoder = new TextDecoder();
       let assistantMessage = '';
       let buffer = ''; // Buffer for incomplete lines
+      let currentUsage: TokenUsage | undefined = undefined;
 
       if (reader) {
         while (true) {
@@ -519,9 +661,35 @@ export default function PlanningAgentPage() {
               
               try {
                 const data = JSON.parse(jsonStr);
+                
+                // Debug: Log all event types to understand what we're receiving
+                if (data.type) {
+                  console.log('[FRONTEND] Received event type:', data.type);
+                  if (data.type === 'usage_summary') {
+                    console.log('[FRONTEND] USAGE SUMMARY EVENT:', JSON.stringify(data, null, 2));
+                  }
+                }
+                
                 if (data.error) {
                   console.error('Stream error:', data.error);
                   assistantMessage += `\n\nError: ${data.error}`;
+                } else if (data.type === 'usage_summary' && data.data) {
+                  // Capture usage data
+                  currentUsage = data.data;
+                  console.log('[FRONTEND] ✅ Usage data captured:', currentUsage);
+                  
+                  // Immediately update the last message with usage data
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      console.log('[FRONTEND] ✅ Updating assistant message with usage data');
+                      newMessages[newMessages.length - 1] = { ...last, usage: currentUsage };
+                    } else {
+                      console.log('[FRONTEND] ⚠️ No assistant message found to attach usage to');
+                    }
+                    return newMessages;
+                  });
                 } else if (data.type === 'output_text_delta' && data.data?.delta) {
                   const content = data.data.delta;
                   assistantMessage += content;
@@ -566,7 +734,10 @@ export default function PlanningAgentPage() {
           const newMessages = [...prev];
           const last = newMessages[newMessages.length - 1];
           if (!last || last.role !== 'assistant') {
-            newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+            newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date(), usage: currentUsage });
+          } else if (currentUsage && !last.usage) {
+            // Update the last message with usage data if not already set
+            newMessages[newMessages.length - 1] = { ...last, usage: currentUsage };
           }
           return newMessages;
         });
@@ -594,6 +765,151 @@ export default function PlanningAgentPage() {
             + New Chat
           </button>
         </div>
+        
+        {/* Settings Panel */}
+        <div style={{ borderBottom: '1px solid #e5e7eb' }}>
+          <details open={showSettings} onToggle={(e) => setShowSettings((e.target as HTMLDetailsElement).open)}>
+            <summary style={{ padding: '10px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 13, color: '#374151', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10 }}>{showSettings ? '▾' : '▸'}</span>
+              <span>⚙️ Agent Settings</span>
+            </summary>
+            <div style={{ padding: '8px 12px', fontSize: 12, backgroundColor: '#f9fafb' }}>
+              {/* Max Iterations */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Max Research Iterations
+                </label>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="5" 
+                  value={settings.maxIterations}
+                  onChange={(e) => setSettings({...settings, maxIterations: parseInt(e.target.value)})}
+                  style={{ width: '100%' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                  <span>1 (quick)</span>
+                  <span style={{ fontWeight: 600, color: '#1e40af' }}>{settings.maxIterations}</span>
+                  <span>5 (thorough)</span>
+                </div>
+              </div>
+              
+              {/* Confidence Threshold */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Confidence Threshold (%)
+                </label>
+                <input 
+                  type="range" 
+                  min="50" 
+                  max="95" 
+                  step="5"
+                  value={settings.confidenceThreshold}
+                  onChange={(e) => setSettings({...settings, confidenceThreshold: parseInt(e.target.value)})}
+                  style={{ width: '100%' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                  <span>50% (lenient)</span>
+                  <span style={{ fontWeight: 600, color: '#1e40af' }}>{settings.confidenceThreshold}%</span>
+                  <span>95% (strict)</span>
+                </div>
+              </div>
+              
+              {/* Summary Mode */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Summary Mode
+                </label>
+                <select 
+                  value={settings.summaryMode}
+                  onChange={(e) => setSettings({...settings, summaryMode: e.target.value as 'brief' | 'balanced' | 'detailed'})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="brief">Brief (concise)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="detailed">Detailed (verbose)</option>
+                </select>
+              </div>
+              
+              {/* Max Response Length */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Max Response Length
+                </label>
+                <select 
+                  value={settings.maxResponseLength}
+                  onChange={(e) => setSettings({...settings, maxResponseLength: parseInt(e.target.value)})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="5000">5K chars (short)</option>
+                  <option value="10000">10K chars (standard)</option>
+                  <option value="20000">20K chars (long)</option>
+                  <option value="50000">50K chars (very long)</option>
+                </select>
+              </div>
+              
+              {/* Model Selection */}
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Model
+                </label>
+                <select 
+                  value={settings.model}
+                  onChange={(e) => {
+                    const newModel = e.target.value;
+                    const modelConfig = MODEL_CONFIGS[newModel];
+                    // Adjust context window if current value exceeds new model's max
+                    const newContextSize = settings.contextWindowSize > modelConfig.maxContextTokens 
+                      ? modelConfig.supportedContextSizes[modelConfig.supportedContextSizes.length - 1]
+                      : settings.contextWindowSize;
+                    setSettings({...settings, model: newModel, contextWindowSize: newContextSize});
+                  }}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="gpt-4o-2024-11-20">GPT-4o (latest) - 128K</option>
+                  <option value="gpt-4o">GPT-4o - 128K</option>
+                  <option value="o1-preview">o1 (preview) - 128K</option>
+                  <option value="o1-mini">o1-mini - 128K</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo - 128K</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo - 16K</option>
+                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  {MODEL_CONFIGS[settings.model]?.description || 'Select a model'}
+                </div>
+              </div>
+              
+              {/* Context Window Size */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Context Window (tokens)
+                </label>
+                <select 
+                  value={settings.contextWindowSize}
+                  onChange={(e) => setSettings({...settings, contextWindowSize: parseInt(e.target.value)})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  {MODEL_CONFIGS[settings.model]?.supportedContextSizes.map((size) => (
+                    <option key={size} value={size}>
+                      {size >= 1000 ? `${size / 1000}K` : size} tokens
+                      {size === 2000 && ' (minimal)'}
+                      {size === 4000 && ' (standard)'}
+                      {size === 8000 && ' (extended)'}
+                      {size === MODEL_CONFIGS[settings.model]?.maxContextTokens && ' (maximum)'}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  Max for {MODEL_CONFIGS[settings.model]?.displayName}: {(MODEL_CONFIGS[settings.model]?.maxContextTokens / 1000).toFixed(0)}K tokens
+                </div>
+              </div>
+              
+              <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 8, padding: 6, backgroundColor: '#fef3c7', borderRadius: 4 }}>
+                💡 Settings apply to new messages in the current chat
+              </div>
+            </div>
+          </details>
+        </div>
+        
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {chats.length === 0 ? (
             <div style={{ padding: 12, color: '#6b7280' }}>No chats yet</div>
@@ -759,6 +1075,88 @@ export default function PlanningAgentPage() {
                       ))}
                     </div>
                   )}
+                  {message.usage && (
+                    <div style={{ marginTop: 8, padding: 8, backgroundColor: '#f3f4f6', borderRadius: 6, fontSize: 12, fontFamily: 'monospace' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#374151' }}>📊 Token Usage</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', color: '#6b7280' }}>
+                        <span>Input:</span>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.inputTokens.toLocaleString()} tokens</span>
+                        <span>Output:</span>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.outputTokens.toLocaleString()} tokens</span>
+                        <span style={{ fontSize: 10, gridColumn: '1 / -1', color: '#9ca3af', marginTop: 2 }}>
+                          (Includes all sections: Thinking, Research, Reflection, Synthesis, Answer)
+                        </span>
+                        <span>Total:</span>
+                        <span style={{ fontWeight: 600, color: '#059669' }}>{message.usage.totalTokens.toLocaleString()} tokens</span>
+                      </div>
+                      {message.usage.breakdown && (
+                        <details style={{ marginTop: 8, cursor: 'pointer' }}>
+                          <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>📋 Input Breakdown</summary>
+                          <div style={{ marginTop: 6, paddingLeft: 12, fontSize: 11 }}>
+                            {/* Calculate sum of our estimates */}
+                            {(() => {
+                              const estimatedSum = 
+                                message.usage.breakdown.userPromptTokens +
+                                message.usage.breakdown.systemInstructionsTokens +
+                                message.usage.breakdown.conversationContextTokens +
+                                message.usage.breakdown.researchContextTokens +
+                                message.usage.breakdown.toolDefinitionsTokens +
+                                message.usage.breakdown.formattingOverheadTokens;
+                              const actualInput = message.usage.inputTokens;
+                              const difference = actualInput - estimatedSum;
+                              
+                              return (
+                                <>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', marginBottom: 8 }}>
+                                    <span>User Prompt:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.userPromptTokens.toLocaleString()} tokens</span>
+                                    <span>System Instructions:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.systemInstructionsTokens.toLocaleString()} tokens</span>
+                                    <span>Tool Definitions:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.toolDefinitionsTokens.toLocaleString()} tokens</span>
+                                    <span>Conversation Context:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.conversationContextTokens.toLocaleString()} tokens</span>
+                                    <span>Stored Research (from context):</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.researchContextTokens.toLocaleString()} tokens</span>
+                                    <span>Formatting Overhead:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.formattingOverheadTokens.toLocaleString()} tokens</span>
+                                  </div>
+                                  
+                                  <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 6, marginTop: 6 }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 10 }}>
+                                      <span>Estimated Total:</span>
+                                      <span style={{ fontWeight: 600, color: '#6b7280' }}>{estimatedSum.toLocaleString()} tokens</span>
+                                      <span>Actual API Input:</span>
+                                      <span style={{ fontWeight: 600, color: '#1e40af' }}>{actualInput.toLocaleString()} tokens</span>
+                                      {difference !== 0 && (
+                                        <>
+                                          <span>{difference > 0 ? 'Unaccounted (API overhead):' : 'Over-estimated:'}</span>
+                                          <span style={{ fontWeight: 600, color: difference > 0 ? '#dc2626' : '#059669' }}>
+                                            {difference > 0 ? '+' : ''}{difference.toLocaleString()} tokens
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {difference > 0 && (
+                                      <div style={{ marginTop: 4, padding: 4, backgroundColor: '#fef3c7', borderRadius: 4, fontSize: 9, color: '#92400e' }}>
+                                        ⓘ Additional tokens used by OpenAI API for model-specific formatting, token encoding overhead, or other internal processing.
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 6, marginTop: 6, fontSize: 10, color: '#6b7280' }}>
+                                    <div>Stored Documents: {message.usage.breakdown.storedDocumentsCount} docs 
+                                      ({message.usage.breakdown.storedDocumentsTokens.toLocaleString()} tokens available for future retrieval)
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
                 </div>
               ))
@@ -767,6 +1165,39 @@ export default function PlanningAgentPage() {
         </div>
 
         <div style={{ borderTop: '1px solid #e5e7eb', padding: 16 }}>
+          {totalUsage && (
+            <div style={{ marginBottom: 12, padding: 12, backgroundColor: '#f0f9ff', border: '2px solid #3b82f6', borderRadius: 8 }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 8, color: '#1e40af', fontSize: 14 }}>
+                📊 Total Token Usage (This Conversation)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, fontSize: 13 }}>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Input</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {totalUsage.inputTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Output</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {totalUsage.outputTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Tokens</div>
+                  <div style={{ fontWeight: 700, color: '#1e40af', fontSize: 16 }}>
+                    {totalUsage.totalTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Responses</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {totalUsage.messageCount}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {uploadedFiles.length > 0 && (
             <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {uploadedFiles.map((file) => (
