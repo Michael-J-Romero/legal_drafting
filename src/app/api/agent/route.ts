@@ -24,8 +24,8 @@ interface UsageData {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  inputTokensDetails?: Record<string, number>;
-  outputTokensDetails?: Record<string, number>;
+  inputTokensDetails?: Array<Record<string, number>>;
+  outputTokensDetails?: Array<Record<string, number>>;
 }
 
 // Helper function to estimate tokens from text
@@ -354,6 +354,23 @@ Always use the emoji markers to help users follow your thinking.`;
             } catch (chunkError) {
               console.error('Error processing chunk:', chunkError);
               // Continue processing other chunks
+            }
+          }
+          
+          // After streaming completes, check if we can get usage from result.rawResponses
+          if (!usageData && result.rawResponses && result.rawResponses.length > 0) {
+            console.log('[BACKEND] Checking rawResponses for usage data');
+            const lastResponse = result.rawResponses[result.rawResponses.length - 1];
+            if (lastResponse && lastResponse.usage) {
+              console.log('[BACKEND] Found usage in rawResponses:', JSON.stringify(lastResponse.usage, null, 2));
+              usageData = {
+                inputTokens: lastResponse.usage.inputTokens || 0,
+                outputTokens: lastResponse.usage.outputTokens || 0,
+                totalTokens: lastResponse.usage.totalTokens || 0,
+                inputTokensDetails: lastResponse.usage.inputTokensDetails,
+                outputTokensDetails: lastResponse.usage.outputTokensDetails,
+              };
+              console.log('[BACKEND] ✅ Usage data extracted from rawResponses:', JSON.stringify(usageData, null, 2));
             }
           }
           
