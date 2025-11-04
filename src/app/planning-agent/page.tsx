@@ -285,6 +285,62 @@ function parseMessageSections(content: string): MessageSection[] {
   return sections;
 }
 
+/**
+ * Filters conversation history to reduce context size.
+ * - Keeps all user messages in full
+ * - For assistant messages, extracts only the final ANSWER section
+ * This dramatically reduces token usage while preserving conversational context
+ */
+function filterConversationHistory(messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: Date | string | number }>): Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }> {
+  return messages.map((msg) => {
+    // Keep user messages unchanged
+    if (msg.role === 'user') {
+      return {
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      };
+    }
+    
+    // For assistant messages, extract only the ANSWER section
+    const answerMarker = PHASE_MARKERS.find(m => m.type === 'answer');
+    if (!answerMarker) {
+      // Fallback: return full content if marker not found
+      return {
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      };
+    }
+    
+    // Find the ANSWER section
+    const answerMatch = answerMarker.pattern.exec(msg.content);
+    if (answerMatch) {
+      // Extract content from ANSWER marker to end of message
+      const answerContent = msg.content.substring(answerMatch.index);
+      // Remove the marker itself
+      const cleanedContent = answerContent.replace(answerMarker.removePattern, '').trim();
+      
+      return {
+        role: msg.role,
+        content: `✅ **ANSWER:**\n${cleanedContent}`,
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      };
+    }
+    
+    // If no ANSWER section found, use the last 500 characters as fallback
+    const fallbackContent = msg.content.length > 500 
+      ? '...' + msg.content.slice(-500)
+      : msg.content;
+    
+    return {
+      role: msg.role,
+      content: fallbackContent,
+      timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+    };
+  });
+}
+
 function renderMessageSection(section: MessageSection, key: number) {
   const style = SECTION_STYLES[section.type];
   
@@ -607,7 +663,10 @@ export default function PlanningAgentPage() {
       });
     }
 
-    const conversationToSend = [...messages, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
+    // Filter conversation history to reduce context size
+    // Keep all user messages, but only ANSWER sections from assistant messages
+    const filteredMessages = filterConversationHistory(messages);
+    const conversationToSend = [...filteredMessages, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
 
     updateActiveChatMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0) {

@@ -2,9 +2,26 @@ import { Agent, tool, run } from '@openai/agents';
 import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
 import { ContextManager } from './contextManager';
+import OpenAI from 'openai';
 
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
+
+// Global context for current request (stored during POST handler execution)
+// This allows tools to access the current user query for better summarization
+let currentUserQuery: string = '';
+
+// OpenAI client instance (lazy-initialized to avoid build-time errors)
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openai;
+}
 
 // Context manager instance (in-memory, per-request)
 // In production, you might want to use Redis or similar for persistence
@@ -89,9 +106,13 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
   }
 }
 
-// Browse tool using simple HTTP fetch + Cheerio (no Browserless/Playwright)
+// Browse tool using simple HTTP fetch + Cheerio + AI summarization
+// This version fetches the webpage and uses a separate AI call to summarize it
+// based on the user's query, preventing context overload
 async function browse(args: z.infer<typeof browseSchema>) {
   try {
+    console.log(`[BROWSE] Fetching URL: ${args.url}`);
+    
     const res = await fetch(args.url, {
       redirect: 'follow',
       headers: {
@@ -120,6 +141,66 @@ async function browse(args: z.infer<typeof browseSchema>) {
       }
     }
 
+    // If content is too large, truncate before summarization
+    const MAX_CONTENT_LENGTH = 50000; // ~12.5k tokens
+    if (content && content.length > MAX_CONTENT_LENGTH) {
+      console.log(`[BROWSE] Content too large (${content.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
+      content = content.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length]';
+    }
+
+    console.log(`[BROWSE] Content extracted: ${content?.length || 0} chars (~${estimateTokens(content || '')} tokens)`);
+
+    // Use AI to summarize the webpage content based on the user's query
+    // This prevents flooding the main agent's context with raw webpage text
+    if (content && content.length > 1000) {
+      console.log(`[BROWSE] Summarizing content with AI (user query: "${currentUserQuery.substring(0, 100)}...")`);
+      
+      try {
+        const openaiClient = getOpenAIClient();
+        const summaryResponse = await openaiClient.chat.completions.create({
+          model: 'gpt-4o-mini', // Use faster, cheaper model for summarization
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a web content summarizer. Extract and summarize ONLY the information relevant to the user\'s query. Be concise but comprehensive. Focus on facts, data, and key points that would help answer the query.'
+            },
+            {
+              role: 'user',
+              content: `User Query: ${currentUserQuery}
+              
+Webpage URL: ${args.url}
+
+Webpage Content:
+${content}
+
+Task: Summarize this webpage, focusing ONLY on information relevant to answering the user's query. Include specific facts, data, quotes, and key points. Keep the summary under 1000 words.`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 2000, // Limit summary to ~2k tokens
+        });
+
+        const summary = summaryResponse.choices[0]?.message?.content || content;
+        console.log(`[BROWSE] AI summary generated: ${summary.length} chars (~${estimateTokens(summary)} tokens)`);
+        
+        return JSON.stringify({ 
+          url: args.url, 
+          summary: summary,
+          note: 'Content summarized by AI to focus on query-relevant information'
+        });
+      } catch (summaryError) {
+        console.error('[BROWSE] Error during summarization, falling back to truncated content:', summaryError);
+        // Fallback: return truncated content if summarization fails
+        const truncated = content.substring(0, 5000);
+        return JSON.stringify({ 
+          url: args.url, 
+          content: truncated,
+          note: 'Summarization failed, content truncated to 5000 chars'
+        });
+      }
+    }
+
+    // For short content, return as-is
     return JSON.stringify({ url: args.url, content });
   } catch (error) {
     console.error('Error in browse:', error);
@@ -137,7 +218,7 @@ const searchWebTool = tool({
 
 const browseTool = tool({
   name: 'browse',
-  description: 'Fetch a URL and extract content with an optional CSS selector (no JS rendering)',
+  description: 'Fetch a URL and get an AI-generated summary of content relevant to the current query. Content is automatically summarized to prevent context overload.',
   parameters: browseSchema,
   execute: browse,
 });
@@ -183,6 +264,9 @@ export async function POST(request: Request) {
     if (!userQuery) {
       return new Response('Message or messages array is required', { status: 400 });
     }
+
+    // Store user query globally so tools (like browse) can access it for context-aware summarization
+    currentUserQuery = userQuery;
 
     // Build optimized context using LangChain
     let inputText: string;
