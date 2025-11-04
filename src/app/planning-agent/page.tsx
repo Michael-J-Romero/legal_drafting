@@ -25,6 +25,8 @@ interface TokenUsageBreakdown {
   conversationContextTokens: number;
   researchContextTokens: number;
   systemInstructionsTokens: number;
+  toolDefinitionsTokens: number;
+  formattingOverheadTokens: number;
   storedDocumentsCount: number;
   storedDocumentsTokens: number;
 }
@@ -869,20 +871,66 @@ export default function PlanningAgentPage() {
                       {message.usage.breakdown && (
                         <details style={{ marginTop: 8, cursor: 'pointer' }}>
                           <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>📋 Input Breakdown</summary>
-                          <div style={{ marginTop: 6, paddingLeft: 12, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 11 }}>
-                            <span>User Prompt:</span>
-                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.userPromptTokens.toLocaleString()} tokens</span>
-                            <span>System Instructions:</span>
-                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.systemInstructionsTokens.toLocaleString()} tokens</span>
-                            <span>Conversation Context:</span>
-                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.conversationContextTokens.toLocaleString()} tokens</span>
-                            <span>Stored Research (from context):</span>
-                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.researchContextTokens.toLocaleString()} tokens</span>
-                            <span>Stored Documents:</span>
-                            <span style={{ fontWeight: 600 }}>
-                              {message.usage.breakdown.storedDocumentsCount} docs 
-                              ({message.usage.breakdown.storedDocumentsTokens.toLocaleString()} tokens available)
-                            </span>
+                          <div style={{ marginTop: 6, paddingLeft: 12, fontSize: 11 }}>
+                            {/* Calculate sum of our estimates */}
+                            {(() => {
+                              const estimatedSum = 
+                                message.usage.breakdown.userPromptTokens +
+                                message.usage.breakdown.systemInstructionsTokens +
+                                message.usage.breakdown.conversationContextTokens +
+                                message.usage.breakdown.researchContextTokens +
+                                message.usage.breakdown.toolDefinitionsTokens +
+                                message.usage.breakdown.formattingOverheadTokens;
+                              const actualInput = message.usage.inputTokens;
+                              const difference = actualInput - estimatedSum;
+                              
+                              return (
+                                <>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', marginBottom: 8 }}>
+                                    <span>User Prompt:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.userPromptTokens.toLocaleString()} tokens</span>
+                                    <span>System Instructions:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.systemInstructionsTokens.toLocaleString()} tokens</span>
+                                    <span>Tool Definitions:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.toolDefinitionsTokens.toLocaleString()} tokens</span>
+                                    <span>Conversation Context:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.conversationContextTokens.toLocaleString()} tokens</span>
+                                    <span>Stored Research (from context):</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.researchContextTokens.toLocaleString()} tokens</span>
+                                    <span>Formatting Overhead:</span>
+                                    <span style={{ fontWeight: 600 }}>{message.usage.breakdown.formattingOverheadTokens.toLocaleString()} tokens</span>
+                                  </div>
+                                  
+                                  <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 6, marginTop: 6 }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 10 }}>
+                                      <span>Estimated Total:</span>
+                                      <span style={{ fontWeight: 600, color: '#6b7280' }}>{estimatedSum.toLocaleString()} tokens</span>
+                                      <span>Actual API Input:</span>
+                                      <span style={{ fontWeight: 600, color: '#1e40af' }}>{actualInput.toLocaleString()} tokens</span>
+                                      {difference !== 0 && (
+                                        <>
+                                          <span>{difference > 0 ? 'Unaccounted (API overhead):' : 'Over-estimated:'}</span>
+                                          <span style={{ fontWeight: 600, color: difference > 0 ? '#dc2626' : '#059669' }}>
+                                            {difference > 0 ? '+' : ''}{difference.toLocaleString()} tokens
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {difference > 0 && (
+                                      <div style={{ marginTop: 4, padding: 4, backgroundColor: '#fef3c7', borderRadius: 4, fontSize: 9, color: '#92400e' }}>
+                                        ⓘ Additional tokens used by OpenAI API for model-specific formatting, token encoding overhead, or other internal processing.
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 6, marginTop: 6, fontSize: 10, color: '#6b7280' }}>
+                                    <div>Stored Documents: {message.usage.breakdown.storedDocumentsCount} docs 
+                                      ({message.usage.breakdown.storedDocumentsTokens.toLocaleString()} tokens available for future retrieval)
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         </details>
                       )}

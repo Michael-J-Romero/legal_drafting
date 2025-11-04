@@ -16,6 +16,8 @@ interface TokenUsageBreakdown {
   conversationContextTokens: number;
   researchContextTokens: number;
   systemInstructionsTokens: number;
+  toolDefinitionsTokens: number;
+  formattingOverheadTokens: number;
   storedDocumentsCount: number;
   storedDocumentsTokens: number;
 }
@@ -174,6 +176,8 @@ export async function POST(request: Request) {
       conversationContextTokens: 0,
       researchContextTokens: 0,
       systemInstructionsTokens: 0,
+      toolDefinitionsTokens: 0,
+      formattingOverheadTokens: 0,
       storedDocumentsCount: 0,
       storedDocumentsTokens: 0,
     };
@@ -219,7 +223,15 @@ ${conversationSummary}
 
 ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
         
+        // Calculate formatting overhead (labels, prefixes, structure)
+        const rawContentTokens = contextBreakdown.userPromptTokens + 
+                                 contextBreakdown.conversationContextTokens + 
+                                 contextBreakdown.researchContextTokens;
+        const actualInputTextTokens = estimateTokens(inputText);
+        contextBreakdown.formattingOverheadTokens = Math.max(0, actualInputTextTokens - rawContentTokens);
+        
         console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
+        console.log(`[REQUEST] Formatting overhead: ~${contextBreakdown.formattingOverheadTokens} tokens`);
         
         // Log context stats for debugging
         console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
@@ -269,8 +281,25 @@ Always use the emoji markers to help users follow your thinking.`;
 
     // Calculate system instructions tokens
     contextBreakdown.systemInstructionsTokens = estimateTokens(agentInstructions);
+    
+    // Estimate tool definitions tokens (search_web and browse tools)
+    // Tool definitions include schema, descriptions, parameters, etc.
+    const toolDefinitionsEstimate = JSON.stringify({
+      searchWebSchema: {
+        name: 'search_web',
+        description: 'Search the web for information',
+        parameters: searchWebSchema.shape
+      },
+      browseSchema: {
+        name: 'browse',
+        description: 'Browse a specific URL',
+        parameters: browseSchema.shape
+      }
+    });
+    contextBreakdown.toolDefinitionsTokens = estimateTokens(toolDefinitionsEstimate);
 
     console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${estimateTokens(agentInstructions)} tokens)`);
+    console.log(`[AGENT] Tool definitions estimate: ~${contextBreakdown.toolDefinitionsTokens} tokens`);
     console.log(`[AGENT] Estimated total input tokens: ~${estimateTokens(agentInstructions + inputText)}`);
     console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
     console.log('=========================================\n');
