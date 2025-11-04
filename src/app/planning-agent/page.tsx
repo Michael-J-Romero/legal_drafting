@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+interface AgentSettings {
+  maxIterations: number;
+  confidenceThreshold: number;
+  maxResponseLength: number;
+  contextWindowSize: number;
+  summaryMode: 'brief' | 'balanced' | 'detailed';
+  model: string;
+}
+
 interface UploadedFile {
   id: string;
   fileName: string;
@@ -317,6 +326,17 @@ export default function PlanningAgentPage() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  
+  // Agent settings with defaults
+  const [settings, setSettings] = useState<AgentSettings>({
+    maxIterations: 3,
+    confidenceThreshold: 85,
+    maxResponseLength: 10000,
+    contextWindowSize: 4000,
+    summaryMode: 'balanced',
+    model: 'gpt-4o-2024-11-20'
+  });
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -550,7 +570,10 @@ export default function PlanningAgentPage() {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: conversationToSend }),
+        body: JSON.stringify({ 
+          messages: conversationToSend,
+          settings: settings
+        }),
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -689,6 +712,130 @@ export default function PlanningAgentPage() {
             + New Chat
           </button>
         </div>
+        
+        {/* Settings Panel */}
+        <div style={{ borderBottom: '1px solid #e5e7eb' }}>
+          <details open={showSettings} onToggle={(e) => setShowSettings((e.target as HTMLDetailsElement).open)}>
+            <summary style={{ padding: '10px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 13, color: '#374151', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10 }}>{showSettings ? '▾' : '▸'}</span>
+              <span>⚙️ Agent Settings</span>
+            </summary>
+            <div style={{ padding: '8px 12px', fontSize: 12, backgroundColor: '#f9fafb' }}>
+              {/* Max Iterations */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Max Research Iterations
+                </label>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="5" 
+                  value={settings.maxIterations}
+                  onChange={(e) => setSettings({...settings, maxIterations: parseInt(e.target.value)})}
+                  style={{ width: '100%' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                  <span>1 (quick)</span>
+                  <span style={{ fontWeight: 600, color: '#1e40af' }}>{settings.maxIterations}</span>
+                  <span>5 (thorough)</span>
+                </div>
+              </div>
+              
+              {/* Confidence Threshold */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Confidence Threshold (%)
+                </label>
+                <input 
+                  type="range" 
+                  min="50" 
+                  max="95" 
+                  step="5"
+                  value={settings.confidenceThreshold}
+                  onChange={(e) => setSettings({...settings, confidenceThreshold: parseInt(e.target.value)})}
+                  style={{ width: '100%' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                  <span>50% (lenient)</span>
+                  <span style={{ fontWeight: 600, color: '#1e40af' }}>{settings.confidenceThreshold}%</span>
+                  <span>95% (strict)</span>
+                </div>
+              </div>
+              
+              {/* Summary Mode */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Summary Mode
+                </label>
+                <select 
+                  value={settings.summaryMode}
+                  onChange={(e) => setSettings({...settings, summaryMode: e.target.value as 'brief' | 'balanced' | 'detailed'})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="brief">Brief (concise)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="detailed">Detailed (verbose)</option>
+                </select>
+              </div>
+              
+              {/* Max Response Length */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Max Response Length
+                </label>
+                <select 
+                  value={settings.maxResponseLength}
+                  onChange={(e) => setSettings({...settings, maxResponseLength: parseInt(e.target.value)})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="5000">5K chars (short)</option>
+                  <option value="10000">10K chars (standard)</option>
+                  <option value="20000">20K chars (long)</option>
+                  <option value="50000">50K chars (very long)</option>
+                </select>
+              </div>
+              
+              {/* Context Window Size */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Context Window (tokens)
+                </label>
+                <select 
+                  value={settings.contextWindowSize}
+                  onChange={(e) => setSettings({...settings, contextWindowSize: parseInt(e.target.value)})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="2000">2K (minimal)</option>
+                  <option value="4000">4K (standard)</option>
+                  <option value="8000">8K (extended)</option>
+                  <option value="16000">16K (maximum)</option>
+                </select>
+              </div>
+              
+              {/* Model Selection */}
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Model
+                </label>
+                <select 
+                  value={settings.model}
+                  onChange={(e) => setSettings({...settings, model: e.target.value})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="gpt-4o-2024-11-20">GPT-4o (latest)</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </select>
+              </div>
+              
+              <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 8, padding: 6, backgroundColor: '#fef3c7', borderRadius: 4 }}>
+                💡 Settings apply to new messages in the current chat
+              </div>
+            </div>
+          </details>
+        </div>
+        
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {chats.length === 0 ? (
             <div style={{ padding: 12, color: '#6b7280' }}>No chats yet</div>

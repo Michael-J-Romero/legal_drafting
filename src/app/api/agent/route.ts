@@ -145,14 +145,32 @@ const browseTool = tool({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, messages, clearContext } = body as {
+    const { message, messages, clearContext, settings } = body as {
       message?: string;
       messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string | number | Date }>;
       clearContext?: boolean;
+      settings?: {
+        maxIterations?: number;
+        confidenceThreshold?: number;
+        maxResponseLength?: number;
+        contextWindowSize?: number;
+        summaryMode?: 'brief' | 'balanced' | 'detailed';
+        model?: string;
+      };
+    };
+    
+    // Apply settings with defaults
+    const agentSettings = {
+      maxIterations: settings?.maxIterations ?? 3,
+      confidenceThreshold: settings?.confidenceThreshold ?? 85,
+      maxResponseLength: settings?.maxResponseLength ?? 10000,
+      contextWindowSize: settings?.contextWindowSize ?? 4000,
+      summaryMode: settings?.summaryMode ?? 'balanced',
+      model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
-    // Get context manager instance
-    const ctxManager = getContextManager();
+    // Get context manager instance with configured context window
+    const ctxManager = new ContextManager(agentSettings.contextWindowSize);
     
     // Clear context if requested (new conversation)
     if (clearContext) {
@@ -252,30 +270,36 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 
     // The OpenAI API key is automatically picked up from the OPENAI_API_KEY environment variable
     // Create the agent with tools
+    const verbosityGuidance = agentSettings.summaryMode === 'brief' 
+      ? 'Be extremely concise - 1-2 sentences per phase maximum.'
+      : agentSettings.summaryMode === 'detailed'
+      ? 'Provide comprehensive explanations with detailed reasoning.'
+      : 'Balance conciseness with clarity - 2-3 sentences per phase.';
+    
     const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
-🤔 **THINKING:** Analyze the question, plan your approach (be concise, 2-3 sentences)
-🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings briefly)
-🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (keep brief)
-💡 **SYNTHESIS:** Organize findings, identify patterns (concise summary)
+🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
+🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings ${agentSettings.summaryMode === 'brief' ? 'very briefly' : agentSettings.summaryMode === 'detailed' ? 'in detail' : 'concisely'})
+🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (${agentSettings.summaryMode === 'brief' ? 'keep minimal' : 'keep brief'})
+💡 **SYNTHESIS:** Organize findings, identify patterns (${agentSettings.summaryMode === 'detailed' ? 'comprehensive summary' : 'concise summary'})
 ✅ **ANSWER:** Clear response with citations
 
 **Iterative Process:**
 - After EACH research step, add REFLECTION
-- Limit to 2-3 research iterations maximum to stay concise
-- If confidence < 85% or critical gaps exist, do ONE more research iteration
-- Be transparent but concise - avoid overly verbose explanations
+- Limit to ${agentSettings.maxIterations} research iterations maximum
+- If confidence < ${agentSettings.confidenceThreshold}% or critical gaps exist, do ONE more research iteration
+- ${verbosityGuidance}
 
 **Research Phase:**
 - Use search_web for queries
 - Use browse for specific URLs (state: "BROWSING_URL: <url>")
-- Summarize ONLY the most relevant findings (not everything)
+- Summarize ${agentSettings.summaryMode === 'brief' ? 'ONLY the most critical findings' : agentSettings.summaryMode === 'detailed' ? 'all relevant findings comprehensively' : 'the most relevant findings'}
 
 **Answer Phase:**
 - Use headings and bullet points
-- Include key URLs only (not every single source)
+- Include ${agentSettings.summaryMode === 'brief' ? 'only essential URLs' : agentSettings.summaryMode === 'detailed' ? 'all relevant URLs with context' : 'key URLs'}
 - State final confidence level
-- Keep total response under 10,000 characters
+- Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;
 
@@ -301,12 +325,13 @@ Always use the emoji markers to help users follow your thinking.`;
     console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${estimateTokens(agentInstructions)} tokens)`);
     console.log(`[AGENT] Tool definitions estimate: ~${contextBreakdown.toolDefinitionsTokens} tokens`);
     console.log(`[AGENT] Estimated total input tokens: ~${estimateTokens(agentInstructions + inputText)}`);
-    console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
+    console.log(`[AGENT] Model: ${agentSettings.model}`);
+    console.log(`[AGENT] Settings: max_iterations=${agentSettings.maxIterations}, confidence=${agentSettings.confidenceThreshold}%, mode=${agentSettings.summaryMode}, max_length=${agentSettings.maxResponseLength}`);
     console.log('=========================================\n');
 
     const agent = new Agent({
       name: 'Research Assistant',
-      model: 'gpt-4o-2024-11-20', // Latest GPT-4o with enhanced reasoning
+      model: agentSettings.model,
       instructions: agentInstructions,
       tools: [searchWebTool, browseTool],
     });
