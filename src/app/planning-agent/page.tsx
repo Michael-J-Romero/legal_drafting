@@ -641,8 +641,9 @@ export default function PlanningAgentPage() {
 
     // Clean the conversation history to remove verbose reasoning steps
     // This keeps only the ANSWER sections from assistant messages, dramatically reducing token usage
+    // Note: We send only the HISTORY (previous messages), not the current user message
+    // The backend expects 'message' for the current query and 'messages' for history
     const cleanedHistory = getCleanedHistory(messages);
-    const conversationToSend = [...cleanedHistory, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
 
     updateActiveChatMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0) {
@@ -659,7 +660,8 @@ export default function PlanningAgentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: conversationToSend,
+          message: messageContent,  // Current user message
+          messages: cleanedHistory,  // Conversation history (excluding current message)
           settings: settings
         }),
       });
