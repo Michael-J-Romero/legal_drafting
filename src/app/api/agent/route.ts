@@ -248,6 +248,7 @@ Always use the emoji markers to help users follow your thinking.`;
           let fullResponse = '';
           let responseTooLarge = false;
           const MAX_RESPONSE_LENGTH = 200000; // 200k chars max (~50k tokens)
+          let usageData: any = null;
 
           // Stream the response chunks
           for await (const chunk of result) {
@@ -255,8 +256,14 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
-              // Accumulate text chunks for later processing
+              // Capture usage data from response_done event
               if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
+                if ('type' in chunk.data && chunk.data.type === 'response_done' && 'usage' in chunk.data) {
+                  usageData = (chunk.data as any).usage;
+                  console.log('[RESPONSE] Usage data captured:', usageData);
+                }
+                
+                // Accumulate text chunks for later processing
                 if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
                   fullResponse += chunk.data.delta;
                 } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
@@ -275,6 +282,15 @@ Always use the emoji markers to help users follow your thinking.`;
               console.error('Error processing chunk:', chunkError);
               // Continue processing other chunks
             }
+          }
+          
+          // Send usage summary at the end if available
+          if (usageData) {
+            const usageSummary = JSON.stringify({
+              type: 'usage_summary',
+              data: usageData
+            });
+            controller.enqueue(new TextEncoder().encode(`data: ${usageSummary}\n\n`));
           }
 
           // Extract and store research findings for future context retrieval

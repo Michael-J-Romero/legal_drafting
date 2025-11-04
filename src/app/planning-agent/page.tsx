@@ -20,11 +20,20 @@ interface StoredUploadedFile {
   uploadedAt: string; // ISO
 }
 
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   files?: UploadedFile[];
+  usage?: TokenUsage;
 }
 
 interface StoredMessage {
@@ -32,6 +41,7 @@ interface StoredMessage {
   content: string;
   timestamp: string; // ISO
   files?: StoredUploadedFile[];
+  usage?: TokenUsage;
 }
 
 interface ChatSession {
@@ -449,6 +459,28 @@ export default function PlanningAgentPage() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
+  const calculateTotalUsage = () => {
+    const messagesWithUsage = messages.filter(m => m.usage);
+    
+    if (messagesWithUsage.length === 0) {
+      return null;
+    }
+    
+    const total = messagesWithUsage.reduce(
+      (acc, m) => ({
+        inputTokens: acc.inputTokens + (m.usage?.inputTokens || 0),
+        outputTokens: acc.outputTokens + (m.usage?.outputTokens || 0),
+        totalTokens: acc.totalTokens + (m.usage?.totalTokens || 0),
+      }),
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    );
+    
+    return {
+      ...total,
+      messageCount: messagesWithUsage.length,
+    };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !activeChat) return;
@@ -494,6 +526,7 @@ export default function PlanningAgentPage() {
       const decoder = new TextDecoder();
       let assistantMessage = '';
       let buffer = ''; // Buffer for incomplete lines
+      let currentUsage: TokenUsage | undefined = undefined;
 
       if (reader) {
         while (true) {
@@ -522,6 +555,10 @@ export default function PlanningAgentPage() {
                 if (data.error) {
                   console.error('Stream error:', data.error);
                   assistantMessage += `\n\nError: ${data.error}`;
+                } else if (data.type === 'usage_summary' && data.data) {
+                  // Capture usage data
+                  currentUsage = data.data;
+                  console.log('Usage data received:', currentUsage);
                 } else if (data.type === 'output_text_delta' && data.data?.delta) {
                   const content = data.data.delta;
                   assistantMessage += content;
@@ -566,7 +603,10 @@ export default function PlanningAgentPage() {
           const newMessages = [...prev];
           const last = newMessages[newMessages.length - 1];
           if (!last || last.role !== 'assistant') {
-            newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+            newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date(), usage: currentUsage });
+          } else if (currentUsage && !last.usage) {
+            // Update the last message with usage data if not already set
+            newMessages[newMessages.length - 1] = { ...last, usage: currentUsage };
           }
           return newMessages;
         });
@@ -759,6 +799,19 @@ export default function PlanningAgentPage() {
                       ))}
                     </div>
                   )}
+                  {message.usage && (
+                    <div style={{ marginTop: 8, padding: 8, backgroundColor: '#f3f4f6', borderRadius: 6, fontSize: 12, fontFamily: 'monospace' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#374151' }}>📊 Token Usage</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', color: '#6b7280' }}>
+                        <span>Input:</span>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.inputTokens.toLocaleString()} tokens</span>
+                        <span>Output:</span>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{message.usage.outputTokens.toLocaleString()} tokens</span>
+                        <span>Total:</span>
+                        <span style={{ fontWeight: 600, color: '#059669' }}>{message.usage.totalTokens.toLocaleString()} tokens</span>
+                      </div>
+                    </div>
+                  )}
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
                 </div>
               ))
@@ -767,6 +820,39 @@ export default function PlanningAgentPage() {
         </div>
 
         <div style={{ borderTop: '1px solid #e5e7eb', padding: 16 }}>
+          {calculateTotalUsage() && (
+            <div style={{ marginBottom: 12, padding: 12, backgroundColor: '#f0f9ff', border: '2px solid #3b82f6', borderRadius: 8 }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 8, color: '#1e40af', fontSize: 14 }}>
+                📊 Total Token Usage (This Conversation)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, fontSize: 13 }}>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Input</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {calculateTotalUsage()!.inputTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Output</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {calculateTotalUsage()!.outputTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Total Tokens</div>
+                  <div style={{ fontWeight: 700, color: '#1e40af', fontSize: 16 }}>
+                    {calculateTotalUsage()!.totalTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>Responses</div>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
+                    {calculateTotalUsage()!.messageCount}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {uploadedFiles.length > 0 && (
             <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {uploadedFiles.map((file) => (
