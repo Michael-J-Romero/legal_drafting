@@ -2,6 +2,59 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+interface ModelConfig {
+  name: string;
+  displayName: string;
+  maxContextTokens: number;
+  supportedContextSizes: number[];
+  description: string;
+}
+
+const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  'gpt-4o-2024-11-20': {
+    name: 'gpt-4o-2024-11-20',
+    displayName: 'GPT-4o (latest)',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'Latest GPT-4o with 128K context'
+  },
+  'gpt-4o': {
+    name: 'gpt-4o',
+    displayName: 'GPT-4o',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4o with 128K context'
+  },
+  'gpt-4-turbo': {
+    name: 'gpt-4-turbo',
+    displayName: 'GPT-4 Turbo',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4 Turbo with 128K context'
+  },
+  'gpt-3.5-turbo': {
+    name: 'gpt-3.5-turbo',
+    displayName: 'GPT-3.5 Turbo',
+    maxContextTokens: 16385,
+    supportedContextSizes: [2000, 4000, 8000, 16000],
+    description: 'GPT-3.5 Turbo with 16K context'
+  },
+  'o1-preview': {
+    name: 'o1-preview',
+    displayName: 'o1 (preview)',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'o1 reasoning model preview with 128K context'
+  },
+  'o1-mini': {
+    name: 'o1-mini',
+    displayName: 'o1-mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'o1-mini reasoning model with 128K context'
+  }
+};
+
 interface AgentSettings {
   maxIterations: number;
   confidenceThreshold: number;
@@ -795,6 +848,36 @@ export default function PlanningAgentPage() {
                 </select>
               </div>
               
+              {/* Model Selection */}
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Model
+                </label>
+                <select 
+                  value={settings.model}
+                  onChange={(e) => {
+                    const newModel = e.target.value;
+                    const modelConfig = MODEL_CONFIGS[newModel];
+                    // Adjust context window if current value exceeds new model's max
+                    const newContextSize = settings.contextWindowSize > modelConfig.maxContextTokens 
+                      ? modelConfig.supportedContextSizes[modelConfig.supportedContextSizes.length - 1]
+                      : settings.contextWindowSize;
+                    setSettings({...settings, model: newModel, contextWindowSize: newContextSize});
+                  }}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="gpt-4o-2024-11-20">GPT-4o (latest) - 128K</option>
+                  <option value="gpt-4o">GPT-4o - 128K</option>
+                  <option value="o1-preview">o1 (preview) - 128K</option>
+                  <option value="o1-mini">o1-mini - 128K</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo - 128K</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo - 16K</option>
+                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  {MODEL_CONFIGS[settings.model]?.description || 'Select a model'}
+                </div>
+              </div>
+              
               {/* Context Window Size */}
               <div style={{ marginBottom: 12 }}>
                 <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
@@ -805,28 +888,19 @@ export default function PlanningAgentPage() {
                   onChange={(e) => setSettings({...settings, contextWindowSize: parseInt(e.target.value)})}
                   style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
                 >
-                  <option value="2000">2K (minimal)</option>
-                  <option value="4000">4K (standard)</option>
-                  <option value="8000">8K (extended)</option>
-                  <option value="16000">16K (maximum)</option>
+                  {MODEL_CONFIGS[settings.model]?.supportedContextSizes.map((size) => (
+                    <option key={size} value={size}>
+                      {size >= 1000 ? `${size / 1000}K` : size} tokens
+                      {size === 2000 && ' (minimal)'}
+                      {size === 4000 && ' (standard)'}
+                      {size === 8000 && ' (extended)'}
+                      {size === MODEL_CONFIGS[settings.model]?.maxContextTokens && ' (maximum)'}
+                    </option>
+                  ))}
                 </select>
-              </div>
-              
-              {/* Model Selection */}
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
-                  Model
-                </label>
-                <select 
-                  value={settings.model}
-                  onChange={(e) => setSettings({...settings, model: e.target.value})}
-                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
-                >
-                  <option value="gpt-4o-2024-11-20">GPT-4o (latest)</option>
-                  <option value="gpt-4o">GPT-4o</option>
-                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  Max for {MODEL_CONFIGS[settings.model]?.displayName}: {(MODEL_CONFIGS[settings.model]?.maxContextTokens / 1000).toFixed(0)}K tokens
+                </div>
               </div>
               
               <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 8, padding: 6, backgroundColor: '#fef3c7', borderRadius: 4 }}>
