@@ -48,6 +48,11 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+// Constants for browse tool content processing
+const MAX_CONTENT_LENGTH = 50000; // Maximum content length before truncation (~12,500 tokens at 4 chars/token)
+const MIN_CONTENT_LENGTH_FOR_SUMMARIZATION = 1000; // Minimum content length to trigger AI summarization
+const FALLBACK_TRUNCATION_LENGTH = 5000; // Truncation length when summarization fails
+
 function getContextManager(): ContextManager {
   if (!contextManager) {
     contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
@@ -138,8 +143,7 @@ async function browse(args: z.infer<typeof browseSchema>, userQuery: string) {
     }
 
     // If content is too large, truncate before summarization
-    // Using 50,000 chars which equals ~12,500 tokens (at 4 chars/token ratio)
-    const MAX_CONTENT_LENGTH = 50000;
+    // Using MAX_CONTENT_LENGTH which equals ~12,500 tokens (at 4 chars/token ratio)
     if (content && content.length > MAX_CONTENT_LENGTH) {
       console.log(`[BROWSE] Content too large (${content.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
       content = content.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length]';
@@ -149,7 +153,7 @@ async function browse(args: z.infer<typeof browseSchema>, userQuery: string) {
 
     // Use AI to summarize the webpage content based on the user's query
     // This prevents flooding the main agent's context with raw webpage text
-    if (content && content.length > 1000) {
+    if (content && content.length > MIN_CONTENT_LENGTH_FOR_SUMMARIZATION) {
       const queryPreview = userQuery.length > 0 
         ? userQuery.substring(0, 100) + (userQuery.length > 100 ? '...' : '')
         : '(no query context)';
@@ -191,11 +195,11 @@ Task: Summarize this webpage, focusing ONLY on information relevant to answering
       } catch (summaryError) {
         console.error('[BROWSE] Error during summarization, falling back to truncated content:', summaryError);
         // Fallback: return truncated content if summarization fails
-        const truncated = content.substring(0, 5000);
+        const truncated = content.substring(0, FALLBACK_TRUNCATION_LENGTH);
         return JSON.stringify({ 
           url: args.url, 
           content: truncated,
-          note: 'Summarization failed, content truncated to 5000 chars'
+          note: `Summarization failed, content truncated to ${FALLBACK_TRUNCATION_LENGTH} chars`
         });
       }
     }

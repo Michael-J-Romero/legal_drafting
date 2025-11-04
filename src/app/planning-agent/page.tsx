@@ -316,11 +316,26 @@ function filterConversationHistory(messages: Array<{ role: 'user' | 'assistant';
       };
     }
     
-    // Find the ANSWER section using match() instead of exec() to avoid global flag issues
-    const matches = msg.content.match(answerMarker.pattern);
-    if (matches && matches.length > 0) {
-      // Find the index of the last ANSWER marker (in case there are multiple)
-      const lastMatchIndex = msg.content.lastIndexOf(matches[matches.length - 1]);
+    // Find all ANSWER sections and get the position of the last one
+    // Create a new regex without the global flag to avoid state issues
+    const searchPattern = new RegExp(answerMarker.pattern.source, 'i');
+    let lastMatchIndex = -1;
+    let currentIndex = 0;
+    
+    // Find all matches and track the last one
+    while (currentIndex < msg.content.length) {
+      const remainingContent = msg.content.substring(currentIndex);
+      const match = remainingContent.match(searchPattern);
+      
+      if (!match || match.index === undefined) {
+        break;
+      }
+      
+      lastMatchIndex = currentIndex + match.index;
+      currentIndex = lastMatchIndex + match[0].length;
+    }
+    
+    if (lastMatchIndex >= 0) {
       // Extract content from last ANSWER marker to end of message
       const answerContent = msg.content.substring(lastMatchIndex);
       // Remove the marker itself
