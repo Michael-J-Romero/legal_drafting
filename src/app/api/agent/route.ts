@@ -10,6 +10,29 @@ export const runtime = 'nodejs';
 // In production, you might want to use Redis or similar for persistence
 let contextManager: ContextManager | null = null;
 
+// Type definitions for usage data
+interface TokenUsageBreakdown {
+  userPromptTokens: number;
+  conversationContextTokens: number;
+  researchContextTokens: number;
+  systemInstructionsTokens: number;
+  storedDocumentsCount: number;
+  storedDocumentsTokens: number;
+}
+
+interface UsageData {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+}
+
+// Helper function to estimate tokens from text
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 function getContextManager(): ContextManager {
   if (!contextManager) {
     contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
@@ -160,13 +183,13 @@ export async function POST(request: Request) {
     console.log(`[REQUEST] Conversation history: ${conversationHistory.length} messages`);
     
     // Calculate user prompt tokens
-    contextBreakdown.userPromptTokens = Math.ceil(userQuery.length / 4);
+    contextBreakdown.userPromptTokens = estimateTokens(userQuery);
     
     // For first message, skip context optimization to avoid overhead
     if (conversationHistory.length === 0) {
       inputText = userQuery;
       console.log(`[REQUEST] First message - no context optimization`);
-      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+      console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
     } else {
       try {
         // Get optimized context with semantic retrieval
@@ -176,8 +199,8 @@ export async function POST(request: Request) {
         );
         
         // Update context breakdown
-        contextBreakdown.conversationContextTokens = Math.ceil(conversationSummary.length / 4);
-        contextBreakdown.researchContextTokens = relevantResearch ? Math.ceil(relevantResearch.length / 4) : 0;
+        contextBreakdown.conversationContextTokens = estimateTokens(conversationSummary);
+        contextBreakdown.researchContextTokens = relevantResearch ? estimateTokens(relevantResearch) : 0;
         
         // Get stored documents stats
         const stats = ctxManager.getStats();
@@ -196,7 +219,7 @@ ${conversationSummary}
 
 ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: ${userQuery}`;
         
-        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
         
         // Log context stats for debugging
         console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
@@ -211,7 +234,7 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
           })
           .join('\n');
         inputText = `Recent context:\n\n${transcript}\n\nQuery: ${userQuery}`;
-        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
+        console.log(`[FALLBACK] Input text length: ${inputText.length} chars (~${estimateTokens(inputText)} tokens)`);
       }
     }
 
@@ -245,10 +268,10 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 Always use the emoji markers to help users follow your thinking.`;
 
     // Calculate system instructions tokens
-    contextBreakdown.systemInstructionsTokens = Math.ceil(agentInstructions.length / 4);
+    contextBreakdown.systemInstructionsTokens = estimateTokens(agentInstructions);
 
-    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${Math.ceil(agentInstructions.length / 4)} tokens)`);
-    console.log(`[AGENT] Estimated total input tokens: ~${Math.ceil((agentInstructions.length + inputText.length) / 4)}`);
+    console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${estimateTokens(agentInstructions)} tokens)`);
+    console.log(`[AGENT] Estimated total input tokens: ~${estimateTokens(agentInstructions + inputText)}`);
     console.log(`[AGENT] Model: gpt-4o-2024-11-20`);
     console.log('=========================================\n');
 
@@ -272,7 +295,7 @@ Always use the emoji markers to help users follow your thinking.`;
           let fullResponse = '';
           let responseTooLarge = false;
           const MAX_RESPONSE_LENGTH = 200000; // 200k chars max (~50k tokens)
-          let usageData: any = null;
+          let usageData: UsageData | null = null;
 
           // Stream the response chunks
           for await (const chunk of result) {
@@ -283,7 +306,14 @@ Always use the emoji markers to help users follow your thinking.`;
               // Capture usage data from response_done event
               if ('data' in chunk && chunk.data && typeof chunk.data === 'object') {
                 if ('type' in chunk.data && chunk.data.type === 'response_done' && 'usage' in chunk.data) {
-                  usageData = (chunk.data as any).usage;
+                  const rawUsage = chunk.data.usage as Record<string, unknown>;
+                  usageData = {
+                    inputTokens: (rawUsage.inputTokens as number) || 0,
+                    outputTokens: (rawUsage.outputTokens as number) || 0,
+                    totalTokens: (rawUsage.totalTokens as number) || 0,
+                    inputTokensDetails: rawUsage.inputTokensDetails as Record<string, number> | undefined,
+                    outputTokensDetails: rawUsage.outputTokensDetails as Record<string, number> | undefined,
+                  };
                   console.log('[RESPONSE] Usage data captured:', usageData);
                 }
                 
@@ -291,7 +321,7 @@ Always use the emoji markers to help users follow your thinking.`;
                 if ('delta' in chunk.data && typeof chunk.data.delta === 'string') {
                   fullResponse += chunk.data.delta;
                 } else if ('type' in chunk.data && chunk.data.type === 'output_text_delta' && 'delta' in chunk.data) {
-                  fullResponse += (chunk.data as any).delta;
+                  fullResponse += String(chunk.data.delta || '');
                 }
               }
               
@@ -322,7 +352,7 @@ Always use the emoji markers to help users follow your thinking.`;
 
           // Extract and store research findings for future context retrieval
           // Only store if response isn't too large to avoid memory issues
-          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${Math.ceil(fullResponse.length / 4)} tokens)`);
+          console.log(`\n[RESPONSE] Full response length: ${fullResponse.length} chars (~${estimateTokens(fullResponse)} tokens)`);
           
           if (fullResponse && fullResponse.length < 50000) { // Limit to 50k chars
             try {

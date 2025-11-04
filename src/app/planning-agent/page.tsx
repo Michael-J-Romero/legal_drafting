@@ -336,6 +336,28 @@ export default function PlanningAgentPage() {
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
 
+  const totalUsage = useMemo(() => {
+    const messagesWithUsage = messages.filter(m => m.usage);
+    
+    if (messagesWithUsage.length === 0) {
+      return null;
+    }
+    
+    const total = messagesWithUsage.reduce(
+      (acc, m) => ({
+        inputTokens: acc.inputTokens + (m.usage?.inputTokens || 0),
+        outputTokens: acc.outputTokens + (m.usage?.outputTokens || 0),
+        totalTokens: acc.totalTokens + (m.usage?.totalTokens || 0),
+      }),
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    );
+    
+    return {
+      ...total,
+      messageCount: messagesWithUsage.length,
+    };
+  }, [messages]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -467,28 +489,6 @@ export default function PlanningAgentPage() {
     if (bytes < 1024) return bytes + ' bytes';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-  };
-
-  const calculateTotalUsage = () => {
-    const messagesWithUsage = messages.filter(m => m.usage);
-    
-    if (messagesWithUsage.length === 0) {
-      return null;
-    }
-    
-    const total = messagesWithUsage.reduce(
-      (acc, m) => ({
-        inputTokens: acc.inputTokens + (m.usage?.inputTokens || 0),
-        outputTokens: acc.outputTokens + (m.usage?.outputTokens || 0),
-        totalTokens: acc.totalTokens + (m.usage?.totalTokens || 0),
-      }),
-      { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-    );
-    
-    return {
-      ...total,
-      messageCount: messagesWithUsage.length,
-    };
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -850,7 +850,7 @@ export default function PlanningAgentPage() {
         </div>
 
         <div style={{ borderTop: '1px solid #e5e7eb', padding: 16 }}>
-          {calculateTotalUsage() && (
+          {totalUsage && (
             <div style={{ marginBottom: 12, padding: 12, backgroundColor: '#f0f9ff', border: '2px solid #3b82f6', borderRadius: 8 }}>
               <div style={{ fontWeight: 'bold', marginBottom: 8, color: '#1e40af', fontSize: 14 }}>
                 📊 Total Token Usage (This Conversation)
@@ -859,25 +859,25 @@ export default function PlanningAgentPage() {
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 11 }}>Total Input</div>
                   <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
-                    {calculateTotalUsage()!.inputTokens.toLocaleString()}
+                    {totalUsage.inputTokens.toLocaleString()}
                   </div>
                 </div>
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 11 }}>Total Output</div>
                   <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
-                    {calculateTotalUsage()!.outputTokens.toLocaleString()}
+                    {totalUsage.outputTokens.toLocaleString()}
                   </div>
                 </div>
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 11 }}>Total Tokens</div>
                   <div style={{ fontWeight: 700, color: '#1e40af', fontSize: 16 }}>
-                    {calculateTotalUsage()!.totalTokens.toLocaleString()}
+                    {totalUsage.totalTokens.toLocaleString()}
                   </div>
                 </div>
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 11 }}>Responses</div>
                   <div style={{ fontWeight: 700, color: '#374151', fontSize: 16 }}>
-                    {calculateTotalUsage()!.messageCount}
+                    {totalUsage.messageCount}
                   </div>
                 </div>
               </div>
