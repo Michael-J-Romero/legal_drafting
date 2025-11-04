@@ -285,6 +285,9 @@ function parseMessageSections(content: string): MessageSection[] {
   return sections;
 }
 
+// Maximum length for fallback content when ANSWER section is not found
+const FALLBACK_CONTENT_LENGTH = 500;
+
 /**
  * Filters conversation history to reduce context size.
  * - Keeps all user messages in full
@@ -313,11 +316,13 @@ function filterConversationHistory(messages: Array<{ role: 'user' | 'assistant';
       };
     }
     
-    // Find the ANSWER section
-    const answerMatch = answerMarker.pattern.exec(msg.content);
-    if (answerMatch) {
-      // Extract content from ANSWER marker to end of message
-      const answerContent = msg.content.substring(answerMatch.index);
+    // Find the ANSWER section using match() instead of exec() to avoid global flag issues
+    const matches = msg.content.match(answerMarker.pattern);
+    if (matches && matches.length > 0) {
+      // Find the index of the last ANSWER marker (in case there are multiple)
+      const lastMatchIndex = msg.content.lastIndexOf(matches[matches.length - 1]);
+      // Extract content from last ANSWER marker to end of message
+      const answerContent = msg.content.substring(lastMatchIndex);
       // Remove the marker itself
       const cleanedContent = answerContent.replace(answerMarker.removePattern, '').trim();
       
@@ -328,9 +333,9 @@ function filterConversationHistory(messages: Array<{ role: 'user' | 'assistant';
       };
     }
     
-    // If no ANSWER section found, use the last 500 characters as fallback
-    const fallbackContent = msg.content.length > 500 
-      ? '...' + msg.content.slice(-500)
+    // If no ANSWER section found, use the last N characters as fallback
+    const fallbackContent = msg.content.length > FALLBACK_CONTENT_LENGTH 
+      ? '...' + msg.content.slice(-FALLBACK_CONTENT_LENGTH)
       : msg.content;
     
     return {

@@ -7,10 +7,6 @@ import OpenAI from 'openai';
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
-// Global context for current request (stored during POST handler execution)
-// This allows tools to access the current user query for better summarization
-let currentUserQuery: string = '';
-
 // OpenAI client instance (lazy-initialized to avoid build-time errors)
 let openai: OpenAI | null = null;
 
@@ -109,7 +105,7 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
 // Browse tool using simple HTTP fetch + Cheerio + AI summarization
 // This version fetches the webpage and uses a separate AI call to summarize it
 // based on the user's query, preventing context overload
-async function browse(args: z.infer<typeof browseSchema>) {
+async function browse(args: z.infer<typeof browseSchema>, userQuery: string) {
   try {
     console.log(`[BROWSE] Fetching URL: ${args.url}`);
     
@@ -142,7 +138,8 @@ async function browse(args: z.infer<typeof browseSchema>) {
     }
 
     // If content is too large, truncate before summarization
-    const MAX_CONTENT_LENGTH = 50000; // ~12.5k tokens
+    // Using 50,000 chars which equals ~12,500 tokens (at 4 chars/token ratio)
+    const MAX_CONTENT_LENGTH = 50000;
     if (content && content.length > MAX_CONTENT_LENGTH) {
       console.log(`[BROWSE] Content too large (${content.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
       content = content.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length]';
@@ -153,7 +150,10 @@ async function browse(args: z.infer<typeof browseSchema>) {
     // Use AI to summarize the webpage content based on the user's query
     // This prevents flooding the main agent's context with raw webpage text
     if (content && content.length > 1000) {
-      console.log(`[BROWSE] Summarizing content with AI (user query: "${currentUserQuery.substring(0, 100)}...")`);
+      const queryPreview = userQuery.length > 0 
+        ? userQuery.substring(0, 100) + (userQuery.length > 100 ? '...' : '')
+        : '(no query context)';
+      console.log(`[BROWSE] Summarizing content with AI (user query: "${queryPreview}")`);
       
       try {
         const openaiClient = getOpenAIClient();
@@ -166,7 +166,7 @@ async function browse(args: z.infer<typeof browseSchema>) {
             },
             {
               role: 'user',
-              content: `User Query: ${currentUserQuery}
+              content: `User Query: ${userQuery}
               
 Webpage URL: ${args.url}
 
@@ -216,13 +216,6 @@ const searchWebTool = tool({
   execute: searchWeb,
 });
 
-const browseTool = tool({
-  name: 'browse',
-  description: 'Fetch a URL and get an AI-generated summary of content relevant to the current query. Content is automatically summarized to prevent context overload.',
-  parameters: browseSchema,
-  execute: browse,
-});
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -265,8 +258,13 @@ export async function POST(request: Request) {
       return new Response('Message or messages array is required', { status: 400 });
     }
 
-    // Store user query globally so tools (like browse) can access it for context-aware summarization
-    currentUserQuery = userQuery;
+    // Create browse tool with userQuery captured in closure (avoids race conditions)
+    const browseTool = tool({
+      name: 'browse',
+      description: 'Fetch a URL and get an AI-generated summary of content relevant to the current query. Content is automatically summarized to prevent context overload.',
+      parameters: browseSchema,
+      execute: (args: z.infer<typeof browseSchema>) => browse(args, userQuery),
+    });
 
     // Build optimized context using LangChain
     let inputText: string;
