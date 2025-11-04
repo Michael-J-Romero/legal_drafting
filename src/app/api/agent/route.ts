@@ -145,9 +145,22 @@ export async function POST(request: Request) {
     let inputText: string;
     const conversationHistory = Array.isArray(messages) ? messages : [];
     
+    // Track token breakdown for detailed usage stats
+    let contextBreakdown = {
+      userPromptTokens: 0,
+      conversationContextTokens: 0,
+      researchContextTokens: 0,
+      systemInstructionsTokens: 0,
+      storedDocumentsCount: 0,
+      storedDocumentsTokens: 0,
+    };
+    
     console.log('\n========== AGENT REQUEST DEBUG ==========');
     console.log(`[REQUEST] User query length: ${userQuery.length} chars`);
     console.log(`[REQUEST] Conversation history: ${conversationHistory.length} messages`);
+    
+    // Calculate user prompt tokens
+    contextBreakdown.userPromptTokens = Math.ceil(userQuery.length / 4);
     
     // For first message, skip context optimization to avoid overhead
     if (conversationHistory.length === 0) {
@@ -161,6 +174,15 @@ export async function POST(request: Request) {
           userQuery,
           conversationHistory
         );
+        
+        // Update context breakdown
+        contextBreakdown.conversationContextTokens = Math.ceil(conversationSummary.length / 4);
+        contextBreakdown.researchContextTokens = relevantResearch ? Math.ceil(relevantResearch.length / 4) : 0;
+        
+        // Get stored documents stats
+        const stats = ctxManager.getStats();
+        contextBreakdown.storedDocumentsCount = stats.documentCount;
+        contextBreakdown.storedDocumentsTokens = stats.totalTokensEstimate;
         
         console.log(`[CONTEXT] Summary tokens: ${totalTokens}`);
         console.log(`[CONTEXT] Summary length: ${conversationSummary.length} chars`);
@@ -177,7 +199,6 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
         console.log(`[REQUEST] Input text length: ${inputText.length} chars (~${Math.ceil(inputText.length / 4)} tokens)`);
         
         // Log context stats for debugging
-        const stats = ctxManager.getStats();
         console.log(`[Context Manager] Documents: ${stats.documentCount}, Total tokens estimate: ${stats.totalTokensEstimate}, Request tokens: ${totalTokens}`);
         
       } catch (error) {
@@ -222,6 +243,9 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - Keep total response under 10,000 characters
 
 Always use the emoji markers to help users follow your thinking.`;
+
+    // Calculate system instructions tokens
+    contextBreakdown.systemInstructionsTokens = Math.ceil(agentInstructions.length / 4);
 
     console.log(`[AGENT] Instructions length: ${agentInstructions.length} chars (~${Math.ceil(agentInstructions.length / 4)} tokens)`);
     console.log(`[AGENT] Estimated total input tokens: ~${Math.ceil((agentInstructions.length + inputText.length) / 4)}`);
@@ -288,7 +312,10 @@ Always use the emoji markers to help users follow your thinking.`;
           if (usageData) {
             const usageSummary = JSON.stringify({
               type: 'usage_summary',
-              data: usageData
+              data: {
+                ...usageData,
+                breakdown: contextBreakdown
+              }
             });
             controller.enqueue(new TextEncoder().encode(`data: ${usageSummary}\n\n`));
           }

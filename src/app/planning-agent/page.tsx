@@ -20,12 +20,22 @@ interface StoredUploadedFile {
   uploadedAt: string; // ISO
 }
 
+interface TokenUsageBreakdown {
+  userPromptTokens: number;
+  conversationContextTokens: number;
+  researchContextTokens: number;
+  systemInstructionsTokens: number;
+  storedDocumentsCount: number;
+  storedDocumentsTokens: number;
+}
+
 interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
   inputTokensDetails?: Record<string, number>;
   outputTokensDetails?: Record<string, number>;
+  breakdown?: TokenUsageBreakdown;
 }
 
 interface Message {
@@ -810,6 +820,26 @@ export default function PlanningAgentPage() {
                         <span>Total:</span>
                         <span style={{ fontWeight: 600, color: '#059669' }}>{message.usage.totalTokens.toLocaleString()} tokens</span>
                       </div>
+                      {message.usage.breakdown && (
+                        <details style={{ marginTop: 8, cursor: 'pointer' }}>
+                          <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>📋 Input Breakdown</summary>
+                          <div style={{ marginTop: 6, paddingLeft: 12, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 11 }}>
+                            <span>User Prompt:</span>
+                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.userPromptTokens.toLocaleString()} tokens</span>
+                            <span>System Instructions:</span>
+                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.systemInstructionsTokens.toLocaleString()} tokens</span>
+                            <span>Conversation Context:</span>
+                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.conversationContextTokens.toLocaleString()} tokens</span>
+                            <span>Research Context:</span>
+                            <span style={{ fontWeight: 600 }}>{message.usage.breakdown.researchContextTokens.toLocaleString()} tokens</span>
+                            <span>Stored Documents:</span>
+                            <span style={{ fontWeight: 600 }}>
+                              {message.usage.breakdown.storedDocumentsCount} docs 
+                              ({message.usage.breakdown.storedDocumentsTokens.toLocaleString()} tokens available)
+                            </span>
+                          </div>
+                        </details>
+                      )}
                     </div>
                   )}
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{message.timestamp.toLocaleTimeString()}</div>
