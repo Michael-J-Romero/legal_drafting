@@ -52,6 +52,8 @@ function estimateTokens(text: string): number {
 const MAX_CONTENT_LENGTH = 50000; // Maximum content length before truncation (~12,500 tokens at 4 chars/token)
 const MIN_CONTENT_LENGTH_FOR_SUMMARIZATION = 1000; // Minimum content length to trigger AI summarization
 const FALLBACK_TRUNCATION_LENGTH = 5000; // Truncation length when summarization fails
+const QUERY_PREVIEW_LENGTH = 100; // Maximum length for query preview in logs
+const SUMMARY_MAX_TOKENS = 2000; // Maximum tokens for AI-generated summaries (~500 words)
 
 function getContextManager(): ContextManager {
   if (!contextManager) {
@@ -155,7 +157,7 @@ async function browse(args: z.infer<typeof browseSchema>, userQuery: string) {
     // This prevents flooding the main agent's context with raw webpage text
     if (content && content.length > MIN_CONTENT_LENGTH_FOR_SUMMARIZATION) {
       const queryPreview = userQuery.length > 0 
-        ? userQuery.substring(0, 100) + (userQuery.length > 100 ? '...' : '')
+        ? userQuery.substring(0, QUERY_PREVIEW_LENGTH) + (userQuery.length > QUERY_PREVIEW_LENGTH ? '...' : '')
         : '(no query context)';
       console.log(`[BROWSE] Summarizing content with AI (user query: "${queryPreview}")`);
       
@@ -181,7 +183,7 @@ Task: Summarize this webpage, focusing ONLY on information relevant to answering
             }
           ],
           temperature: 0.3,
-          max_tokens: 2000, // Limit summary to ~2k tokens
+          max_tokens: SUMMARY_MAX_TOKENS, // Limit summary length
         });
 
         const summary = summaryResponse.choices[0]?.message?.content || content;
