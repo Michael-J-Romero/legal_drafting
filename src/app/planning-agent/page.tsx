@@ -566,6 +566,9 @@ export default function PlanningAgentPage() {
                 // Debug: Log all event types to understand what we're receiving
                 if (data.type) {
                   console.log('[FRONTEND] Received event type:', data.type);
+                  if (data.type === 'usage_summary') {
+                    console.log('[FRONTEND] USAGE SUMMARY EVENT:', JSON.stringify(data, null, 2));
+                  }
                 }
                 
                 if (data.error) {
@@ -574,7 +577,20 @@ export default function PlanningAgentPage() {
                 } else if (data.type === 'usage_summary' && data.data) {
                   // Capture usage data
                   currentUsage = data.data;
-                  console.log('[FRONTEND] Usage data received:', currentUsage);
+                  console.log('[FRONTEND] ✅ Usage data captured:', currentUsage);
+                  
+                  // Immediately update the last message with usage data
+                  updateActiveChatMessages((prev) => {
+                    const newMessages = [...prev];
+                    const last = newMessages[newMessages.length - 1];
+                    if (last && last.role === 'assistant') {
+                      console.log('[FRONTEND] ✅ Updating assistant message with usage data');
+                      newMessages[newMessages.length - 1] = { ...last, usage: currentUsage };
+                    } else {
+                      console.log('[FRONTEND] ⚠️ No assistant message found to attach usage to');
+                    }
+                    return newMessages;
+                  });
                 } else if (data.type === 'output_text_delta' && data.data?.delta) {
                   const content = data.data.delta;
                   assistantMessage += content;

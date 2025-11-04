@@ -303,9 +303,19 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
+              // Debug: Log chunk type
+              if ('type' in chunk) {
+                console.log(`[BACKEND] Chunk type: ${chunk.type}`);
+              }
+              
               // Capture usage data from response.completed event within raw_model_stream_event
               if ('type' in chunk && chunk.type === 'raw_model_stream_event' && 'data' in chunk) {
                 const eventData = chunk.data as any;
+                
+                // Log the event type within raw_model_stream_event
+                if (eventData.type) {
+                  console.log(`[BACKEND] raw_model_stream_event contains: ${eventData.type}`);
+                }
                 
                 // Check if this is a response.completed event with usage data
                 if (eventData.type === 'response.completed' && eventData.response && eventData.response.usage) {
@@ -317,7 +327,7 @@ Always use the emoji markers to help users follow your thinking.`;
                     inputTokensDetails: rawUsage.input_tokens_details,
                     outputTokensDetails: rawUsage.output_tokens_details,
                   };
-                  console.log('[RESPONSE] Usage data captured from response.completed:', usageData);
+                  console.log('[BACKEND] ✅ Usage data captured from response.completed:', JSON.stringify(usageData, null, 2));
                 }
                 
                 // Accumulate text chunks for later processing
@@ -349,6 +359,8 @@ Always use the emoji markers to help users follow your thinking.`;
           
           // Send usage summary at the end if available
           if (usageData) {
+            console.log('[BACKEND] ✅ Sending usage summary:', JSON.stringify(usageData, null, 2));
+            console.log('[BACKEND] ✅ Context breakdown:', JSON.stringify(contextBreakdown, null, 2));
             const usageSummary = JSON.stringify({
               type: 'usage_summary',
               data: {
@@ -357,6 +369,9 @@ Always use the emoji markers to help users follow your thinking.`;
               }
             });
             controller.enqueue(new TextEncoder().encode(`data: ${usageSummary}\n\n`));
+            console.log('[BACKEND] ✅ Usage summary sent to client');
+          } else {
+            console.log('[BACKEND] ⚠️ No usage data captured - usage summary not sent');
           }
 
           // Extract and store research findings for future context retrieval
