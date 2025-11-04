@@ -2,9 +2,22 @@ import { Agent, tool, run } from '@openai/agents';
 import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
 import { ContextManager } from './contextManager';
+import OpenAI from 'openai';
 
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
+
+// OpenAI client instance (lazy-initialized to avoid build-time errors)
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openai;
+}
 
 // Context manager instance (in-memory, per-request)
 // In production, you might want to use Redis or similar for persistence
@@ -34,6 +47,13 @@ interface UsageData {
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
+
+// Constants for browse tool content processing
+const MAX_CONTENT_LENGTH = 50000; // Maximum content length before truncation (~12,500 tokens at 4 chars/token)
+const MIN_CONTENT_LENGTH_FOR_SUMMARIZATION = 1000; // Minimum content length to trigger AI summarization
+const FALLBACK_TRUNCATION_LENGTH = 5000; // Truncation length when summarization fails
+const QUERY_PREVIEW_LENGTH = 100; // Maximum length for query preview in logs
+const SUMMARY_MAX_TOKENS = 2000; // Maximum tokens for AI-generated summaries (~500 words)
 
 function getContextManager(): ContextManager {
   if (!contextManager) {
@@ -89,9 +109,13 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
   }
 }
 
-// Browse tool using simple HTTP fetch + Cheerio (no Browserless/Playwright)
-async function browse(args: z.infer<typeof browseSchema>) {
+// Browse tool using simple HTTP fetch + Cheerio + AI summarization
+// This version fetches the webpage and uses a separate AI call to summarize it
+// based on the user's query, preventing context overload
+async function browse(args: z.infer<typeof browseSchema>, userQuery: string) {
   try {
+    console.log(`[BROWSE] Fetching URL: ${args.url}`);
+    
     const res = await fetch(args.url, {
       redirect: 'follow',
       headers: {
@@ -120,6 +144,69 @@ async function browse(args: z.infer<typeof browseSchema>) {
       }
     }
 
+    // If content is too large, truncate before summarization
+    // Using MAX_CONTENT_LENGTH which equals ~12,500 tokens (at 4 chars/token ratio)
+    if (content && content.length > MAX_CONTENT_LENGTH) {
+      console.log(`[BROWSE] Content too large (${content.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
+      content = content.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length]';
+    }
+
+    console.log(`[BROWSE] Content extracted: ${content?.length || 0} chars (~${estimateTokens(content || '')} tokens)`);
+
+    // Use AI to summarize the webpage content based on the user's query
+    // This prevents flooding the main agent's context with raw webpage text
+    if (content && content.length > MIN_CONTENT_LENGTH_FOR_SUMMARIZATION) {
+      const queryPreview = userQuery.length > 0 
+        ? userQuery.substring(0, QUERY_PREVIEW_LENGTH) + (userQuery.length > QUERY_PREVIEW_LENGTH ? '...' : '')
+        : '(no query context)';
+      console.log(`[BROWSE] Summarizing content with AI (user query: "${queryPreview}")`);
+      
+      try {
+        const openaiClient = getOpenAIClient();
+        const summaryResponse = await openaiClient.chat.completions.create({
+          model: 'gpt-4o-mini', // Use faster, cheaper model for summarization
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a web content summarizer. Extract and summarize ONLY the information relevant to the user\'s query. Be concise but comprehensive. Focus on facts, data, and key points that would help answer the query.'
+            },
+            {
+              role: 'user',
+              content: `User Query: ${userQuery}
+              
+Webpage URL: ${args.url}
+
+Webpage Content:
+${content}
+
+Task: Summarize this webpage, focusing ONLY on information relevant to answering the user's query. Include specific facts, data, quotes, and key points. Keep the summary under 1000 words.`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: SUMMARY_MAX_TOKENS, // Limit summary length
+        });
+
+        const summary = summaryResponse.choices[0]?.message?.content || content;
+        console.log(`[BROWSE] AI summary generated: ${summary.length} chars (~${estimateTokens(summary)} tokens)`);
+        
+        return JSON.stringify({ 
+          url: args.url, 
+          summary: summary,
+          note: 'Content summarized by AI to focus on query-relevant information'
+        });
+      } catch (summaryError) {
+        console.error('[BROWSE] Error during summarization, falling back to truncated content:', summaryError);
+        // Fallback: return truncated content if summarization fails
+        const truncated = content.substring(0, FALLBACK_TRUNCATION_LENGTH);
+        return JSON.stringify({ 
+          url: args.url, 
+          content: truncated,
+          note: `Summarization failed, content truncated to ${FALLBACK_TRUNCATION_LENGTH} chars`
+        });
+      }
+    }
+
+    // For short content, return as-is
     return JSON.stringify({ url: args.url, content });
   } catch (error) {
     console.error('Error in browse:', error);
@@ -133,13 +220,6 @@ const searchWebTool = tool({
   description: 'Search the web using Tavily API to find relevant information',
   parameters: searchWebSchema,
   execute: searchWeb,
-});
-
-const browseTool = tool({
-  name: 'browse',
-  description: 'Fetch a URL and extract content with an optional CSS selector (no JS rendering)',
-  parameters: browseSchema,
-  execute: browse,
 });
 
 export async function POST(request: Request) {
@@ -183,6 +263,14 @@ export async function POST(request: Request) {
     if (!userQuery) {
       return new Response('Message or messages array is required', { status: 400 });
     }
+
+    // Create browse tool with userQuery captured in closure (avoids race conditions)
+    const browseTool = tool({
+      name: 'browse',
+      description: 'Fetch a URL and get an AI-generated summary of content relevant to the current query. Content is automatically summarized to prevent context overload.',
+      parameters: browseSchema,
+      execute: (args: z.infer<typeof browseSchema>) => browse(args, userQuery),
+    });
 
     // Build optimized context using LangChain
     let inputText: string;
