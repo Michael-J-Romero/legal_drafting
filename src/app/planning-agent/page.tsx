@@ -762,6 +762,20 @@ export default function PlanningAgentPage() {
       });
     }
 
+    // Include existing notes context so AI knows what's already stored
+    if (notes.length > 0) {
+      messageContent += '\n\n[Existing Notes - Do not duplicate these]:\n';
+      const notesByCategory = notes.reduce((acc, note) => {
+        if (!acc[note.category]) acc[note.category] = [];
+        acc[note.category].push(note.content);
+        return acc;
+      }, {} as Record<string, string[]>);
+      
+      Object.entries(notesByCategory).forEach(([category, noteContents]) => {
+        messageContent += `${category.toUpperCase()}: ${noteContents.join('; ')}\n`;
+      });
+    }
+
     // Clean the conversation history to remove verbose reasoning steps
     // This keeps only the ANSWER sections from assistant messages, dramatically reducing token usage
     // Note: We send only the HISTORY (previous messages), not the current user message
