@@ -389,6 +389,12 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
 🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (${agentSettings.summaryMode === 'brief' ? 'keep minimal' : 'keep brief'})
 💡 **SYNTHESIS:** Organize findings, identify patterns (${agentSettings.summaryMode === 'detailed' ? 'comprehensive summary' : 'concise summary'})
+📝 **NOTES:** (Optional) When you discover key information, add it as a note using this format:
+   [NOTE: category | content]
+   Categories: dates, places, documents, people, goals, deadlines, requirements, other
+   Example: [NOTE: dates | Meeting scheduled for March 15, 2024]
+   Example: [NOTE: documents | Need passport copy and proof of residence]
+   Group related items in single note when possible
 ✅ **ANSWER:** Clear response with citations
 
 **Iterative Process:**
@@ -402,6 +408,13 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - Use browse for specific URLs - it returns only relevant content, not full page source (already optimized)
 - The tools handle optimization - you receive pre-processed, token-efficient summaries
 - Focus on extracting insights from the optimized data you receive
+
+**Note-Taking Guidelines:**
+- Add notes when you discover: dates, deadlines, required documents, locations, people's names, goals, requirements
+- Use clear, concise language in notes
+- Group similar items together when it makes sense
+- Don't duplicate information already in notes
+- Categories help organize information for the user
 
 **Answer Phase:**
 - Use headings and bullet points
