@@ -471,6 +471,8 @@ export default function PlanningAgentPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
   const [showNotesPanel, setShowNotesPanel] = useState(true); // Toggle notes panel visibility
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editedContent, setEditedContent] = useState('');
   
   // Agent settings with defaults
   const [settings, setSettings] = useState<AgentSettings>({
@@ -643,6 +645,40 @@ export default function PlanningAgentPage() {
     setInput('');
   }
 
+  // Message editing and deletion functions
+  function startEditingMessage(index: number) {
+    setEditingMessageIndex(index);
+    setEditedContent(messages[index].content);
+  }
+
+  function saveEditedMessage() {
+    if (editingMessageIndex === null || !activeChat) return;
+    
+    updateActiveChatMessages((prev) => 
+      prev.map((msg, idx) => 
+        idx === editingMessageIndex 
+          ? { ...msg, content: editedContent } 
+          : msg
+      )
+    );
+    
+    setEditingMessageIndex(null);
+    setEditedContent('');
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageIndex(null);
+    setEditedContent('');
+  }
+
+  function deleteMessage(index: number) {
+    if (!activeChat) return;
+    const ok = window.confirm('Delete this message? This cannot be undone.');
+    if (!ok) return;
+    
+    updateActiveChatMessages((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
   // Note management functions
   function addNote(note: Note) {
     if (!activeChat) return;
@@ -747,6 +783,7 @@ export default function PlanningAgentPage() {
           content: assistantResponse,
           existingNotes: existingNotesContext,
           model: effectiveModel,  // Pass the effective model
+          autoFilter: true,  // Request automatic filtering of notes
         }),
       });
 
@@ -757,16 +794,33 @@ export default function PlanningAgentPage() {
 
       const data = await response.json();
       
-      // Parse the extracted notes
+      // Parse the extracted notes with automatic filtering
       if (data.notes && Array.isArray(data.notes)) {
-        return data.notes.map((note: any) => ({
+        const allNotes = data.notes.map((note: any) => ({
           id: generateId(),
           content: note.content,
           category: note.category || 'other',
           createdAt: new Date(),
           updatedAt: new Date(),
-          isPending: true,
+          isPending: note.confidence !== 'auto-accept', // Only pending if not auto-accepted
+          autoAccept: note.confidence === 'auto-accept',
+          needsReview: note.confidence === 'needs-review',
         }));
+
+        // Automatically accept high-confidence notes
+        const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
+        if (autoAcceptedNotes.length > 0) {
+          autoAcceptedNotes.forEach((note: any) => {
+            const { autoAccept, needsReview, ...cleanNote } = note;
+            addNote({ ...cleanNote, isPending: false });
+          });
+        }
+
+        // Return only notes that need user review (filter out auto-rejected and auto-accepted)
+        return allNotes.filter((n: any) => n.needsReview).map((n: any) => {
+          const { autoAccept, needsReview, ...cleanNote } = n;
+          return cleanNote;
+        });
       }
 
       return [];
@@ -1418,10 +1472,100 @@ export default function PlanningAgentPage() {
             messages.map((message, index) => (
               <div
                 key={index}
-                style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none' }}
+                style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none', position: 'relative' }}
               >
-                <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
-                <MessageContent content={message.content} role={message.role} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontWeight: 'bold', color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {editingMessageIndex !== index && (
+                      <>
+                        <button
+                          onClick={() => startEditingMessage(index)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            backgroundColor: 'transparent',
+                            border: '1px solid #d1d5db',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: '#6b7280',
+                          }}
+                          title="Edit message"
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMessage(index)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            backgroundColor: 'transparent',
+                            border: '1px solid #ef4444',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: '#ef4444',
+                          }}
+                          title="Delete message"
+                        >
+                          🗑️ Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {editingMessageIndex === index ? (
+                  <div>
+                    <textarea
+                      value={editedContent}
+                      onChange={(e) => setEditedContent(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 100,
+                        padding: 8,
+                        border: '1px solid #d1d5db',
+                        borderRadius: 4,
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                        resize: 'vertical',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        onClick={saveEditedMessage}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✓ Save
+                      </button>
+                      <button
+                        onClick={cancelEditingMessage}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#6b7280',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <MessageContent content={message.content} role={message.role} />
+                )}
                   {message.files && message.files.length > 0 && (
                     <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {message.files.map((file) => (
