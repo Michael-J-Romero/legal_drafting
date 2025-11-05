@@ -804,7 +804,7 @@ export default function PlanningAgentPage() {
           updatedAt: new Date(),
           isPending: note.confidence !== 'auto-accept', // Only pending if not auto-accepted
           autoAccept: note.confidence === 'auto-accept',
-          needsReview: note.confidence === 'needs-review',
+          needsReview: note.confidence === 'needs-review' || !note.confidence, // Include notes without confidence (backend doesn't support auto-filtering yet)
         }));
 
         // Automatically accept high-confidence notes
