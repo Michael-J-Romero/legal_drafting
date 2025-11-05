@@ -767,6 +767,60 @@ export default function PlanningAgentPage() {
     return notes;
   }
 
+  // Client-side heuristics to auto-filter notes when backend doesn't provide confidence levels
+  function assignNoteConfidence(note: any, existingNotes: Note[]): string {
+    const content = note.content?.toLowerCase() || '';
+    const category = note.category?.toLowerCase() || 'other';
+    
+    // Auto-reject criteria: vague, generic, or low-value notes
+    const rejectPatterns = [
+      /^(ok|okay|yes|no|sure|thanks|thank you)\.?$/i,
+      /^(noted|understood|got it|i see)\.?$/i,
+      /^.{1,10}$/,  // Too short (less than 10 chars)
+    ];
+    
+    const vagueWords = ['something', 'things', 'stuff', 'maybe', 'perhaps', 'might', 'possibly'];
+    const hasVagueWords = vagueWords.some(word => content.includes(word));
+    
+    // Check for duplicate or very similar content
+    const isDuplicate = existingNotes.some(existing => {
+      const existingContent = existing.content.toLowerCase();
+      return existingContent === content || 
+             (existingContent.length > 10 && content.includes(existingContent)) ||
+             (content.length > 10 && existingContent.includes(content));
+    });
+    
+    // Auto-reject conditions
+    if (rejectPatterns.some(pattern => pattern.test(content))) {
+      return 'auto-reject';
+    }
+    
+    if (isDuplicate) {
+      return 'auto-reject';
+    }
+    
+    if (content.length < 15 && hasVagueWords) {
+      return 'auto-reject';
+    }
+    
+    // Auto-accept criteria: specific, actionable notes with clear information
+    const hasDate = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.test(content);
+    const hasSpecificInfo = content.length > 30;
+    const isActionableCategory = ['dates', 'deadlines', 'documents', 'people', 'goals', 'requirements'].includes(category);
+    
+    // Strong indicators for auto-accept
+    if (hasDate && category === 'dates') {
+      return 'auto-accept';
+    }
+    
+    if (isActionableCategory && hasSpecificInfo && !hasVagueWords) {
+      return 'auto-accept';
+    }
+    
+    // Default: needs review
+    return 'needs-review';
+  }
+
   // Intelligent note extraction using AI analysis
   async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[]): Promise<Note[]> {
     try {
@@ -796,16 +850,21 @@ export default function PlanningAgentPage() {
       
       // Parse the extracted notes with automatic filtering
       if (data.notes && Array.isArray(data.notes)) {
-        const allNotes = data.notes.map((note: any) => ({
-          id: generateId(),
-          content: note.content,
-          category: note.category || 'other',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          isPending: note.confidence !== 'auto-accept', // Only pending if not auto-accepted
-          autoAccept: note.confidence === 'auto-accept',
-          needsReview: note.confidence === 'needs-review' || !note.confidence, // Include notes without confidence (backend doesn't support auto-filtering yet)
-        }));
+        const allNotes = data.notes.map((note: any) => {
+          // Apply client-side confidence if backend doesn't provide it
+          const confidence = note.confidence || assignNoteConfidence(note, existingNotes);
+          
+          return {
+            id: generateId(),
+            content: note.content,
+            category: note.category || 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isPending: confidence !== 'auto-accept', // Only pending if not auto-accepted
+            autoAccept: confidence === 'auto-accept',
+            needsReview: confidence === 'needs-review',
+          };
+        });
 
         // Automatically accept high-confidence notes
         const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
