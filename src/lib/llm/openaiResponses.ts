@@ -166,7 +166,8 @@ export class OpenAIResponsesClient {
 
       let accumulatedText = '';
 
-      for await (const chunk of stream) {
+      // The OpenAI SDK returns an async iterable when stream: true
+      for await (const chunk of stream as any) {
         const delta = chunk.choices[0]?.delta?.content || '';
         
         if (delta) {

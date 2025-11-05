@@ -6,54 +6,34 @@
  */
 
 import React from 'react';
-import {
-  Box,
-  FormControl,
-  FormLabel,
-  Select,
-  Radio,
-  RadioGroup,
-  Stack,
-  Text,
-  Checkbox,
-  VStack,
-  HStack,
-  Button,
-  useToast,
-  Divider,
-} from '@chakra-ui/react';
 import { useSettingsStore, PROCESS_TYPES, type ProcessType } from '@/lib/settings';
 import { AVAILABLE_MODELS, getModelConfig } from '@/config/models';
+import styles from './ModelSettings.module.css';
 
 export function ModelSettings() {
-  const toast = useToast();
   const { settings, updateSettings, resetSettings } = useSettingsStore();
+  const [showToast, setShowToast] = React.useState<string | null>(null);
   
   const selectedModelConfig = getModelConfig(settings.defaultModel);
   const isReasoningModel = selectedModelConfig?.reasoningCapable ?? false;
 
+  const showMessage = (message: string) => {
+    setShowToast(message);
+    setTimeout(() => setShowToast(null), 2000);
+  };
+
   const handleDefaultModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateSettings({ defaultModel: e.target.value });
-    toast({
-      title: 'Default model updated',
-      status: 'success',
-      duration: 2000,
-      isClosable: true,
-    });
+    showMessage('Default model updated');
   };
 
   const handleQuickModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateSettings({ quickModel: e.target.value });
-    toast({
-      title: 'Quick model updated',
-      status: 'success',
-      duration: 2000,
-      isClosable: true,
-    });
+    showMessage('Quick model updated');
   };
 
-  const handleReasoningEffortChange = (value: string) => {
-    updateSettings({ reasoningEffort: value as 'low' | 'medium' | 'high' });
+  const handleReasoningEffortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    updateSettings({ reasoningEffort: e.target.value as 'low' | 'medium' | 'high' });
   };
 
   const handleReasoningSummaryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -75,148 +55,180 @@ export function ModelSettings() {
 
   const handleReset = () => {
     resetSettings();
-    toast({
-      title: 'Settings reset to defaults',
-      status: 'info',
-      duration: 2000,
-      isClosable: true,
-    });
+    showMessage('Settings reset to defaults');
   };
 
   return (
-    <Box p={6} bg="white" borderRadius="md" shadow="md">
-      <VStack spacing={6} align="stretch">
-        <Box>
-          <Text fontSize="2xl" fontWeight="bold" mb={4}>
-            Model Settings
-          </Text>
-          <Text fontSize="sm" color="gray.600">
-            Configure LLM models and routing for different tasks
-          </Text>
-        </Box>
+    <div className={styles.container}>
+      {showToast && (
+        <div className={styles.toast}>
+          {showToast}
+        </div>
+      )}
 
-        <Divider />
+      <div className={styles.header}>
+        <h2 className={styles.title}>Model Settings</h2>
+        <p className={styles.subtitle}>
+          Configure LLM models and routing for different tasks
+        </p>
+      </div>
 
-        {/* Default Model */}
-        <FormControl>
-          <FormLabel>Default Model</FormLabel>
-          <Select value={settings.defaultModel} onChange={handleDefaultModelChange}>
-            {AVAILABLE_MODELS.map((model) => (
+      <div className={styles.divider} />
+
+      {/* Default Model */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Default Model</label>
+        <select 
+          className={styles.select}
+          value={settings.defaultModel} 
+          onChange={handleDefaultModelChange}
+        >
+          {AVAILABLE_MODELS.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name} {model.description ? `- ${model.description}` : ''}
+            </option>
+          ))}
+        </select>
+        <p className={styles.hint}>
+          The primary model used for most tasks
+        </p>
+      </div>
+
+      {/* Reasoning Effort */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>
+          Reasoning Effort
+          {!isReasoningModel && (
+            <span className={styles.warning}>
+              (Not available for selected model)
+            </span>
+          )}
+        </label>
+        <div className={styles.radioGroup}>
+          <label className={`${styles.radioLabel} ${!isReasoningModel ? styles.disabled : ''}`}>
+            <input
+              type="radio"
+              value="low"
+              checked={settings.reasoningEffort === 'low'}
+              onChange={handleReasoningEffortChange}
+              disabled={!isReasoningModel}
+            />
+            Low
+          </label>
+          <label className={`${styles.radioLabel} ${!isReasoningModel ? styles.disabled : ''}`}>
+            <input
+              type="radio"
+              value="medium"
+              checked={settings.reasoningEffort === 'medium'}
+              onChange={handleReasoningEffortChange}
+              disabled={!isReasoningModel}
+            />
+            Medium
+          </label>
+          <label className={`${styles.radioLabel} ${!isReasoningModel ? styles.disabled : ''}`}>
+            <input
+              type="radio"
+              value="high"
+              checked={settings.reasoningEffort === 'high'}
+              onChange={handleReasoningEffortChange}
+              disabled={!isReasoningModel}
+            />
+            High
+          </label>
+        </div>
+        <p className={styles.hint}>
+          {isReasoningModel
+            ? 'Control the depth of reasoning for GPT-5 and other reasoning-capable models'
+            : 'Only available for reasoning-capable models (e.g., GPT-5 family)'}
+        </p>
+      </div>
+
+      {/* Reasoning Summary */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Reasoning Summary</label>
+        <select
+          className={styles.select}
+          value={settings.reasoningSummary}
+          onChange={handleReasoningSummaryChange}
+          disabled={!isReasoningModel}
+        >
+          <option value="auto">Auto</option>
+          <option value="concise">Concise</option>
+          <option value="detailed">Detailed</option>
+        </select>
+        <p className={styles.hint}>
+          How reasoning steps should be summarized
+        </p>
+      </div>
+
+      {/* Text Verbosity */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Text Verbosity</label>
+        <select 
+          className={styles.select}
+          value={settings.textVerbosity} 
+          onChange={handleTextVerbosityChange}
+        >
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+        <p className={styles.hint}>
+          Control the length and detail of responses
+        </p>
+      </div>
+
+      <div className={styles.divider} />
+
+      {/* Quick Thinking Model */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Quick Thinking Model</label>
+        <select 
+          className={styles.select}
+          value={settings.quickModel} 
+          onChange={handleQuickModelChange}
+        >
+          {AVAILABLE_MODELS.filter((m) => !m.reasoningCapable || m.id.includes('mini')).map(
+            (model) => (
               <option key={model.id} value={model.id}>
                 {model.name} {model.description ? `- ${model.description}` : ''}
               </option>
-            ))}
-          </Select>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            The primary model used for most tasks
-          </Text>
-        </FormControl>
+            )
+          )}
+        </select>
+        <p className={styles.hint}>
+          Faster, cheaper model for lightweight tasks
+        </p>
+      </div>
 
-        {/* Reasoning Effort */}
-        <FormControl isDisabled={!isReasoningModel}>
-          <FormLabel>
-            Reasoning Effort
-            {!isReasoningModel && (
-              <Text as="span" fontSize="xs" color="orange.500" ml={2}>
-                (Not available for selected model)
-              </Text>
-            )}
-          </FormLabel>
-          <RadioGroup
-            value={settings.reasoningEffort}
-            onChange={handleReasoningEffortChange}
-            isDisabled={!isReasoningModel}
-          >
-            <Stack direction="row" spacing={4}>
-              <Radio value="low">Low</Radio>
-              <Radio value="medium">Medium</Radio>
-              <Radio value="high">High</Radio>
-            </Stack>
-          </RadioGroup>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            {isReasoningModel
-              ? 'Control the depth of reasoning for GPT-5 and other reasoning-capable models'
-              : 'Only available for reasoning-capable models (e.g., GPT-5 family)'}
-          </Text>
-        </FormControl>
-
-        {/* Reasoning Summary */}
-        <FormControl isDisabled={!isReasoningModel}>
-          <FormLabel>Reasoning Summary</FormLabel>
-          <Select
-            value={settings.reasoningSummary}
-            onChange={handleReasoningSummaryChange}
-            isDisabled={!isReasoningModel}
-          >
-            <option value="auto">Auto</option>
-            <option value="concise">Concise</option>
-            <option value="detailed">Detailed</option>
-          </Select>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            How reasoning steps should be summarized
-          </Text>
-        </FormControl>
-
-        {/* Text Verbosity */}
-        <FormControl>
-          <FormLabel>Text Verbosity</FormLabel>
-          <Select value={settings.textVerbosity} onChange={handleTextVerbosityChange}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </Select>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            Control the length and detail of responses
-          </Text>
-        </FormControl>
-
-        <Divider />
-
-        {/* Quick Thinking Model */}
-        <FormControl>
-          <FormLabel>Quick Thinking Model</FormLabel>
-          <Select value={settings.quickModel} onChange={handleQuickModelChange}>
-            {AVAILABLE_MODELS.filter((m) => !m.reasoningCapable || m.id.includes('mini')).map(
-              (model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} {model.description ? `- ${model.description}` : ''}
-                </option>
-              )
-            )}
-          </Select>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            Faster, cheaper model for lightweight tasks
-          </Text>
-        </FormControl>
-
-        {/* Quick Model Process Types */}
-        <FormControl>
-          <FormLabel>Use Quick Model For</FormLabel>
-          <VStack align="start" spacing={2} pl={2}>
-            {PROCESS_TYPES.map((processType) => (
-              <Checkbox
-                key={processType.value}
-                isChecked={settings.quickModelProcesses.includes(processType.value)}
+      {/* Quick Model Process Types */}
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Use Quick Model For</label>
+        <div className={styles.checkboxGroup}>
+          {PROCESS_TYPES.map((processType) => (
+            <label key={processType.value} className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={settings.quickModelProcesses.includes(processType.value)}
                 onChange={(e) => handleProcessToggle(processType.value, e.target.checked)}
-              >
-                {processType.label}
-              </Checkbox>
-            ))}
-          </VStack>
-          <Text fontSize="xs" color="gray.500" mt={2}>
-            Select which tasks should use the quick model instead of the default model
-          </Text>
-        </FormControl>
+              />
+              {processType.label}
+            </label>
+          ))}
+        </div>
+        <p className={styles.hint}>
+          Select which tasks should use the quick model instead of the default model
+        </p>
+      </div>
 
-        <Divider />
+      <div className={styles.divider} />
 
-        {/* Reset Button */}
-        <HStack justify="flex-end">
-          <Button variant="outline" onClick={handleReset}>
-            Reset to Defaults
-          </Button>
-        </HStack>
-      </VStack>
-    </Box>
+      {/* Reset Button */}
+      <div className={styles.buttonGroup}>
+        <button className={styles.resetButton} onClick={handleReset}>
+          Reset to Defaults
+        </button>
+      </div>
+    </div>
   );
 }
