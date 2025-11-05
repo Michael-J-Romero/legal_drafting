@@ -11,6 +11,20 @@ interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  'gpt-5': {
+    name: 'gpt-5',
+    displayName: 'GPT-5',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-5 with reasoning capabilities and 128K context'
+  },
+  'gpt-5-mini': {
+    name: 'gpt-5-mini',
+    displayName: 'GPT-5 Mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-5 Mini - faster and cheaper with 128K context'
+  },
   'gpt-4o-2024-11-20': {
     name: 'gpt-4o-2024-11-20',
     displayName: 'GPT-4o (latest)',
@@ -24,6 +38,13 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
     description: 'GPT-4o with 128K context'
+  },
+  'gpt-4o-mini': {
+    name: 'gpt-4o-mini',
+    displayName: 'GPT-4o Mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4o Mini - compact and efficient with 128K context'
   },
   'gpt-4-turbo': {
     name: 'gpt-4-turbo',
@@ -62,6 +83,9 @@ interface AgentSettings {
   contextWindowSize: number;
   summaryMode: 'brief' | 'balanced' | 'detailed';
   model: string;
+  reasoningEffort: 'low' | 'medium' | 'high';
+  quickModel: string;
+  quickAssignments: Record<string, boolean>;
 }
 
 interface UploadedFile {
@@ -155,6 +179,7 @@ interface StoredChatSession {
 }
 
 const STORAGE_KEY = 'planningAgentChats';
+const SETTINGS_STORAGE_KEY = 'planningAgentSettings';
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -454,7 +479,13 @@ export default function PlanningAgentPage() {
     maxResponseLength: 10000,
     contextWindowSize: 4000,
     summaryMode: 'balanced',
-    model: 'gpt-4o-2024-11-20'
+    model: 'gpt-4o-2024-11-20',
+    reasoningEffort: 'medium',
+    quickModel: 'gpt-3.5-turbo',
+    quickAssignments: {
+      'extract-notes': true,
+      'agent': false
+    }
   });
 
   // Load from localStorage on mount
@@ -487,6 +518,28 @@ export default function PlanningAgentPage() {
       console.error('Failed to save chats to storage', e);
     }
   }, [chats]);
+
+  // Load settings from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(SETTINGS_STORAGE_KEY) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as AgentSettings;
+        setSettings(parsed);
+      }
+    } catch (e) {
+      console.error('Failed to load settings from storage', e);
+    }
+  }, []);
+
+  // Persist settings to localStorage when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch (e) {
+      console.error('Failed to save settings to storage', e);
+    }
+  }, [settings]);
 
   // Close any open chat menu on window click
   useEffect(() => {
@@ -684,12 +737,16 @@ export default function PlanningAgentPage() {
       // Build existing notes context
       const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
 
+      // Determine the effective model for note extraction (always use quick model for this lightweight task)
+      const effectiveModel = getEffectiveModel('extract-notes');
+
       const response = await fetch('/api/extract-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content: assistantResponse,
-          existingNotes: existingNotesContext
+          existingNotes: existingNotesContext,
+          model: effectiveModel,  // Pass the effective model
         }),
       });
 
@@ -784,6 +841,16 @@ export default function PlanningAgentPage() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
+  // Helper to determine effective model based on routing settings
+  const getEffectiveModel = (processType: 'agent' | 'extract-notes'): string => {
+    // Check if this process should use the quick model
+    if (settings.quickAssignments[processType]) {
+      return settings.quickModel;
+    }
+    // Otherwise use the primary model
+    return settings.model;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !activeChat) return;
@@ -835,13 +902,20 @@ export default function PlanningAgentPage() {
     setIsLoading(true);
 
     try {
+      // Determine the effective model for the agent call
+      const effectiveModel = getEffectiveModel('agent');
+      
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: messageContent,  // Current user message
           messages: cleanedHistory,  // Conversation history (excluding current message)
-          settings: settings
+          settings: {
+            ...settings,
+            model: effectiveModel,  // Use effective model based on routing
+          },
+          reasoningEffort: settings.reasoningEffort,  // Pass reasoning effort separately for clarity
         }),
       });
 
@@ -1088,6 +1162,8 @@ export default function PlanningAgentPage() {
                   }}
                   style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
                 >
+                  <option value="gpt-5">GPT-5 - 128K</option>
+                  <option value="gpt-5-mini">GPT-5 Mini - 128K</option>
                   <option value="gpt-4o-2024-11-20">GPT-4o (latest) - 128K</option>
                   <option value="gpt-4o">GPT-4o - 128K</option>
                   <option value="o1-preview">o1 (preview) - 128K</option>
@@ -1122,6 +1198,81 @@ export default function PlanningAgentPage() {
                 </select>
                 <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
                   Max for {MODEL_CONFIGS[settings.model]?.displayName}: {(MODEL_CONFIGS[settings.model]?.maxContextTokens / 1000).toFixed(0)}K tokens
+                </div>
+              </div>
+              
+              {/* Reasoning Effort (for reasoning-capable models) */}
+              {(settings.model.startsWith('gpt-5') || settings.model.startsWith('o1')) && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                    Reasoning Effort
+                  </label>
+                  <select 
+                    value={settings.reasoningEffort}
+                    onChange={(e) => setSettings({...settings, reasoningEffort: e.target.value as 'low' | 'medium' | 'high'})}
+                    style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                  >
+                    <option value="low">Low (faster)</option>
+                    <option value="medium">Medium (balanced)</option>
+                    <option value="high">High (thorough)</option>
+                  </select>
+                  <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                    Controls depth of reasoning for {MODEL_CONFIGS[settings.model]?.displayName}
+                  </div>
+                </div>
+              )}
+              
+              {/* Quick Model Selection */}
+              <div style={{ marginBottom: 12, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Quick Model (for lightweight tasks)
+                </label>
+                <select 
+                  value={settings.quickModel}
+                  onChange={(e) => setSettings({...settings, quickModel: e.target.value})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (fastest)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  Used for parallel/background tasks to save cost
+                </div>
+              </div>
+              
+              {/* Process Routing Checkboxes */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 6, color: '#374151' }}>
+                  Use Quick Model For:
+                </label>
+                <div style={{ fontSize: 11 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.quickAssignments['extract-notes'] || false}
+                      onChange={(e) => setSettings({
+                        ...settings, 
+                        quickAssignments: {...settings.quickAssignments, 'extract-notes': e.target.checked}
+                      })}
+                    />
+                    <span>Notes Extraction</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.quickAssignments['agent'] || false}
+                      onChange={(e) => setSettings({
+                        ...settings, 
+                        quickAssignments: {...settings.quickAssignments, 'agent': e.target.checked}
+                      })}
+                    />
+                    <span>Main Agent Chat</span>
+                  </label>
+                </div>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 4 }}>
+                  Automatically routes these processes to the quick model
                 </div>
               </div>
               
