@@ -389,15 +389,9 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
 🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (${agentSettings.summaryMode === 'brief' ? 'keep minimal' : 'keep brief'})
 💡 **SYNTHESIS:** Organize findings, identify patterns (${agentSettings.summaryMode === 'detailed' ? 'comprehensive summary' : 'concise summary'})
-📝 **NOTES:** IMPORTANT - Always extract and save key information as notes! Use this format:
-   [NOTE: category | content]
-   Categories: dates, places, documents, people, goals, deadlines, requirements, other
-   Example: [NOTE: dates | Meeting scheduled for March 15, 2024]
-   Example: [NOTE: documents | Need passport copy and proof of residence]
-   Example: [NOTE: goals | Research AI developments by end of week]
-   Example: [NOTE: people | Contact John Smith at john@example.com]
-   Group related items in single note when possible
 ✅ **ANSWER:** Clear response with citations
+
+**Important:** After you complete your response, an intelligent AI system will automatically analyze your entire response (including all research, thinking, and answers) to extract noteworthy facts for the user's reference. Focus on providing thorough, detailed responses with specific information - dates, names, locations, requirements, deadlines, etc. - as these will be automatically captured as notes for the user.
 
 **Iterative Process:**
 - After EACH research step, add REFLECTION
@@ -411,22 +405,11 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - The tools handle optimization - you receive pre-processed, token-efficient summaries
 - Focus on extracting insights from the optimized data you receive
 
-**CRITICAL Note-Taking Guidelines - Follow These Strictly:**
-- ALWAYS create notes for ANY new factual information you discover or discuss
-- Create notes for: specific dates, deadlines, time periods, locations, addresses, building names, document names/types, file requirements, people's names, contact info, organizations, companies, goals (user's or project), milestones, requirements, specifications, prices, amounts, quantities, URLs, legal terms, processes, steps in a procedure
-- Be PROACTIVE - if you mention something specific in your research or answer, add it as a note
-- Don't worry about creating too many notes - the user will review and accept/reject them
-- Use clear, concise language in notes
-- Group similar items together when it makes sense (e.g., multiple documents in one note, several dates for the same event)
-- Check conversation context to avoid exact duplicates, but when in doubt, create the note
-- Categories help organize information - choose the most specific category
-- If information could fit multiple categories, pick the most relevant one
-- Even seemingly minor details can be important - capture them
-
 **Answer Phase:**
 - Use headings and bullet points
 - Include ${agentSettings.summaryMode === 'brief' ? 'only essential URLs' : agentSettings.summaryMode === 'detailed' ? 'all relevant URLs with context' : 'key URLs'}
 - State final confidence level
+- Be specific with details - dates, names, locations, requirements, deadlines - as these are automatically captured for the user
 - Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;

@@ -651,7 +651,7 @@ export default function PlanningAgentPage() {
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
   }
 
-  // Extract notes from assistant's response
+  // Extract notes from assistant's response using regex (fallback method)
   function extractNotesFromResponse(content: string): Note[] {
     const notePattern = /\[NOTE:\s*([^\|]+)\s*\|\s*([^\]]+)\]/gi;
     const notes: Note[] = [];
@@ -676,6 +676,48 @@ export default function PlanningAgentPage() {
     }
 
     return notes;
+  }
+
+  // Intelligent note extraction using AI analysis
+  async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[]): Promise<Note[]> {
+    try {
+      // Build existing notes context
+      const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
+
+      const response = await fetch('/api/extract-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: assistantResponse,
+          existingNotes: existingNotesContext
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Note extraction API failed, falling back to regex extraction');
+        return extractNotesFromResponse(assistantResponse);
+      }
+
+      const data = await response.json();
+      
+      // Parse the extracted notes
+      if (data.notes && Array.isArray(data.notes)) {
+        return data.notes.map((note: any) => ({
+          id: generateId(),
+          content: note.content,
+          category: note.category || 'other',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isPending: true,
+        }));
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error in intelligent note extraction:', error);
+      // Fallback to regex extraction
+      return extractNotesFromResponse(assistantResponse);
+    }
   }
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -916,8 +958,8 @@ export default function PlanningAgentPage() {
           return newMessages;
         });
 
-        // Extract notes from the assistant's response
-        const extractedNotes = extractNotesFromResponse(assistantMessage);
+        // Extract notes from the assistant's response using intelligent AI analysis
+        const extractedNotes = await intelligentNoteExtraction(assistantMessage, notes);
         if (extractedNotes.length > 0) {
           setPendingNotes((prev) => [...prev, ...extractedNotes]);
         }
