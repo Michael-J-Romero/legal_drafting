@@ -181,6 +181,10 @@ Responses include detailed usage information:
 Run the demo to see model routing in action:
 
 ```bash
+# Using npx (recommended, no installation needed)
+OPENAI_API_KEY=your_key npx ts-node src/examples/llmRoutingDemo.ts
+
+# Or if ts-node is installed globally
 OPENAI_API_KEY=your_key ts-node src/examples/llmRoutingDemo.ts
 ```
 

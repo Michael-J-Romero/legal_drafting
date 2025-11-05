@@ -52,6 +52,7 @@ export class ModelRouter {
     }
 
     // Get settings from store if not provided
+    // Note: Zustand's getState() works outside React components - it's safe to use here
     const activeSettings = settings || useSettingsStore.getState().settings;
 
     // Determine if this process type should use the quick model

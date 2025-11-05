@@ -93,6 +93,23 @@ export function getQuickThinkingModels(): ModelConfig[] {
 }
 
 /**
+ * Check if a model is suitable for quick thinking tasks
+ * (lightweight, fast, or economical models)
+ */
+export function isQuickThinkingModel(modelId: string): boolean {
+  const config = getModelConfig(modelId);
+  if (!config) return false;
+  
+  // Reasoning-capable models except mini variants are not quick-thinking
+  if (config.reasoningCapable && !modelId.includes('mini')) {
+    return false;
+  }
+  
+  // Mini variants and 3.5 models are quick-thinking
+  return modelId.includes('mini') || modelId.includes('3.5');
+}
+
+/**
  * Default model IDs
  */
 export const DEFAULT_MODEL = 'gpt-4o-2024-11-20';

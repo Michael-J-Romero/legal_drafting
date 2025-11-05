@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useSettingsStore, PROCESS_TYPES, type ProcessType } from '@/lib/settings';
-import { AVAILABLE_MODELS, getModelConfig } from '@/config/models';
+import { AVAILABLE_MODELS, getModelConfig, isQuickThinkingModel } from '@/config/models';
 import styles from './ModelSettings.module.css';
 
 export function ModelSettings() {
@@ -188,7 +188,7 @@ export function ModelSettings() {
           value={settings.quickModel} 
           onChange={handleQuickModelChange}
         >
-          {AVAILABLE_MODELS.filter((m) => !m.reasoningCapable || m.id.includes('mini')).map(
+          {AVAILABLE_MODELS.filter((m) => isQuickThinkingModel(m.id)).map(
             (model) => (
               <option key={model.id} value={model.id}>
                 {model.name} {model.description ? `- ${model.description}` : ''}

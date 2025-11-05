@@ -115,11 +115,9 @@ export class OpenAIResponsesClient {
       params.response_format = {
         type: 'text',
       };
-      if (request.text.verbosity) {
-        // Note: verbosity is not a standard OpenAI parameter yet
-        // This is a placeholder for future API support
-        // For now, we can include it in the system message
-      }
+      // Note: text.verbosity is not a standard OpenAI parameter
+      // It's included in our interface for future API support
+      // The verbosity preference should be communicated via the prompt/instructions
     }
 
     // IMPORTANT: Do not include temperature for reasoning models
@@ -166,8 +164,10 @@ export class OpenAIResponsesClient {
 
       let accumulatedText = '';
 
-      // The OpenAI SDK returns an async iterable when stream: true
-      for await (const chunk of stream as any) {
+      // The OpenAI SDK's TypeScript definitions don't properly type the stream response
+      // When stream:true is passed, it returns an async iterable, not a ChatCompletion
+      // We use unknown here to properly handle the actual runtime type
+      for await (const chunk of stream as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
         const delta = chunk.choices[0]?.delta?.content || '';
         
         if (delta) {
