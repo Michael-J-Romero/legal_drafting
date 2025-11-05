@@ -35,6 +35,51 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+// Helper function to truncate text intelligently
+function truncateText(text: string, maxChars: number = 2000): string {
+  if (text.length <= maxChars) return text;
+  
+  // Try to truncate at sentence boundary
+  const truncated = text.substring(0, maxChars);
+  const lastPeriod = truncated.lastIndexOf('.');
+  const lastNewline = truncated.lastIndexOf('\n');
+  const cutoff = Math.max(lastPeriod, lastNewline);
+  
+  if (cutoff > maxChars * 0.8) {
+    return truncated.substring(0, cutoff + 1) + '\n[...truncated for brevity]';
+  }
+  
+  return truncated + '...[truncated]';
+}
+
+// Helper function to extract main content from HTML body text
+function extractMainContent(bodyText: string): string {
+  // Remove excessive whitespace
+  let cleaned = bodyText.replace(/\s+/g, ' ').trim();
+  
+  // Remove common navigation/footer patterns
+  cleaned = cleaned.replace(/\b(cookie|privacy policy|terms of service|all rights reserved|copyright|subscribe|newsletter|sign up|log in|menu|navigation)\b/gi, '');
+  
+  // If still too long, take first meaningful chunk
+  if (cleaned.length > 3000) {
+    // Try to find main content sections (paragraphs)
+    const sentences = cleaned.split(/[.!?]+\s+/);
+    let result = '';
+    let tokenCount = 0;
+    
+    for (const sentence of sentences) {
+      const sentenceTokens = estimateTokens(sentence);
+      if (tokenCount + sentenceTokens > 750) break; // Max ~750 tokens
+      result += sentence + '. ';
+      tokenCount += sentenceTokens;
+    }
+    
+    return result.trim() + '\n[...content truncated to save tokens]';
+  }
+  
+  return cleaned;
+}
+
 function getContextManager(): ContextManager {
   if (!contextManager) {
     contextManager = new ContextManager(4000); // Reduced from 8000 to 4000 tokens for safer context management
@@ -74,6 +119,8 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
         api_key: tavilyApiKey,
         query: args.query,
         max_results: args.maxResults,
+        include_answer: true, // Get AI-generated answer summary
+        include_raw_content: false, // Don't include full page content
       }),
     });
 
@@ -82,7 +129,30 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
     }
 
     const data = await response.json();
-    return JSON.stringify(data.results || []);
+    
+    // Format results in a concise, token-efficient way
+    const results = (data.results || []).map((result: any, idx: number) => {
+      // Truncate each result's content to avoid token bloat
+      const content = result.content ? truncateText(result.content, 500) : '';
+      return {
+        position: idx + 1,
+        title: result.title || 'No title',
+        url: result.url || '',
+        snippet: content,
+        score: result.score || 0
+      };
+    });
+    
+    // Build optimized response
+    const summary = {
+      query: args.query,
+      answer: data.answer || 'No summary available', // AI-generated answer from Tavily
+      top_results: results.slice(0, 3), // Only top 3 results
+      total_found: results.length
+    };
+    
+    console.log(`[SEARCH] Query: "${args.query}" - Found ${results.length} results, returning top 3`);
+    return JSON.stringify(summary, null, 2);
   } catch (error) {
     console.error('Error in searchWeb:', error);
     throw error;
@@ -90,6 +160,7 @@ async function searchWeb(args: z.infer<typeof searchWebSchema>) {
 }
 
 // Browse tool using simple HTTP fetch + Cheerio (no Browserless/Playwright)
+// Optimized to return only relevant content summaries instead of full page source
 async function browse(args: z.infer<typeof browseSchema>) {
   try {
     const res = await fetch(args.url, {
@@ -109,18 +180,54 @@ async function browse(args: z.infer<typeof browseSchema>) {
     const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
     const html = await res.text();
 
-    let content: string | null = html;
+    let extractedContent: string;
+    let metadata: any = {
+      url: args.url,
+      contentType: contentType
+    };
+
     if (isHtml) {
       const $ = loadHtml(html);
+      
+      // Extract metadata
+      metadata.title = $('title').text().trim() || 'No title';
+      metadata.description = $('meta[name="description"]').attr('content') || 
+                            $('meta[property="og:description"]').attr('content') || '';
+      
+      // If selector provided, use it
       if (args.selector && args.selector.trim() !== '') {
         const sel = $(args.selector);
-        content = sel.length ? sel.text().trim() : '';
+        extractedContent = sel.length ? sel.text().trim() : 'Selector matched no elements';
       } else {
-        content = $('body').text().replace(/\s+/g, ' ').trim();
+        // Intelligent content extraction
+        // Try to find main content areas
+        const mainContent = $('main').text() || 
+                          $('article').text() || 
+                          $('#content').text() || 
+                          $('.content').text() || 
+                          $('body').text();
+        
+        // Remove script and style content
+        $('script, style, nav, header, footer, aside').remove();
+        
+        extractedContent = extractMainContent(mainContent.replace(/\s+/g, ' ').trim());
       }
+    } else {
+      // Non-HTML content - just truncate
+      extractedContent = truncateText(html, 1000);
     }
 
-    return JSON.stringify({ url: args.url, content });
+    // Build optimized response
+    const optimizedResponse = {
+      ...metadata,
+      content: extractedContent,
+      contentLength: extractedContent.length,
+      estimatedTokens: estimateTokens(extractedContent),
+      note: 'Content has been optimized to show only relevant information'
+    };
+
+    console.log(`[BROWSE] URL: ${args.url} - Extracted ${extractedContent.length} chars (~${estimateTokens(extractedContent)} tokens)`);
+    return JSON.stringify(optimizedResponse, null, 2);
   } catch (error) {
     console.error('Error in browse:', error);
     throw error;
@@ -130,14 +237,14 @@ async function browse(args: z.infer<typeof browseSchema>) {
 // Create tools using the tool helper
 const searchWebTool = tool({
   name: 'search_web',
-  description: 'Search the web using Tavily API to find relevant information',
+  description: 'Search the web using Tavily API. Returns an AI-generated answer summary and top 3 most relevant results with snippets. Optimized to minimize token usage while providing key information.',
   parameters: searchWebSchema,
   execute: searchWeb,
 });
 
 const browseTool = tool({
   name: 'browse',
-  description: 'Fetch a URL and extract content with an optional CSS selector (no JS rendering)',
+  description: 'Fetch and extract relevant content from a URL. Automatically extracts main content (articles, main sections) and returns optimized summaries instead of full page source. Use CSS selector parameter to target specific elements if needed.',
   parameters: browseSchema,
   execute: browse,
 });
@@ -279,10 +386,12 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
     const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
 🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
-🔍 **RESEARCH:** Use tools, explain what you're searching for (summarize findings ${agentSettings.summaryMode === 'brief' ? 'very briefly' : agentSettings.summaryMode === 'detailed' ? 'in detail' : 'concisely'})
+🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
 🧐 **REFLECTION:** After research, state confidence (0-100%), identify gaps (${agentSettings.summaryMode === 'brief' ? 'keep minimal' : 'keep brief'})
 💡 **SYNTHESIS:** Organize findings, identify patterns (${agentSettings.summaryMode === 'detailed' ? 'comprehensive summary' : 'concise summary'})
 ✅ **ANSWER:** Clear response with citations
+
+**Important:** After you complete your response, an intelligent AI system will automatically analyze your entire response (including all research, thinking, and answers) to extract noteworthy facts for the user's reference. Focus on providing thorough, detailed responses with specific information - dates, names, locations, requirements, deadlines, etc. - as these will be automatically captured as notes for the user.
 
 **Iterative Process:**
 - After EACH research step, add REFLECTION
@@ -291,14 +400,16 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - ${verbosityGuidance}
 
 **Research Phase:**
-- Use search_web for queries
-- Use browse for specific URLs (state: "BROWSING_URL: <url>")
-- Summarize ${agentSettings.summaryMode === 'brief' ? 'ONLY the most critical findings' : agentSettings.summaryMode === 'detailed' ? 'all relevant findings comprehensively' : 'the most relevant findings'}
+- Use search_web for queries - it returns an AI summary + top 3 results with snippets (already optimized)
+- Use browse for specific URLs - it returns only relevant content, not full page source (already optimized)
+- The tools handle optimization - you receive pre-processed, token-efficient summaries
+- Focus on extracting insights from the optimized data you receive
 
 **Answer Phase:**
 - Use headings and bullet points
 - Include ${agentSettings.summaryMode === 'brief' ? 'only essential URLs' : agentSettings.summaryMode === 'detailed' ? 'all relevant URLs with context' : 'key URLs'}
 - State final confidence level
+- Be specific with details - dates, names, locations, requirements, deadlines - as these are automatically captured for the user
 - Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;

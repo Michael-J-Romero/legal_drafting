@@ -118,12 +118,31 @@ interface StoredMessage {
   usage?: TokenUsage;
 }
 
+interface Note {
+  id: string;
+  content: string;
+  category: string; // e.g., 'dates', 'places', 'documents', 'general', 'goals'
+  createdAt: Date;
+  updatedAt: Date;
+  isNew?: boolean; // For highlighting newly added notes
+  isPending?: boolean; // Waiting for user approval
+}
+
+interface StoredNote {
+  id: string;
+  content: string;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface ChatSession {
   id: string;
   title: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
   messages: Message[];
+  notes?: Note[]; // Notes/goals for this chat
 }
 
 interface StoredChatSession {
@@ -132,6 +151,7 @@ interface StoredChatSession {
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];
+  notes?: StoredNote[];
 }
 
 const STORAGE_KEY = 'planningAgentChats';
@@ -285,6 +305,38 @@ function parseMessageSections(content: string): MessageSection[] {
   return sections;
 }
 
+/**
+ * Cleans the conversation history by extracting only the ANSWER sections from assistant messages.
+ * This dramatically reduces token usage by removing verbose reasoning steps (THINKING, RESEARCH, etc.)
+ * while preserving the actual conversation context.
+ */
+function getCleanedHistory(messages: Message[]): Pick<Message, 'role' | 'content' | 'timestamp'>[] {
+  return messages.map(msg => {
+    // Keep user messages unchanged - return a minimal object to avoid unnecessary copying
+    if (msg.role === 'user') {
+      return { role: msg.role, content: msg.content, timestamp: msg.timestamp };
+    }
+    
+    // For assistant messages, extract only the ANSWER section
+    // Quick check: if the message doesn't contain the ANSWER marker, return as-is
+    if (!msg.content.includes('✅') && !msg.content.includes('ANSWER:')) {
+      return { role: msg.role, content: msg.content, timestamp: msg.timestamp };
+    }
+    
+    // Parse sections only if we detected the marker
+    const sections = parseMessageSections(msg.content);
+    const answerSection = sections.find(section => section.type === 'answer');
+    
+    // If there's an ANSWER section, use only that; otherwise keep the full content
+    // (to handle edge cases where the response doesn't have the expected structure)
+    const cleanedContent = answerSection 
+      ? answerSection.content 
+      : msg.content;
+    
+    return { role: msg.role, content: cleanedContent, timestamp: msg.timestamp };
+  });
+}
+
 function renderMessageSection(section: MessageSection, key: number) {
   const style = SECTION_STYLES[section.type];
   
@@ -351,6 +403,11 @@ function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
       timestamp: new Date(m.timestamp),
       files: m.files?.map(f => ({ ...f, uploadedAt: new Date(f.uploadedAt) }))
     })),
+    notes: (c.notes || []).map((n) => ({
+      ...n,
+      createdAt: new Date(n.createdAt),
+      updatedAt: new Date(n.updatedAt)
+    }))
   }));
 }
 
@@ -365,6 +422,13 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
       timestamp: m.timestamp.toISOString(),
       files: m.files?.map(f => ({ ...f, uploadedAt: f.uploadedAt.toISOString() }))
     })),
+    notes: (c.notes || []).map((n) => ({
+      id: n.id,
+      content: n.content,
+      category: n.category,
+      createdAt: n.createdAt.toISOString(),
+      updatedAt: n.updatedAt.toISOString()
+    }))
   }));
 }
 
@@ -380,6 +444,8 @@ export default function PlanningAgentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
+  const [showNotesPanel, setShowNotesPanel] = useState(true); // Toggle notes panel visibility
   
   // Agent settings with defaults
   const [settings, setSettings] = useState<AgentSettings>({
@@ -403,7 +469,7 @@ export default function PlanningAgentPage() {
       } else {
         const id = generateId();
         const now = new Date().toISOString();
-        const initial: ChatSession = { id, title: 'New chat', createdAt: now, updatedAt: now, messages: [] };
+        const initial: ChatSession = { id, title: 'New chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
         setChats([initial]);
         setActiveChatId(id);
       }
@@ -431,6 +497,7 @@ export default function PlanningAgentPage() {
 
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
+  const notes = activeChat?.notes ?? [];
 
   const totalUsage = useMemo(() => {
     const messagesWithUsage = messages.filter(m => m.usage);
@@ -476,7 +543,7 @@ export default function PlanningAgentPage() {
   function createNewChat() {
     const id = generateId();
     const now = new Date().toISOString();
-    const newChat: ChatSession = { id, title: 'New chat', createdAt: now, updatedAt: now, messages: [] };
+    const newChat: ChatSession = { id, title: 'New chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(id);
     setInput('');
@@ -513,7 +580,7 @@ export default function PlanningAgentPage() {
           // If none remain, create a fresh chat
           const newId = generateId();
           const now = new Date().toISOString();
-          const fresh: ChatSession = { id: newId, title: 'New chat', createdAt: now, updatedAt: now, messages: [] };
+          const fresh: ChatSession = { id: newId, title: 'New chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
           setActiveChatId(newId);
           return [fresh];
         }
@@ -521,6 +588,136 @@ export default function PlanningAgentPage() {
       return next;
     });
     setInput('');
+  }
+
+  // Note management functions
+  function addNote(note: Note) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) => 
+        c.id === activeChat.id 
+          ? { ...c, notes: [...(c.notes || []), note], updatedAt: new Date().toISOString() } 
+          : c
+      )
+    );
+  }
+
+  function updateNote(noteId: string, updates: Partial<Note>) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? {
+              ...c,
+              notes: (c.notes || []).map((n) =>
+                n.id === noteId ? { ...n, ...updates, updatedAt: new Date() } : n
+              ),
+              updatedAt: new Date().toISOString(),
+            }
+          : c
+      )
+    );
+  }
+
+  function deleteNote(noteId: string) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notes: (c.notes || []).filter((n) => n.id !== noteId), updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  }
+
+  function acceptPendingNote(noteId: string) {
+    const pendingNote = pendingNotes.find((n) => n.id === noteId);
+    if (!pendingNote) return;
+    
+    // Remove isPending flag and add to chat notes
+    const acceptedNote: Note = { ...pendingNote, isPending: false, isNew: true };
+    addNote(acceptedNote);
+    
+    // Remove from pending
+    setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
+    
+    // Clear isNew flag after a delay
+    setTimeout(() => {
+      updateNote(noteId, { isNew: false });
+    }, 3000);
+  }
+
+  function rejectPendingNote(noteId: string) {
+    setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
+  }
+
+  // Extract notes from assistant's response using regex (fallback method)
+  function extractNotesFromResponse(content: string): Note[] {
+    const notePattern = /\[NOTE:\s*([^\|]+)\s*\|\s*([^\]]+)\]/gi;
+    const notes: Note[] = [];
+    let match;
+
+    while ((match = notePattern.exec(content)) !== null) {
+      const category = match[1].trim().toLowerCase();
+      const noteContent = match[2].trim();
+
+      // Validate category
+      const validCategories = ['dates', 'places', 'documents', 'people', 'goals', 'deadlines', 'requirements', 'other'];
+      const finalCategory = validCategories.includes(category) ? category : 'other';
+
+      notes.push({
+        id: generateId(),
+        content: noteContent,
+        category: finalCategory,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isPending: true,
+      });
+    }
+
+    return notes;
+  }
+
+  // Intelligent note extraction using AI analysis
+  async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[]): Promise<Note[]> {
+    try {
+      // Build existing notes context
+      const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
+
+      const response = await fetch('/api/extract-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: assistantResponse,
+          existingNotes: existingNotesContext
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Note extraction API failed, falling back to regex extraction');
+        return extractNotesFromResponse(assistantResponse);
+      }
+
+      const data = await response.json();
+      
+      // Parse the extracted notes
+      if (data.notes && Array.isArray(data.notes)) {
+        return data.notes.map((note: any) => ({
+          id: generateId(),
+          content: note.content,
+          category: note.category || 'other',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isPending: true,
+        }));
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error in intelligent note extraction:', error);
+      // Fallback to regex extraction
+      return extractNotesFromResponse(assistantResponse);
+    }
   }
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -607,7 +804,25 @@ export default function PlanningAgentPage() {
       });
     }
 
-    const conversationToSend = [...messages, { role: 'user' as const, content: messageContent, timestamp: new Date() }];
+    // Include existing notes context so AI knows what's already stored
+    if (notes.length > 0) {
+      messageContent += '\n\n[Existing Notes - Do not duplicate these]:\n';
+      const notesByCategory = notes.reduce((acc, note) => {
+        if (!acc[note.category]) acc[note.category] = [];
+        acc[note.category].push(note.content);
+        return acc;
+      }, {} as Record<string, string[]>);
+      
+      Object.entries(notesByCategory).forEach(([category, noteContents]) => {
+        messageContent += `${category.toUpperCase()}: ${noteContents.join('; ')}\n`;
+      });
+    }
+
+    // Clean the conversation history to remove verbose reasoning steps
+    // This keeps only the ANSWER sections from assistant messages, dramatically reducing token usage
+    // Note: We send only the HISTORY (previous messages), not the current user message
+    // The backend expects 'message' for the current query and 'messages' for history
+    const cleanedHistory = getCleanedHistory(messages);
 
     updateActiveChatMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0) {
@@ -624,7 +839,8 @@ export default function PlanningAgentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: conversationToSend,
+          message: messageContent,  // Current user message
+          messages: cleanedHistory,  // Conversation history (excluding current message)
           settings: settings
         }),
       });
@@ -741,6 +957,12 @@ export default function PlanningAgentPage() {
           }
           return newMessages;
         });
+
+        // Extract notes from the assistant's response using intelligent AI analysis
+        const extractedNotes = await intelligentNoteExtraction(assistantMessage, notes);
+        if (extractedNotes.length > 0) {
+          setPendingNotes((prev) => [...prev, ...extractedNotes]);
+        }
       }
     } catch (error) {
       console.error('Error communicating with agent:', error);
@@ -1300,6 +1522,177 @@ export default function PlanningAgentPage() {
           </form>
         </div>
       </main>
+
+      {/* Notes/Goals Panel */}
+      {showNotesPanel && (
+        <aside style={{ width: 320, borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
+          <div style={{ padding: 12, borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
+            <button
+              onClick={() => setShowNotesPanel(false)}
+              style={{ padding: '4px 8px', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: '#6b7280' }}
+              title="Hide panel"
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Pending Notes (waiting for approval) */}
+          {pendingNotes.length > 0 && (
+            <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7' }}>
+              <div style={{ padding: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 8 }}>
+                  ⚠️ New Notes (Review & Accept)
+                </div>
+                {pendingNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    style={{
+                      marginBottom: 8,
+                      padding: 10,
+                      backgroundColor: '#fff',
+                      border: '2px solid #fbbf24',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#92400e', marginBottom: 4 }}>
+                      {note.category.toUpperCase()}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#111827', marginBottom: 8, lineHeight: 1.4 }}>
+                      {note.content}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => acceptPendingNote(note.id)}
+                        style={{
+                          padding: '4px 12px',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✓ Accept
+                      </button>
+                      <button
+                        onClick={() => rejectPendingNote(note.id)}
+                        style={{
+                          padding: '4px 12px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        × Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Notes List */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+            {notes.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#9ca3af', padding: 20, fontSize: 13 }}>
+                No notes yet. The AI will create notes as you chat about dates, documents, goals, etc.
+              </div>
+            ) : (
+              <>
+                {/* Group notes by category */}
+                {['goals', 'dates', 'deadlines', 'documents', 'requirements', 'places', 'people', 'other'].map((category) => {
+                  const categoryNotes = notes.filter((n) => n.category === category);
+                  if (categoryNotes.length === 0) return null;
+
+                  return (
+                    <div key={category} style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8, textTransform: 'uppercase' }}>
+                        {category === 'goals' && '🎯 '}
+                        {category === 'dates' && '📅 '}
+                        {category === 'deadlines' && '⏰ '}
+                        {category === 'documents' && '📄 '}
+                        {category === 'requirements' && '✓ '}
+                        {category === 'places' && '📍 '}
+                        {category === 'people' && '👤 '}
+                        {category}
+                      </div>
+                      {categoryNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          style={{
+                            marginBottom: 8,
+                            padding: 10,
+                            backgroundColor: note.isNew ? '#d1fae5' : '#fff',
+                            border: note.isNew ? '2px solid #10b981' : '1px solid #e5e7eb',
+                            borderRadius: 6,
+                            position: 'relative',
+                            transition: 'all 0.3s ease',
+                          }}
+                        >
+                          <div style={{ fontSize: 13, color: '#111827', marginBottom: 4, lineHeight: 1.4 }}>
+                            {note.content}
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                              {new Date(note.updatedAt).toLocaleDateString()}
+                            </div>
+                            <button
+                              onClick={() => deleteNote(note.id)}
+                              style={{
+                                padding: '2px 6px',
+                                backgroundColor: 'transparent',
+                                color: '#ef4444',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: 12,
+                              }}
+                              title="Delete note"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* Show/hide notes panel button (when hidden) */}
+      {!showNotesPanel && (
+        <button
+          onClick={() => setShowNotesPanel(true)}
+          style={{
+            position: 'fixed',
+            right: 20,
+            top: 20,
+            padding: '8px 12px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 13,
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+            zIndex: 100,
+          }}
+        >
+          📝 Show Notes
+        </button>
+      )}
     </div>
   );
 }
