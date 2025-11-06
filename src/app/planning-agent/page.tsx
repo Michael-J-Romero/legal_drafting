@@ -16,14 +16,14 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     displayName: 'GPT-5',
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
-    description: 'GPT-5 with reasoning capabilities and 128K context'
+    description: 'GPT-5 with native reasoning capabilities and 128K context (optimized for complex tasks)'
   },
   'gpt-5-mini': {
     name: 'gpt-5-mini',
     displayName: 'GPT-5 Mini',
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
-    description: 'GPT-5 Mini - faster and cheaper with 128K context'
+    description: 'GPT-5 Mini with reasoning - faster and cheaper with 128K context'
   },
   'gpt-4o-2024-11-20': {
     name: 'gpt-4o-2024-11-20',
@@ -65,14 +65,14 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     displayName: 'o1 (preview)',
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
-    description: 'o1 reasoning model preview with 128K context'
+    description: 'o1 reasoning model preview with 128K context (optimized for complex reasoning)'
   },
   'o1-mini': {
     name: 'o1-mini',
     displayName: 'o1-mini',
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
-    description: 'o1-mini reasoning model with 128K context'
+    description: 'o1-mini reasoning model with 128K context (faster reasoning)'
   }
 };
 
