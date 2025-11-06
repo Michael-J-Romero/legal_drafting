@@ -13,6 +13,19 @@ An AI-powered research assistant that works like GitHub Copilot Agent or ChatGPT
 - **Visual Indicators**: Color-coded sections for each reasoning phase
 - **Reasoning Model Support**: Optimized for GPT-5 and o1 series models with native reasoning capabilities
 
+### 📝 AI-Powered Note Management
+Intelligent note organization and structuring features:
+- **Auto-Extraction**: AI automatically extracts important information from conversations
+- **Refine Notes**: AI-powered refinement that:
+  - Removes duplicate notes
+  - Filters out generic/redundant/irrelevant information
+  - Flags contradictions between notes
+- **Graph Notes**: Converts notes into hierarchical JSON structures
+  - Intelligent merging with existing graphs
+  - Cross-references using dot notation
+  - Organized by case, parties, events, evidence, and documents
+  - Perfect for legal case management
+
 ### 📄 Document Creator
 Tools for legal document drafting and management.
 
@@ -46,6 +59,7 @@ Tools for legal document drafting and management.
 
 ## Usage Examples
 
+### Research Agent
 Try asking the research agent:
 - "Research the latest developments in AI agents and explain the key trends"
 - "Compare different approaches to state management in React"
@@ -56,6 +70,48 @@ The agent will show you its complete reasoning process:
 - 🔍 **RESEARCH** - Web search and browsing
 - 💡 **SYNTHESIS** - Pattern recognition and analysis
 - ✅ **ANSWER** - Comprehensive response with citations
+
+### Notes Management
+1. **Chat with the AI** - Notes are automatically extracted from your conversations
+2. **Review Pending Notes** - Accept or reject AI-suggested notes
+3. **Refine Notes** - Click "🧹 Refine Notes" to:
+   - Remove duplicates
+   - Filter out generic content
+   - Identify contradictions
+4. **Graph Notes** - Click "📊 Graph Notes" to:
+   - Convert notes into structured JSON
+   - Visualize relationships
+   - Export for use in other tools
+
+Example graph structure:
+```json
+{
+  "case": {
+    "jurisdiction": {
+      "court": "Superior Court",
+      "location": "Los Angeles"
+    },
+    "parties": {
+      "plaintiff": { "name": "John Doe" }
+    },
+    "events": {
+      "hearings": [
+        {
+          "title": "Motion to Compel",
+          "date": "2024-03-15",
+          "documents": ["@documents.motion_to_compel"]
+        }
+      ]
+    }
+  },
+  "documents": {
+    "motion_to_compel": {
+      "title": "Motion to Compel Discovery",
+      "date_filed": "2024-02-01"
+    }
+  }
+}
+```
 
 ## Requirements
 
