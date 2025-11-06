@@ -63,6 +63,8 @@ export default function DocumentsView() {
   const [chatInput, setChatInput] = useState('');
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const [pendingDocumentEdit, setPendingDocumentEdit] = useState<{content: string, title?: string} | null>(null);
+  const [showViewEditsModal, setShowViewEditsModal] = useState(false);
+  const [documentHasUnappliedEdits, setDocumentHasUnappliedEdits] = useState<{[docId: string]: boolean}>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Load documents from localStorage on mount
@@ -648,15 +650,13 @@ IMPORTANT:
   const handleApplyEdits = async () => {
     if (!pendingDocumentEdit || !selectedDocument) return;
 
-    setIsAnalyzing(true);
-
     try {
       const updatedText = pendingDocumentEdit.content.trim();
       const updatedFileName = pendingDocumentEdit.title 
         ? pendingDocumentEdit.title + (selectedDocument.fileType || '.txt')
         : selectedDocument.fileName;
 
-      // Update the document
+      // Update the document without re-analyzing
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === selectedDocument.id
@@ -670,13 +670,42 @@ IMPORTANT:
         )
       );
 
+      // Mark this document as having unapplied edits (needs re-analysis)
+      setDocumentHasUnappliedEdits(prev => ({
+        ...prev,
+        [selectedDocument.id]: true
+      }));
+
+      // Clear pending edit and add confirmation message
+      setPendingDocumentEdit(null);
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: '✅ Document updated successfully! Click the "Analyze" button to regenerate the summary and notes.', 
+        timestamp: new Date() 
+      }]);
+
+    } catch (err) {
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `Error applying edits: ${err instanceof Error ? err.message : 'An error occurred'}`, 
+        timestamp: new Date() 
+      }]);
+    }
+  };
+
+  const handleReanalyzeDocument = async () => {
+    if (!selectedDocument) return;
+
+    setIsAnalyzing(true);
+
+    try {
       // Re-analyze the updated document
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: updatedText,
-          fileName: updatedFileName,
+          text: selectedDocument.text,
+          fileName: selectedDocument.fileName,
           fileType: selectedDocument.fileType,
         }),
       });
@@ -699,6 +728,29 @@ IMPORTANT:
         setDocuments((prev) =>
           prev.map((doc) =>
             doc.id === selectedDocument.id
+              ? {
+                  ...doc,
+                  summary: analyzeData.summary,
+                  notes: analyzedNotes,
+                  analyzedAt: new Date(),
+                }
+              : doc
+          )
+        );
+
+        // Clear the unapplied edits marker
+        setDocumentHasUnappliedEdits(prev => ({
+          ...prev,
+          [selectedDocument.id]: false
+        }));
+      }
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during re-analysis');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
               ? {
                   ...doc,
                   summary: analyzeData.summary,
@@ -920,8 +972,64 @@ IMPORTANT:
                 </div>
               </div>
 
-              {/* Content Area with Summary and Notes */}
+              {/* Content Area with Document Text, Summary and Notes */}
               <div style={{ flex: 1, overflowY: 'auto', padding: 20, backgroundColor: '#f9fafb' }}>
+                {/* Full Document Text Section - Now at top */}
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>
+                    📄 Full Document Text
+                  </h4>
+                  <div
+                    style={{
+                      padding: 16,
+                      backgroundColor: '#fff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      maxHeight: 400,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        color: '#374151',
+                        margin: 0,
+                      }}
+                    >
+                      {selectedDocument.text}
+                    </pre>
+                  </div>
+                  
+                  {/* Edited marker with Analyze button */}
+                  {documentHasUnappliedEdits[selectedDocument.id] && (
+                    <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', backgroundColor: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 6 }}>
+                      <span style={{ flex: 1, fontSize: 13, color: '#92400e', fontWeight: 600 }}>
+                        ✏️ Edited - Summary and notes need updating
+                      </span>
+                      <button
+                        onClick={handleReanalyzeDocument}
+                        disabled={isAnalyzing}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: isAnalyzing ? '#d1d5db' : '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 6,
+                          cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                        }}
+                      >
+                        {isAnalyzing ? 'Analyzing...' : '🔍 Analyze'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Summary Section */}
                 {selectedDocument.summary ? (
                   <div style={{ marginBottom: 24 }}>
@@ -958,37 +1066,6 @@ IMPORTANT:
                     </div>
                   </div>
                 )}
-
-                {/* Full Document Text Section */}
-                <div style={{ marginBottom: 24 }}>
-                  <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>
-                    📄 Full Document Text
-                  </h4>
-                  <div
-                    style={{
-                      padding: 16,
-                      backgroundColor: '#fff',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 8,
-                      maxHeight: 400,
-                      overflowY: 'auto',
-                    }}
-                  >
-                    <pre
-                      style={{
-                        whiteSpace: 'pre-wrap',
-                        wordWrap: 'break-word',
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        color: '#374151',
-                        margin: 0,
-                      }}
-                    >
-                      {selectedDocument.text}
-                    </pre>
-                  </div>
-                </div>
 
                 {/* Notes Section */}
                 <div>
@@ -1161,25 +1238,43 @@ IMPORTANT:
                   </div>
                 )}
                 {pendingDocumentEdit && (
-                  <button
-                    onClick={handleApplyEdits}
-                    disabled={isAnalyzing}
-                    style={{
-                      width: '100%',
-                      marginBottom: 12,
-                      padding: '12px 16px',
-                      backgroundColor: isAnalyzing ? '#d1d5db' : '#10b981',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: 6,
-                      cursor: isAnalyzing ? 'not-allowed' : 'pointer',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-                    }}
-                  >
-                    ✅ Apply Edits to Document
-                  </button>
+                  <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={() => setShowViewEditsModal(true)}
+                      style={{
+                        flex: 1,
+                        padding: '12px 16px',
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        fontSize: 14,
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                      }}
+                    >
+                      👁️ View Edits
+                    </button>
+                    <button
+                      onClick={handleApplyEdits}
+                      disabled={isAnalyzing}
+                      style={{
+                        flex: 1,
+                        padding: '12px 16px',
+                        backgroundColor: isAnalyzing ? '#d1d5db' : '#10b981',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: 6,
+                        cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                        fontWeight: 700,
+                        fontSize: 14,
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                      }}
+                    >
+                      ✅ Apply Edits
+                    </button>
+                  </div>
                 )}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
@@ -1512,6 +1607,120 @@ IMPORTANT:
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* View Edits Modal */}
+      {showViewEditsModal && pendingDocumentEdit && selectedDocument && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowViewEditsModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 800,
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+          >
+            <h3 style={{ fontSize: 20, fontWeight: 700, margin: 0, marginBottom: 16, color: '#111827' }}>
+              View Edited Document
+            </h3>
+
+            {pendingDocumentEdit.title && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: '#6b7280', margin: 0, marginBottom: 4 }}>
+                  New Title:
+                </p>
+                <p style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
+                  {pendingDocumentEdit.title}
+                </p>
+              </div>
+            )}
+
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#6b7280', margin: 0, marginBottom: 8 }}>
+                Edited Content:
+              </p>
+              <div
+                style={{
+                  padding: 16,
+                  backgroundColor: '#f9fafb',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  maxHeight: 500,
+                  overflowY: 'auto',
+                }}
+              >
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    color: '#374151',
+                    margin: 0,
+                  }}
+                >
+                  {pendingDocumentEdit.content}
+                </pre>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowViewEditsModal(false)}
+                style={{
+                  padding: '10px 16px',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setShowViewEditsModal(false);
+                  handleApplyEdits();
+                }}
+                style={{
+                  padding: '10px 16px',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                ✅ Apply These Edits
+              </button>
+            </div>
           </div>
         </div>
       )}
