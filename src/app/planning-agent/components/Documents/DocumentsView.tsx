@@ -114,10 +114,13 @@ export default function DocumentsView() {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('selectDocument', handleSelectDocument as EventListener);
-      return () => {
-        window.removeEventListener('selectDocument', handleSelectDocument as EventListener);
-      };
     }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('selectDocument', handleSelectDocument as EventListener);
+      }
+    };
   }, [documents]);
 
   // Persist documents to localStorage when they change

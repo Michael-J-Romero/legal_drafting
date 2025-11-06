@@ -176,6 +176,12 @@ export default function NotesView({
   // Get unique source types from notes
   const sourceTypes = Array.from(new Set(notes.map(n => n.source.type)));
 
+  // Handler for deleting a note
+  const handleDeleteNote = (e: React.MouseEvent, noteId: string) => {
+    e.stopPropagation();
+    deleteNote(noteId);
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
       <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
@@ -571,10 +577,7 @@ export default function NotesView({
                           {onNoteClick && <span style={{ marginLeft: 8, color: '#3b82f6' }}>→ Click to view source</span>}
                         </div>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteNote(note.id);
-                          }}
+                          onClick={(e) => handleDeleteNote(e, note.id)}
                           style={{
                             padding: '2px 8px',
                             backgroundColor: 'transparent',
