@@ -299,6 +299,7 @@ export default function DocumentsView() {
       const reader = generateResponse.body?.getReader();
       const decoder = new TextDecoder();
       let generatedContent = '';
+      let buffer = ''; // Buffer for incomplete lines
 
       if (reader) {
         while (true) {
@@ -306,20 +307,37 @@ export default function DocumentsView() {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          buffer += chunk;
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
+          // Split by double newline (SSE message separator) to get complete messages
+          const messages = buffer.split('\n\n');
 
-            try {
-              const data = JSON.parse(jsonStr);
-              if (data.type === 'output_text_delta' && data.data?.delta) {
-                generatedContent += data.data.delta;
+          // Keep the last incomplete message in the buffer
+          buffer = messages.pop() || '';
+
+          for (const message of messages) {
+            const lines = message.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+
+              try {
+                const data = JSON.parse(jsonStr);
+                
+                // Handle different event types
+                if (data.type === 'output_text_delta' && data.data?.delta) {
+                  generatedContent += data.data.delta;
+                } else if (data.type === 'raw_model_stream_event' && data.data) {
+                  // Handle nested text deltas
+                  const eventData = data.data;
+                  if (eventData.type === 'output_text_delta' && eventData.delta) {
+                    generatedContent += eventData.delta;
+                  }
+                }
+              } catch (e) {
+                // Skip malformed JSON
               }
-            } catch (e) {
-              // Skip malformed JSON
             }
           }
         }
