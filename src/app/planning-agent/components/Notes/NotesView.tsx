@@ -12,6 +12,29 @@ interface NotesViewProps {
   setNotes?: (notes: Note[]) => void;
 }
 
+interface Contradiction {
+  note1: string;
+  note2: string;
+  reason: string;
+}
+
+interface RefinementResult {
+  removedDuplicates: number;
+  removedGeneric: number;
+  contradictions: Contradiction[];
+}
+
+interface NotesGraph {
+  case?: {
+    jurisdiction?: Record<string, any>;
+    parties?: Record<string, any>;
+    events?: Record<string, any>;
+    evidence?: any[];
+  };
+  documents?: Record<string, any>;
+  [key: string]: any;
+}
+
 export default function NotesView({
   notes,
   pendingNotes,
@@ -22,22 +45,19 @@ export default function NotesView({
 }: NotesViewProps) {
   const [isRefining, setIsRefining] = useState(false);
   const [isGraphing, setIsGraphing] = useState(false);
-  const [refinementResult, setRefinementResult] = useState<{
-    removedDuplicates: number;
-    removedGeneric: number;
-    contradictions: Array<{ note1: string; note2: string; reason: string }>;
-  } | null>(null);
-  const [notesGraph, setNotesGraph] = useState<any>(null);
+  const [refinementResult, setRefinementResult] = useState<RefinementResult | null>(null);
+  const [notesGraph, setNotesGraph] = useState<NotesGraph | null>(null);
   const [showGraph, setShowGraph] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleRefineNotes = async () => {
     if (notes.length === 0) {
-      alert('No notes to refine');
-      return;
+      return; // Button is already disabled when no notes
     }
 
     setIsRefining(true);
     setRefinementResult(null);
+    setErrorMessage(null);
 
     try {
       const response = await fetch('/api/refine-notes', {
@@ -62,7 +82,7 @@ export default function NotesView({
       }
     } catch (error) {
       console.error('Error refining notes:', error);
-      alert(error instanceof Error ? error.message : 'Failed to refine notes');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to refine notes');
     } finally {
       setIsRefining(false);
     }
@@ -70,11 +90,11 @@ export default function NotesView({
 
   const handleGraphNotes = async () => {
     if (notes.length === 0) {
-      alert('No notes to graph');
-      return;
+      return; // Button is already disabled when no notes
     }
 
     setIsGraphing(true);
+    setErrorMessage(null);
 
     try {
       const response = await fetch('/api/graph-notes', {
@@ -98,7 +118,7 @@ export default function NotesView({
       }
     } catch (error) {
       console.error('Error graphing notes:', error);
-      alert(error instanceof Error ? error.message : 'Failed to create graph');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create graph');
     } finally {
       setIsGraphing(false);
     }
@@ -150,6 +170,31 @@ export default function NotesView({
           AI-extracted notes from your conversations
         </p>
       </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b' }}>
+              ❌ Error: {errorMessage}
+            </div>
+            <button
+              onClick={() => setErrorMessage(null)}
+              style={{
+                padding: '4px 12px',
+                backgroundColor: '#ef4444',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Refinement Results */}
       {refinementResult && (
@@ -243,7 +288,6 @@ export default function NotesView({
             <button
               onClick={() => {
                 navigator.clipboard.writeText(JSON.stringify(notesGraph, null, 2));
-                alert('Graph copied to clipboard!');
               }}
               style={{
                 marginTop: 12,

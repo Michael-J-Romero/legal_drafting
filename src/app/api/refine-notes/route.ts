@@ -10,15 +10,30 @@ interface Note {
   updatedAt: string;
 }
 
+interface Contradiction {
+  note1: string;
+  note2: string;
+  reason: string;
+}
+
+interface RefinedNoteItem {
+  index: number;
+  content: string;
+  category: string;
+  keep: boolean;
+  reason: string;
+}
+
+interface RefinementResponse {
+  refinedNotes: RefinedNoteItem[];
+  contradictions: Contradiction[];
+}
+
 interface RefinedNotesResponse {
   refinedNotes: Note[];
   removedDuplicates: number;
   removedGeneric: number;
-  contradictions: Array<{
-    note1: string;
-    note2: string;
-    reason: string;
-  }>;
+  contradictions: Contradiction[];
 }
 
 /**
@@ -122,18 +137,18 @@ Return ONLY the JSON, no other text.`;
         jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
       }
 
-      const parsed = JSON.parse(jsonContent);
+      const parsed = JSON.parse(jsonContent) as RefinementResponse;
       
       if (parsed.refinedNotes && Array.isArray(parsed.refinedNotes)) {
         // Filter to keep only notes marked as keep=true
         const keptNotes = parsed.refinedNotes
-          .filter((n: any) => n.keep === true)
-          .map((n: any) => notes[n.index]);
+          .filter((n: RefinedNoteItem) => n.keep === true)
+          .map((n: RefinedNoteItem) => notes[n.index]);
 
         const removedCount = notes.length - keptNotes.length;
         
         // Count duplicates vs generic removals (simplified heuristic)
-        const duplicateReasons = parsed.refinedNotes.filter((n: any) => 
+        const duplicateReasons = parsed.refinedNotes.filter((n: RefinedNoteItem) => 
           !n.keep && (n.reason?.toLowerCase().includes('duplicate') || n.reason?.toLowerCase().includes('similar'))
         ).length;
         const genericReasons = removedCount - duplicateReasons;
