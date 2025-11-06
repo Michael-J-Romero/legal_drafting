@@ -151,15 +151,38 @@ export function serializeNote(note: Note): StoredNote {
 
 /**
  * Helper to convert StoredNote to Note
+ * Handles backward compatibility with old note format
  */
-export function deserializeNote(stored: StoredNote): Note {
+export function deserializeNote(stored: StoredNote | any): Note {
+  // Handle old notes that don't have source and context
+  const source: NoteSource = stored.source || {
+    type: 'agent_ai' as NoteSourceType,
+    sourceTimestamp: new Date(stored.createdAt || new Date()),
+    aiModel: 'unknown',
+  };
+  
+  const context: NoteContext = stored.context || {
+    who: undefined,
+    what: undefined,
+    when: undefined,
+    where: undefined,
+    relatedTo: undefined,
+  };
+  
   return {
-    ...stored,
+    id: stored.id,
+    content: stored.content,
+    category: stored.category as NoteCategory,
     createdAt: new Date(stored.createdAt),
     updatedAt: new Date(stored.updatedAt),
     source: {
-      ...stored.source,
-      sourceTimestamp: new Date(stored.source.sourceTimestamp),
+      ...source,
+      sourceTimestamp: new Date(source.sourceTimestamp),
     },
+    context,
+    isNew: stored.isNew,
+    isPending: stored.isPending,
+    tags: stored.tags,
+    confidence: stored.confidence,
   };
 }
