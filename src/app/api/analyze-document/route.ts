@@ -61,6 +61,18 @@ RESPONSE FORMAT (JSON only):
 
 Return ONLY the JSON, no other text.`;
 
+    // Calculate appropriate max_tokens based on text length
+    // Rough estimate: summary needs ~500-800 tokens, notes can vary
+    // Use more tokens for larger documents to avoid truncation
+    const textLength = text.length;
+    const estimatedMaxTokens = Math.min(
+      4000, // Cap at 4000 tokens
+      Math.max(
+        2000, // Minimum 2000 tokens for smaller docs
+        Math.ceil(textLength / 3) // ~1 token per 3 chars + room for summary/notes
+      )
+    );
+
     // Call OpenAI API for document analysis
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -81,7 +93,7 @@ Return ONLY the JSON, no other text.`;
           }
         ],
         temperature: 0.3, // Lower temperature for more consistent analysis
-        max_tokens: 3000,
+        max_tokens: estimatedMaxTokens,
       }),
     });
 
@@ -115,10 +127,15 @@ Return ONLY the JSON, no other text.`;
         return NextResponse.json({ error: 'Invalid analysis format - missing summary' }, { status: 500 });
       }
 
-      // Filter out any invalid notes
+      // Validate and filter notes
+      const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
       const validNotes = Array.isArray(parsedAnalysis.notes)
-        ? parsedAnalysis.notes.filter((note: any) => 
-            note.content && typeof note.content === 'string' && note.content.trim().length > 0
+        ? parsedAnalysis.notes.filter((note: { content?: string; category?: string }) => 
+            note.content && 
+            typeof note.content === 'string' && 
+            note.content.trim().length > 0 &&
+            note.category &&
+            validCategories.includes(note.category)
           )
         : [];
 

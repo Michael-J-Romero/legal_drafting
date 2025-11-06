@@ -2,17 +2,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Document, StoredDocument, Note } from '../../types';
+import { generateId, formatFileSize } from '../../utils/helpers';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 
-function generateId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' bytes';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+interface ExtractedNote {
+  content: string;
+  category: string;
 }
 
 function hydrateDocuments(stored: StoredDocument[]): Document[] {
@@ -66,6 +62,11 @@ export default function DocumentsView() {
       }
     } catch (e) {
       console.error('Failed to load documents from storage', e);
+      // Reset storage if corrupted
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(DOCUMENTS_STORAGE_KEY);
+      }
+      setDocuments([]);
     }
   }, []);
 
@@ -136,14 +137,17 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         // Update document with summary and notes
-        const analyzedNotes: Note[] = (analyzeData.notes || []).map((note: any) => ({
-          id: generateId(),
-          content: note.content,
-          category: note.category || 'other',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          documentId: newDocument.id,
-        }));
+        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
+          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
+          .map((note: ExtractedNote) => ({
+            id: generateId(),
+            content: note.content,
+            category: validCategories.includes(note.category) ? note.category : 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            documentId: newDocument.id,
+          }));
 
         setDocuments((prev) =>
           prev.map((doc) =>
