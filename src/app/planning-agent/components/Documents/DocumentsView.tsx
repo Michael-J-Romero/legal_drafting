@@ -751,35 +751,6 @@ IMPORTANT:
       setIsAnalyzing(false);
     }
   };
-              ? {
-                  ...doc,
-                  summary: analyzeData.summary,
-                  notes: analyzedNotes,
-                  analyzedAt: new Date(),
-                }
-              : doc
-          )
-        );
-      }
-
-      // Clear pending edit and add confirmation message
-      setPendingDocumentEdit(null);
-      setChatMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: '✅ Document updated successfully! The changes have been applied and the document has been re-analyzed.', 
-        timestamp: new Date() 
-      }]);
-
-    } catch (err) {
-      setChatMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: `Error applying edits: ${err instanceof Error ? err.message : 'An error occurred'}`, 
-        timestamp: new Date() 
-      }]);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
 
   // Auto-scroll chat to bottom
   useEffect(() => {
