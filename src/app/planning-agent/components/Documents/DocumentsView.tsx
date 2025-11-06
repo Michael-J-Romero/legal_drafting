@@ -40,6 +40,8 @@ function dehydrateDocuments(documents: Document[]): StoredDocument[] {
   }));
 }
 
+type CreateMode = 'upload' | 'paste' | 'generate';
+
 export default function DocumentsView() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -47,6 +49,14 @@ export default function DocumentsView() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // New document creation states
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [createMode, setCreateMode] = useState<CreateMode>('upload');
+  const [pastedText, setPastedText] = useState('');
+  const [documentName, setDocumentName] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // Load documents from localStorage on mount
   useEffect(() => {
@@ -176,6 +186,216 @@ export default function DocumentsView() {
     }
   };
 
+  const handleCreateFromText = async () => {
+    if (!pastedText.trim() || !documentName.trim()) {
+      setError('Please provide both document name and text content');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError('');
+
+    try {
+      // Create document with pasted text
+      const newDocument: Document = {
+        id: generateId(),
+        fileName: documentName.trim() + '.txt',
+        fileType: '.txt',
+        size: pastedText.length,
+        text: pastedText.trim(),
+        notes: [],
+        uploadedAt: new Date(),
+      };
+
+      // Add document to list
+      setDocuments((prev) => [newDocument, ...prev]);
+      setSelectedDocumentId(newDocument.id);
+
+      // Analyze the pasted text
+      const analyzeResponse = await fetch('/api/analyze-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: pastedText.trim(),
+          fileName: newDocument.fileName,
+          fileType: '.txt',
+        }),
+      });
+
+      const analyzeData = await analyzeResponse.json();
+
+      if (analyzeResponse.ok && analyzeData.summary) {
+        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
+          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
+          .map((note: ExtractedNote) => ({
+            id: generateId(),
+            content: note.content,
+            category: validCategories.includes(note.category) ? note.category : 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            documentId: newDocument.id,
+          }));
+
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === newDocument.id
+              ? {
+                  ...doc,
+                  summary: analyzeData.summary,
+                  notes: analyzedNotes,
+                  analyzedAt: new Date(),
+                }
+              : doc
+          )
+        );
+      }
+
+      // Close dialog and reset
+      setShowCreateDialog(false);
+      setPastedText('');
+      setDocumentName('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while creating document');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleGenerateDocument = async () => {
+    if (!aiPrompt.trim() || !documentName.trim()) {
+      setError('Please provide both document name and description');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError('');
+
+    try {
+      // Call AI to generate document content
+      const generateResponse = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Generate a comprehensive document based on this description: ${aiPrompt.trim()}. Provide the full document content in a professional format.`,
+          messages: [],
+          settings: {
+            model: 'gpt-4o-mini',
+            maxIterations: 1,
+            confidenceThreshold: 85,
+            maxResponseLength: 10000,
+            contextWindowSize: 4000,
+            summaryMode: 'balanced',
+            reasoningEffort: 'medium',
+          },
+        }),
+      });
+
+      if (!generateResponse.ok) {
+        throw new Error('Failed to generate document');
+      }
+
+      // Read the streaming response
+      const reader = generateResponse.body?.getReader();
+      const decoder = new TextDecoder();
+      let generatedContent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+
+            try {
+              const data = JSON.parse(jsonStr);
+              if (data.type === 'output_text_delta' && data.data?.delta) {
+                generatedContent += data.data.delta;
+              }
+            } catch (e) {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+
+      if (!generatedContent.trim()) {
+        throw new Error('No content generated');
+      }
+
+      // Create document with generated content
+      const newDocument: Document = {
+        id: generateId(),
+        fileName: documentName.trim() + '.txt',
+        fileType: '.txt',
+        size: generatedContent.length,
+        text: generatedContent.trim(),
+        notes: [],
+        uploadedAt: new Date(),
+      };
+
+      setDocuments((prev) => [newDocument, ...prev]);
+      setSelectedDocumentId(newDocument.id);
+
+      // Analyze the generated document
+      setIsAnalyzing(true);
+      const analyzeResponse = await fetch('/api/analyze-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: generatedContent.trim(),
+          fileName: newDocument.fileName,
+          fileType: '.txt',
+        }),
+      });
+
+      const analyzeData = await analyzeResponse.json();
+
+      if (analyzeResponse.ok && analyzeData.summary) {
+        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
+          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
+          .map((note: ExtractedNote) => ({
+            id: generateId(),
+            content: note.content,
+            category: validCategories.includes(note.category) ? note.category : 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            documentId: newDocument.id,
+          }));
+
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === newDocument.id
+              ? {
+                  ...doc,
+                  summary: analyzeData.summary,
+                  notes: analyzedNotes,
+                  analyzedAt: new Date(),
+                }
+              : doc
+          )
+        );
+      }
+
+      // Close dialog and reset
+      setShowCreateDialog(false);
+      setAiPrompt('');
+      setDocumentName('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while generating document');
+    } finally {
+      setIsGenerating(false);
+      setIsAnalyzing(false);
+    }
+  };
+
   const handleDeleteDocument = (docId: string) => {
     const doc = documents.find((d) => d.id === docId);
     if (!doc) return;
@@ -228,22 +448,44 @@ export default function DocumentsView() {
               accept=".pdf,.txt,.js,.json"
               style={{ display: 'none' }}
             />
+            
+            {/* Primary Create Button */}
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading || isAnalyzing}
+              onClick={() => setShowCreateDialog(true)}
+              disabled={isUploading || isAnalyzing || isGenerating}
               style={{
                 width: '100%',
                 padding: '10px 16px',
-                backgroundColor: isUploading || isAnalyzing ? '#d1d5db' : '#10b981',
+                backgroundColor: isUploading || isAnalyzing || isGenerating ? '#d1d5db' : '#10b981',
                 color: 'white',
                 border: 'none',
                 borderRadius: 6,
-                cursor: isUploading || isAnalyzing ? 'not-allowed' : 'pointer',
+                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
                 fontWeight: 600,
                 fontSize: 14,
+                marginBottom: 8,
               }}
             >
-              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : '+ Upload Document'}
+              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : isGenerating ? '✨ Generating...' : '+ Create Document'}
+            </button>
+            
+            {/* Quick upload shortcut */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading || isAnalyzing || isGenerating}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                backgroundColor: 'transparent',
+                color: '#6b7280',
+                border: '1px solid #d1d5db',
+                borderRadius: 6,
+                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
+                fontWeight: 500,
+                fontSize: 13,
+              }}
+            >
+              📎 Quick Upload File
             </button>
           </div>
 
@@ -532,6 +774,297 @@ export default function DocumentsView() {
           )}
         </main>
       </div>
+
+      {/* Create Document Dialog */}
+      {showCreateDialog && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowCreateDialog(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+          >
+            <h3 style={{ fontSize: 20, fontWeight: 700, margin: 0, marginBottom: 16, color: '#111827' }}>
+              Create New Document
+            </h3>
+
+            {/* Mode Selection */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button
+                  onClick={() => setCreateMode('upload')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    backgroundColor: createMode === 'upload' ? '#3b82f6' : '#f3f4f6',
+                    color: createMode === 'upload' ? 'white' : '#6b7280',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
+                >
+                  📎 Upload File
+                </button>
+                <button
+                  onClick={() => setCreateMode('paste')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    backgroundColor: createMode === 'paste' ? '#3b82f6' : '#f3f4f6',
+                    color: createMode === 'paste' ? 'white' : '#6b7280',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
+                >
+                  📝 Paste Text
+                </button>
+                <button
+                  onClick={() => setCreateMode('generate')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    backgroundColor: createMode === 'generate' ? '#3b82f6' : '#f3f4f6',
+                    color: createMode === 'generate' ? 'white' : '#6b7280',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
+                >
+                  ✨ AI Generate
+                </button>
+              </div>
+            </div>
+
+            {/* Upload Mode */}
+            {createMode === 'upload' && (
+              <div>
+                <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                  Upload a PDF or text file to create a new document
+                </p>
+                <button
+                  onClick={() => {
+                    fileInputRef.current?.click();
+                    setShowCreateDialog(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    backgroundColor: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
+                >
+                  Choose File
+                </button>
+              </div>
+            )}
+
+            {/* Paste Text Mode */}
+            {createMode === 'paste' && (
+              <div>
+                <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                  Paste or type your document content below
+                </p>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                    Document Name
+                  </label>
+                  <input
+                    type="text"
+                    value={documentName}
+                    onChange={(e) => setDocumentName(e.target.value)}
+                    placeholder="e.g., Contract Agreement"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                    Document Content
+                  </label>
+                  <textarea
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="Paste or type your document content here..."
+                    style={{
+                      width: '100%',
+                      minHeight: 200,
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                      outline: 'none',
+                      resize: 'vertical',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setShowCreateDialog(false)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: 14,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateFromText}
+                    disabled={!pastedText.trim() || !documentName.trim() || isAnalyzing}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      backgroundColor: !pastedText.trim() || !documentName.trim() || isAnalyzing ? '#d1d5db' : '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: !pastedText.trim() || !documentName.trim() || isAnalyzing ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: 14,
+                    }}
+                  >
+                    {isAnalyzing ? 'Analyzing...' : 'Create Document'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* AI Generate Mode */}
+            {createMode === 'generate' && (
+              <div>
+                <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+                  Describe the document you want AI to generate
+                </p>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                    Document Name
+                  </label>
+                  <input
+                    type="text"
+                    value={documentName}
+                    onChange={(e) => setDocumentName(e.target.value)}
+                    placeholder="e.g., Employee Handbook"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                    Description
+                  </label>
+                  <textarea
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="Describe what the document should contain. E.g., 'Create a comprehensive employee handbook for a tech startup with 50 employees, including policies on remote work, benefits, and code of conduct.'"
+                    style={{
+                      width: '100%',
+                      minHeight: 150,
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                      outline: 'none',
+                      resize: 'vertical',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setShowCreateDialog(false)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: 14,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleGenerateDocument}
+                    disabled={!aiPrompt.trim() || !documentName.trim() || isGenerating || isAnalyzing}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      backgroundColor: !aiPrompt.trim() || !documentName.trim() || isGenerating || isAnalyzing ? '#d1d5db' : '#8b5cf6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: !aiPrompt.trim() || !documentName.trim() || isGenerating || isAnalyzing ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: 14,
+                    }}
+                  >
+                    {isGenerating ? 'Generating...' : isAnalyzing ? 'Analyzing...' : 'Generate Document'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
