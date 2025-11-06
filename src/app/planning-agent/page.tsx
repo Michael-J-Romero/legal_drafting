@@ -11,6 +11,20 @@ interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  'gpt-5': {
+    name: 'gpt-5',
+    displayName: 'GPT-5',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-5 with reasoning capabilities and 128K context'
+  },
+  'gpt-5-mini': {
+    name: 'gpt-5-mini',
+    displayName: 'GPT-5 Mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-5 Mini - faster and cheaper with 128K context'
+  },
   'gpt-4o-2024-11-20': {
     name: 'gpt-4o-2024-11-20',
     displayName: 'GPT-4o (latest)',
@@ -24,6 +38,13 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     maxContextTokens: 128000,
     supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
     description: 'GPT-4o with 128K context'
+  },
+  'gpt-4o-mini': {
+    name: 'gpt-4o-mini',
+    displayName: 'GPT-4o Mini',
+    maxContextTokens: 128000,
+    supportedContextSizes: [2000, 4000, 8000, 16000, 32000, 64000, 128000],
+    description: 'GPT-4o Mini - compact and efficient with 128K context'
   },
   'gpt-4-turbo': {
     name: 'gpt-4-turbo',
@@ -62,6 +83,9 @@ interface AgentSettings {
   contextWindowSize: number;
   summaryMode: 'brief' | 'balanced' | 'detailed';
   model: string;
+  reasoningEffort: 'low' | 'medium' | 'high';
+  quickModel: string;
+  quickAssignments: Record<string, boolean>;
 }
 
 interface UploadedFile {
@@ -155,6 +179,7 @@ interface StoredChatSession {
 }
 
 const STORAGE_KEY = 'planningAgentChats';
+const SETTINGS_STORAGE_KEY = 'planningAgentSettings';
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -446,6 +471,8 @@ export default function PlanningAgentPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
   const [showNotesPanel, setShowNotesPanel] = useState(true); // Toggle notes panel visibility
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editedContent, setEditedContent] = useState('');
   
   // Agent settings with defaults
   const [settings, setSettings] = useState<AgentSettings>({
@@ -454,7 +481,13 @@ export default function PlanningAgentPage() {
     maxResponseLength: 10000,
     contextWindowSize: 4000,
     summaryMode: 'balanced',
-    model: 'gpt-4o-2024-11-20'
+    model: 'gpt-4o-2024-11-20',
+    reasoningEffort: 'medium',
+    quickModel: 'gpt-3.5-turbo',
+    quickAssignments: {
+      'extract-notes': true,
+      'agent': false
+    }
   });
 
   // Load from localStorage on mount
@@ -487,6 +520,28 @@ export default function PlanningAgentPage() {
       console.error('Failed to save chats to storage', e);
     }
   }, [chats]);
+
+  // Load settings from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(SETTINGS_STORAGE_KEY) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as AgentSettings;
+        setSettings(parsed);
+      }
+    } catch (e) {
+      console.error('Failed to load settings from storage', e);
+    }
+  }, []);
+
+  // Persist settings to localStorage when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch (e) {
+      console.error('Failed to save settings to storage', e);
+    }
+  }, [settings]);
 
   // Close any open chat menu on window click
   useEffect(() => {
@@ -590,6 +645,40 @@ export default function PlanningAgentPage() {
     setInput('');
   }
 
+  // Message editing and deletion functions
+  function startEditingMessage(index: number) {
+    setEditingMessageIndex(index);
+    setEditedContent(messages[index].content);
+  }
+
+  function saveEditedMessage() {
+    if (editingMessageIndex === null || !activeChat) return;
+    
+    updateActiveChatMessages((prev) => 
+      prev.map((msg, idx) => 
+        idx === editingMessageIndex 
+          ? { ...msg, content: editedContent } 
+          : msg
+      )
+    );
+    
+    setEditingMessageIndex(null);
+    setEditedContent('');
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageIndex(null);
+    setEditedContent('');
+  }
+
+  function deleteMessage(index: number) {
+    if (!activeChat) return;
+    const ok = window.confirm('Delete this message? This cannot be undone.');
+    if (!ok) return;
+    
+    updateActiveChatMessages((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
   // Note management functions
   function addNote(note: Note) {
     if (!activeChat) return;
@@ -678,18 +767,77 @@ export default function PlanningAgentPage() {
     return notes;
   }
 
+  // Client-side heuristics to auto-filter notes when backend doesn't provide confidence levels
+  function assignNoteConfidence(note: any, existingNotes: Note[]): string {
+    const content = note.content?.toLowerCase() || '';
+    const category = note.category?.toLowerCase() || 'other';
+    
+    // Auto-reject criteria: vague, generic, or low-value notes
+    const rejectPatterns = [
+      /^(ok|okay|yes|no|sure|thanks|thank you)\.?$/i,
+      /^(noted|understood|got it|i see)\.?$/i,
+      /^.{1,10}$/,  // Too short (less than 10 chars)
+    ];
+    
+    const vagueWords = ['something', 'things', 'stuff', 'maybe', 'perhaps', 'might', 'possibly'];
+    const hasVagueWords = vagueWords.some(word => content.includes(word));
+    
+    // Check for duplicate or very similar content
+    const isDuplicate = existingNotes.some(existing => {
+      const existingContent = existing.content.toLowerCase();
+      return existingContent === content || 
+             (existingContent.length > 10 && content.includes(existingContent)) ||
+             (content.length > 10 && existingContent.includes(content));
+    });
+    
+    // Auto-reject conditions
+    if (rejectPatterns.some(pattern => pattern.test(content))) {
+      return 'auto-reject';
+    }
+    
+    if (isDuplicate) {
+      return 'auto-reject';
+    }
+    
+    if (content.length < 15 && hasVagueWords) {
+      return 'auto-reject';
+    }
+    
+    // Auto-accept criteria: specific, actionable notes with clear information
+    const hasDate = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.test(content);
+    const hasSpecificInfo = content.length > 30;
+    const isActionableCategory = ['dates', 'deadlines', 'documents', 'people', 'goals', 'requirements'].includes(category);
+    
+    // Strong indicators for auto-accept
+    if (hasDate && category === 'dates') {
+      return 'auto-accept';
+    }
+    
+    if (isActionableCategory && hasSpecificInfo && !hasVagueWords) {
+      return 'auto-accept';
+    }
+    
+    // Default: needs review
+    return 'needs-review';
+  }
+
   // Intelligent note extraction using AI analysis
   async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[]): Promise<Note[]> {
     try {
       // Build existing notes context
       const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
 
+      // Determine the effective model for note extraction (always use quick model for this lightweight task)
+      const effectiveModel = getEffectiveModel('extract-notes');
+
       const response = await fetch('/api/extract-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content: assistantResponse,
-          existingNotes: existingNotesContext
+          existingNotes: existingNotesContext,
+          model: effectiveModel,  // Pass the effective model
+          autoFilter: true,  // Request automatic filtering of notes
         }),
       });
 
@@ -700,16 +848,38 @@ export default function PlanningAgentPage() {
 
       const data = await response.json();
       
-      // Parse the extracted notes
+      // Parse the extracted notes with automatic filtering
       if (data.notes && Array.isArray(data.notes)) {
-        return data.notes.map((note: any) => ({
-          id: generateId(),
-          content: note.content,
-          category: note.category || 'other',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          isPending: true,
-        }));
+        const allNotes = data.notes.map((note: any) => {
+          // Apply client-side confidence if backend doesn't provide it
+          const confidence = note.confidence || assignNoteConfidence(note, existingNotes);
+          
+          return {
+            id: generateId(),
+            content: note.content,
+            category: note.category || 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isPending: confidence !== 'auto-accept', // Only pending if not auto-accepted
+            autoAccept: confidence === 'auto-accept',
+            needsReview: confidence === 'needs-review',
+          };
+        });
+
+        // Automatically accept high-confidence notes
+        const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
+        if (autoAcceptedNotes.length > 0) {
+          autoAcceptedNotes.forEach((note: any) => {
+            const { autoAccept, needsReview, ...cleanNote } = note;
+            addNote({ ...cleanNote, isPending: false });
+          });
+        }
+
+        // Return only notes that need user review (filter out auto-rejected and auto-accepted)
+        return allNotes.filter((n: any) => n.needsReview).map((n: any) => {
+          const { autoAccept, needsReview, ...cleanNote } = n;
+          return cleanNote;
+        });
       }
 
       return [];
@@ -784,6 +954,16 @@ export default function PlanningAgentPage() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
+  // Helper to determine effective model based on routing settings
+  const getEffectiveModel = (processType: 'agent' | 'extract-notes'): string => {
+    // Check if this process should use the quick model
+    if (settings.quickAssignments[processType]) {
+      return settings.quickModel;
+    }
+    // Otherwise use the primary model
+    return settings.model;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !activeChat) return;
@@ -835,13 +1015,20 @@ export default function PlanningAgentPage() {
     setIsLoading(true);
 
     try {
+      // Determine the effective model for the agent call
+      const effectiveModel = getEffectiveModel('agent');
+      
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: messageContent,  // Current user message
           messages: cleanedHistory,  // Conversation history (excluding current message)
-          settings: settings
+          settings: {
+            ...settings,
+            model: effectiveModel,  // Use effective model based on routing
+          },
+          reasoningEffort: settings.reasoningEffort,  // Pass reasoning effort separately for clarity
         }),
       });
 
@@ -1088,6 +1275,8 @@ export default function PlanningAgentPage() {
                   }}
                   style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
                 >
+                  <option value="gpt-5">GPT-5 - 128K</option>
+                  <option value="gpt-5-mini">GPT-5 Mini - 128K</option>
                   <option value="gpt-4o-2024-11-20">GPT-4o (latest) - 128K</option>
                   <option value="gpt-4o">GPT-4o - 128K</option>
                   <option value="o1-preview">o1 (preview) - 128K</option>
@@ -1122,6 +1311,81 @@ export default function PlanningAgentPage() {
                 </select>
                 <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
                   Max for {MODEL_CONFIGS[settings.model]?.displayName}: {(MODEL_CONFIGS[settings.model]?.maxContextTokens / 1000).toFixed(0)}K tokens
+                </div>
+              </div>
+              
+              {/* Reasoning Effort (for reasoning-capable models) */}
+              {(settings.model.startsWith('gpt-5') || settings.model.startsWith('o1')) && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                    Reasoning Effort
+                  </label>
+                  <select 
+                    value={settings.reasoningEffort}
+                    onChange={(e) => setSettings({...settings, reasoningEffort: e.target.value as 'low' | 'medium' | 'high'})}
+                    style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                  >
+                    <option value="low">Low (faster)</option>
+                    <option value="medium">Medium (balanced)</option>
+                    <option value="high">High (thorough)</option>
+                  </select>
+                  <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                    Controls depth of reasoning for {MODEL_CONFIGS[settings.model]?.displayName}
+                  </div>
+                </div>
+              )}
+              
+              {/* Quick Model Selection */}
+              <div style={{ marginBottom: 12, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, color: '#374151' }}>
+                  Quick Model (for lightweight tasks)
+                </label>
+                <select 
+                  value={settings.quickModel}
+                  onChange={(e) => setSettings({...settings, quickModel: e.target.value})}
+                  style={{ width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 11 }}
+                >
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (fastest)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </select>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+                  Used for parallel/background tasks to save cost
+                </div>
+              </div>
+              
+              {/* Process Routing Checkboxes */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: 6, color: '#374151' }}>
+                  Use Quick Model For:
+                </label>
+                <div style={{ fontSize: 11 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.quickAssignments['extract-notes'] || false}
+                      onChange={(e) => setSettings({
+                        ...settings, 
+                        quickAssignments: {...settings.quickAssignments, 'extract-notes': e.target.checked}
+                      })}
+                    />
+                    <span>Notes Extraction</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.quickAssignments['agent'] || false}
+                      onChange={(e) => setSettings({
+                        ...settings, 
+                        quickAssignments: {...settings.quickAssignments, 'agent': e.target.checked}
+                      })}
+                    />
+                    <span>Main Agent Chat</span>
+                  </label>
+                </div>
+                <div style={{ fontSize: 9, color: '#6b7280', marginTop: 4 }}>
+                  Automatically routes these processes to the quick model
                 </div>
               </div>
               
@@ -1267,10 +1531,100 @@ export default function PlanningAgentPage() {
             messages.map((message, index) => (
               <div
                 key={index}
-                style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none' }}
+                style={{ marginBottom: 16, padding: 12, borderRadius: 8, backgroundColor: message.role === 'user' ? '#dbeafe' : '#fff', border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none', position: 'relative' }}
               >
-                <div style={{ fontWeight: 'bold', marginBottom: 4, color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
-                <MessageContent content={message.content} role={message.role} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontWeight: 'bold', color: message.role === 'user' ? '#1e40af' : '#059669' }}>{message.role === 'user' ? 'You' : 'Assistant'}</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {editingMessageIndex !== index && (
+                      <>
+                        <button
+                          onClick={() => startEditingMessage(index)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            backgroundColor: 'transparent',
+                            border: '1px solid #d1d5db',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: '#6b7280',
+                          }}
+                          title="Edit message"
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMessage(index)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            backgroundColor: 'transparent',
+                            border: '1px solid #ef4444',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: '#ef4444',
+                          }}
+                          title="Delete message"
+                        >
+                          🗑️ Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {editingMessageIndex === index ? (
+                  <div>
+                    <textarea
+                      value={editedContent}
+                      onChange={(e) => setEditedContent(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 100,
+                        padding: 8,
+                        border: '1px solid #d1d5db',
+                        borderRadius: 4,
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                        resize: 'vertical',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        onClick={saveEditedMessage}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✓ Save
+                      </button>
+                      <button
+                        onClick={cancelEditingMessage}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#6b7280',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <MessageContent content={message.content} role={message.role} />
+                )}
                   {message.files && message.files.length > 0 && (
                     <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {message.files.map((file) => (
