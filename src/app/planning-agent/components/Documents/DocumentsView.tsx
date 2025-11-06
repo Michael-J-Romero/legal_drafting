@@ -408,6 +408,37 @@ export default function DocumentsView() {
                   </div>
                 )}
 
+                {/* Full Document Text Section */}
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>
+                    📄 Full Document Text
+                  </h4>
+                  <div
+                    style={{
+                      padding: 16,
+                      backgroundColor: '#fff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      maxHeight: 400,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    <pre
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        color: '#374151',
+                        margin: 0,
+                      }}
+                    >
+                      {selectedDocument.text}
+                    </pre>
+                  </div>
+                </div>
+
                 {/* Notes Section */}
                 <div>
                   <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>
