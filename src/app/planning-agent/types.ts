@@ -69,6 +69,7 @@ export interface Note {
   updatedAt: Date;
   isPending?: boolean;
   isNew?: boolean;
+  documentId?: string; // Optional: associates note with a document
 }
 
 export interface StoredNote {
@@ -77,6 +78,31 @@ export interface StoredNote {
   category: string;
   createdAt: string;
   updatedAt: string;
+  documentId?: string;
+}
+
+export interface Document {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  summary?: string;
+  notes: Note[];
+  uploadedAt: Date;
+  analyzedAt?: Date;
+}
+
+export interface StoredDocument {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  summary?: string;
+  notes: StoredNote[];
+  uploadedAt: string;
+  analyzedAt?: string;
 }
 
 export interface ChatSession {
