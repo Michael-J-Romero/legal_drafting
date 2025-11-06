@@ -276,6 +276,12 @@ export async function POST(request: Request) {
       model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
+    // Detect if using a reasoning model (o1-preview, o1-mini, o1)
+    // These models have internal reasoning that counts against turn limits
+    const REASONING_MODELS = ['o1-preview', 'o1-mini', 'o1'];
+    const isReasoningModel = REASONING_MODELS.includes(agentSettings.model);
+    console.log(`[MODEL] Using model: ${agentSettings.model}, isReasoningModel: ${isReasoningModel}`);
+
     // Get context manager instance with configured context window
     const ctxManager = new ContextManager(agentSettings.contextWindowSize);
     
@@ -383,7 +389,25 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
       ? 'Provide comprehensive explanations with detailed reasoning.'
       : 'Balance conciseness with clarity - 2-3 sentences per phase.';
     
-    const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
+    // For reasoning models (o1, o1-preview, o1-mini), use simplified single-phase instructions
+    // The orchestration layer will handle multi-turn execution
+    // For regular models, keep the multi-phase prompt as they handle it well in one turn
+    const agentInstructions = isReasoningModel 
+      ? `You are a research assistant. For this task, focus on producing a clear, well-researched response.
+
+**Available Tools:**
+- search_web: Search the web for information (returns AI summary + top 3 results)
+- browse: Fetch content from a specific URL (returns optimized content summaries)
+
+**Guidelines:**
+- Use tools when you need current information or specific details
+- Be thorough and cite your sources with URLs
+- Include specific details: dates, names, locations, requirements, deadlines
+- ${verbosityGuidance}
+- Keep response under ${agentSettings.maxResponseLength} characters
+
+Provide your response with clear reasoning and citations.`
+      : `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
 🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
 🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
@@ -452,8 +476,14 @@ Always use the emoji markers to help users follow your thinking.`;
       async start(controller) {
         try {
           // Run the agent with streaming
+          // For reasoning models, significantly increase maxTurns since their internal
+          // reasoning steps count as turns. For regular models, keep default or moderate limit.
+          const maxTurns = isReasoningModel ? 50 : 25;
+          console.log(`[AGENT] Running with maxTurns=${maxTurns} (isReasoningModel=${isReasoningModel})`);
+          
           const result = await run(agent, inputText, {
             stream: true,
+            maxTurns: maxTurns,
           });
 
           // Accumulate full response for context extraction

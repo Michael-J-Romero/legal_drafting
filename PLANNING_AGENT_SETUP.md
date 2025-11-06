@@ -13,7 +13,10 @@ The Web Research Planning Agent is an advanced AI-powered assistant with deep re
 
 ### Agent Reasoning Process
 
-The agent uses a structured four-phase approach to tackle every query:
+The agent adapts its reasoning approach based on the model being used:
+
+#### Standard Models (GPT-4o, GPT-4 Turbo, GPT-3.5)
+Uses a structured four-phase approach to tackle every query:
 
 1. **🤔 THINKING Phase**: The agent analyzes your question, breaks it down into sub-problems, plans its approach, and shows its internal reasoning process.
 
@@ -24,6 +27,17 @@ The agent uses a structured four-phase approach to tackle every query:
 4. **✅ ANSWER Phase**: The agent presents a comprehensive, well-structured response with proper citations.
 
 Each phase is visually distinguished in the UI with colored backgrounds and emoji indicators, making it easy to follow the agent's reasoning process.
+
+#### Reasoning Models (o1, o1-preview, o1-mini)
+Uses a streamlined approach that leverages the model's native reasoning capabilities:
+
+- The model performs its own internal reasoning without forced phase structure
+- Focuses on producing clear, well-researched responses with tool usage
+- Has increased turn limits (50 vs 25) to accommodate internal reasoning steps
+- Naturally integrates web search and browsing as needed
+- Results in more efficient token usage and avoids "max turns exceeded" errors
+
+The system automatically detects which model you're using and applies the appropriate prompting strategy.
 
 ## Architecture
 
