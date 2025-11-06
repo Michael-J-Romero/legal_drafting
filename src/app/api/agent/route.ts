@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
 import { ContextManager } from './contextManager';
 
+// Constants for turn limits
+const MAX_TURNS_REASONING_MODEL = 100; // High limit for models with native reasoning (GPT-5, o1 series)
+const MAX_TURNS_REGULAR_MODEL = 25;    // Moderate limit for structured multi-phase responses
+
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
@@ -276,6 +280,31 @@ export async function POST(request: Request) {
       model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
+    // Detect if we're using a reasoning model (GPT-5, o1 series)
+    // These models have their own internal reasoning capabilities:
+    // - They do their own "thinking" and "reasoning" internally
+    // - Each internal reasoning step counts as a "turn" in the OpenAI Agents SDK
+    // - The default maxTurns of 10 is too low, causing "Max turns exceeded" errors
+    // 
+    // Solution:
+    // - Increase maxTurns to 100 to accommodate their internal reasoning process
+    // - Simplify agent instructions to avoid forcing multi-phase structure
+    // - Let the model use its own reasoning to determine the best approach
+    //
+    // Note: Using exact matches to avoid false positives with future model variants
+    const reasoningModelNames = new Set([
+      'gpt-5',
+      'gpt-5-mini',
+      'o1-preview',
+      'o1-mini',
+      'o3-mini', // Future model
+      'o3',      // Future model
+    ]);
+    const isReasoningModel = reasoningModelNames.has(agentSettings.model);
+
+    console.log(`[MODEL] Using model: ${agentSettings.model}`);
+    console.log(`[MODEL] Is reasoning model: ${isReasoningModel}`);
+
     // Get context manager instance with configured context window
     const ctxManager = new ContextManager(agentSettings.contextWindowSize);
     
@@ -383,7 +412,29 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
       ? 'Provide comprehensive explanations with detailed reasoning.'
       : 'Balance conciseness with clarity - 2-3 sentences per phase.';
     
-    const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
+    // Different instructions for reasoning models vs regular models
+    // Reasoning models (GPT-5, o1) have their own internal reasoning, so we simplify the instructions
+    // and do step-by-step orchestration on our end
+    let agentInstructions: string;
+    
+    if (isReasoningModel) {
+      // For reasoning models: simplified instructions for single-step tasks
+      // The orchestration logic will call this multiple times for different phases
+      agentInstructions = `You are a research assistant. Use your reasoning capabilities to help answer the user's question.
+
+**Tools Available:**
+- search_web: Search the web for information (returns AI-generated summary + top 3 results)
+- browse: Fetch content from a specific URL (returns optimized, relevant content)
+
+**Your Task:**
+Respond to the user's query in a clear, well-structured way. If you need to research something, use the tools available. Include source citations when relevant.
+
+**Important:** Focus on providing thorough, detailed responses with specific information - dates, names, locations, requirements, deadlines, etc. These details will be automatically captured as notes for the user.
+
+Keep responses under ${agentSettings.maxResponseLength} characters.`;
+    } else {
+      // For regular models: detailed multi-phase instructions
+      agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
 🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
 🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
@@ -413,6 +464,7 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;
+    }
 
     // Calculate system instructions tokens
     contextBreakdown.systemInstructionsTokens = estimateTokens(agentInstructions);
@@ -451,9 +503,17 @@ Always use the emoji markers to help users follow your thinking.`;
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // For reasoning models, increase maxTurns significantly to allow internal reasoning
+          // This allows the model to do its own internal reasoning without hitting the turn limit
+          // For regular models, use a moderate maxTurns limit for structured responses
+          const maxTurns = isReasoningModel ? MAX_TURNS_REASONING_MODEL : MAX_TURNS_REGULAR_MODEL;
+          
+          console.log(`[AGENT] Using maxTurns: ${maxTurns} (reasoning model: ${isReasoningModel})`);
+          
           // Run the agent with streaming
           const result = await run(agent, inputText, {
             stream: true,
+            maxTurns: maxTurns,
           });
 
           // Accumulate full response for context extraction
@@ -468,9 +528,14 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
-              // Debug: Log chunk type
+              // Enhanced debug logging for all event types
               if ('type' in chunk) {
-                console.log(`[BACKEND] Chunk type: ${chunk.type}`);
+                console.log(`[BACKEND] Event type: ${chunk.type}`);
+                
+                // Log run item events (tool calls, handoffs, etc.)
+                if (chunk.type === 'run_item_stream_event' && 'name' in chunk) {
+                  console.log(`[BACKEND] 🔧 Run item event: ${chunk.name}`, chunk.item);
+                }
               }
               
               // Capture usage data from response.completed event within raw_model_stream_event
@@ -479,7 +544,12 @@ Always use the emoji markers to help users follow your thinking.`;
                 
                 // Log the event type within raw_model_stream_event
                 if (eventData.type) {
-                  console.log(`[BACKEND] raw_model_stream_event contains: ${eventData.type}`);
+                  console.log(`[BACKEND] raw_model_stream_event → ${eventData.type}`);
+                  
+                  // Log function calls
+                  if (eventData.type.includes('function_call')) {
+                    console.log(`[BACKEND] 🔧 Function call event:`, eventData);
+                  }
                 }
                 
                 // Check if this is a response.completed event with usage data
