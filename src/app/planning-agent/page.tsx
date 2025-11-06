@@ -1067,10 +1067,7 @@ export default function PlanningAgentPage() {
                 
                 // Debug: Log all event types to understand what we're receiving
                 if (data.type) {
-                  console.log('[FRONTEND] Received event type:', data.type);
-                  if (data.type === 'usage_summary') {
-                    console.log('[FRONTEND] USAGE SUMMARY EVENT:', JSON.stringify(data, null, 2));
-                  }
+                  console.log('[FRONTEND] Received event type:', data.type, data);
                 }
                 
                 if (data.error) {
@@ -1093,6 +1090,45 @@ export default function PlanningAgentPage() {
                     }
                     return newMessages;
                   });
+                } else if (data.type === 'run_item_stream_event') {
+                  // Handle run item events: tool_called, tool_output, handoff, etc.
+                  const eventName = data.name;
+                  const item = data.item;
+                  let eventText = '';
+                  
+                  if (eventName === 'tool_called' && item) {
+                    // Display tool call
+                    const toolName = item.name || 'unknown tool';
+                    const toolArgs = item.arguments || item.input || '';
+                    eventText = `\n\n🔧 **Calling tool: ${toolName}**\n\`\`\`json\n${typeof toolArgs === 'string' ? toolArgs : JSON.stringify(toolArgs, null, 2)}\n\`\`\`\n`;
+                  } else if (eventName === 'tool_output' && item) {
+                    // Display tool result
+                    const toolName = item.name || 'unknown tool';
+                    const toolOutput = item.output || item.result || '';
+                    const outputPreview = typeof toolOutput === 'string' 
+                      ? toolOutput.substring(0, 500) 
+                      : JSON.stringify(toolOutput, null, 2).substring(0, 500);
+                    eventText = `\n\n✅ **Tool result (${toolName}):**\n\`\`\`\n${outputPreview}${toolOutput.length > 500 ? '\n...(truncated)' : ''}\n\`\`\`\n`;
+                  } else if (eventName === 'handoff_occurred' && item) {
+                    eventText = `\n\n🔄 **Handoff to:** ${item.agent?.name || 'another agent'}\n`;
+                  } else if (eventName === 'reasoning_item_created' && item) {
+                    // For reasoning models (o1), show reasoning steps
+                    eventText = `\n\n🧠 **Reasoning...**\n`;
+                  }
+                  
+                  if (eventText) {
+                    assistantMessage += eventText;
+                    updateActiveChatMessages((prev) => {
+                      const newMessages = [...prev];
+                      const last = newMessages[newMessages.length - 1];
+                      if (last && last.role === 'assistant') {
+                        newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                      } else {
+                        newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                      }
+                      return newMessages;
+                    });
+                  }
                 } else if (data.type === 'output_text_delta' && data.data?.delta) {
                   const content = data.data.delta;
                   assistantMessage += content;
@@ -1106,19 +1142,24 @@ export default function PlanningAgentPage() {
                     }
                     return newMessages;
                   });
-                } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta') {
-                  const content = data.data.delta;
-                  assistantMessage += content;
-                  updateActiveChatMessages((prev) => {
-                    const newMessages = [...prev];
-                    const last = newMessages[newMessages.length - 1];
-                    if (last && last.role === 'assistant') {
-                      newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
-                    } else {
-                      newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                    }
-                    return newMessages;
-                  });
+                } else if (data.type === 'raw_model_stream_event' && data.data) {
+                  const eventData = data.data;
+                  
+                  // Handle text deltas
+                  if (eventData.type === 'output_text_delta' && eventData.delta) {
+                    const content = eventData.delta;
+                    assistantMessage += content;
+                    updateActiveChatMessages((prev) => {
+                      const newMessages = [...prev];
+                      const last = newMessages[newMessages.length - 1];
+                      if (last && last.role === 'assistant') {
+                        newMessages[newMessages.length - 1] = { ...last, content: assistantMessage };
+                      } else {
+                        newMessages.push({ role: 'assistant', content: assistantMessage, timestamp: new Date() });
+                      }
+                      return newMessages;
+                    });
+                  }
                 }
               } catch (err) {
                 // Silently skip malformed JSON - likely an incomplete chunk

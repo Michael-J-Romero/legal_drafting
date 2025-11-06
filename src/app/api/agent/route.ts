@@ -528,9 +528,14 @@ Always use the emoji markers to help users follow your thinking.`;
               const data = JSON.stringify(chunk);
               controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
               
-              // Debug: Log chunk type
+              // Enhanced debug logging for all event types
               if ('type' in chunk) {
-                console.log(`[BACKEND] Chunk type: ${chunk.type}`);
+                console.log(`[BACKEND] Event type: ${chunk.type}`);
+                
+                // Log run item events (tool calls, handoffs, etc.)
+                if (chunk.type === 'run_item_stream_event' && 'name' in chunk) {
+                  console.log(`[BACKEND] 🔧 Run item event: ${chunk.name}`, chunk.item);
+                }
               }
               
               // Capture usage data from response.completed event within raw_model_stream_event
@@ -539,7 +544,12 @@ Always use the emoji markers to help users follow your thinking.`;
                 
                 // Log the event type within raw_model_stream_event
                 if (eventData.type) {
-                  console.log(`[BACKEND] raw_model_stream_event contains: ${eventData.type}`);
+                  console.log(`[BACKEND] raw_model_stream_event → ${eventData.type}`);
+                  
+                  // Log function calls
+                  if (eventData.type.includes('function_call')) {
+                    console.log(`[BACKEND] 🔧 Function call event:`, eventData);
+                  }
                 }
                 
                 // Check if this is a response.completed event with usage data
