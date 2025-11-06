@@ -62,6 +62,7 @@ export default function DocumentsView() {
   const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'assistant', content: string, timestamp: Date}>>([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatProcessing, setIsChatProcessing] = useState(false);
+  const [pendingDocumentEdit, setPendingDocumentEdit] = useState<{content: string, title?: string} | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Load documents from localStorage on mount
@@ -462,27 +463,55 @@ export default function DocumentsView() {
     setIsChatProcessing(true);
 
     try {
+      // Build conversation history for context
+      const conversationHistory = chatMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+      
       // Call AI agent to process the document editing request
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `You are helping to edit a document. The document is titled "${selectedDocument.fileName}". 
+          message: `You are a document editing assistant. Your job is to help edit documents through conversation.
 
-Current document content:
+CURRENT DOCUMENT:
+Title: ${selectedDocument.fileName}
+Content:
+---
 ${selectedDocument.text}
+---
 
-User request: ${userMessage}
+CONVERSATION HISTORY:
+${conversationHistory}
 
-Instructions:
-1. Analyze the user's request carefully
-2. If you need more information or clarification to properly edit the document, ask specific questions
-3. If you have enough information, provide the edited version of the document
-4. Always respond in a helpful and professional manner
+NEW USER REQUEST: ${userMessage}
 
-Respond with either:
-- Questions you need answered (if clarification needed)
-- The complete edited document text (if you have enough information)`,
+INSTRUCTIONS:
+1. Analyze the user's editing request carefully
+2. If you need MORE INFORMATION to make the edit properly, ask specific clarifying questions
+3. If you have ENOUGH INFORMATION, provide the edited document using the EXACT format below
+
+RESPONSE FORMAT:
+You must respond with ONLY a JSON object in one of these two formats:
+
+Format 1 - If you need more information:
+{
+  "type": "clarification",
+  "questions": ["Question 1?", "Question 2?", "Question 3?"]
+}
+
+Format 2 - If you're ready to provide the edited document:
+{
+  "type": "edit",
+  "title": "optional new title if changed",
+  "content": "THE COMPLETE EDITED DOCUMENT TEXT HERE"
+}
+
+IMPORTANT:
+- Respond with ONLY the JSON object, no additional commentary
+- For "edit" type, include ONLY the document content in the "content" field
+- Do NOT include explanations, meta-commentary, or chat text in the "content" field
+- The "content" should be the raw document text that will replace the current document
+- Ask questions iteratively - don't try to edit until you have all needed information`,
           messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
           settings: {
             model: 'gpt-4o-mini',
@@ -547,72 +576,62 @@ Respond with either:
         throw new Error('No response from AI');
       }
 
-      // Add assistant response to chat
-      setChatMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: assistantContent.trim(), 
-        timestamp: new Date() 
-      }]);
-
-      // Check if the response contains an edited document (heuristic: check for length and structure)
-      // If it looks like a full document replacement, update the document
-      const looksLikeFullDocument = assistantContent.length > 100 && 
-                                     !assistantContent.toLowerCase().includes('question') &&
-                                     !assistantContent.endsWith('?');
-      
-      if (looksLikeFullDocument && assistantContent.length > selectedDocument.text.length * 0.5) {
-        // Update the document with edited content
-        const updatedText = assistantContent.trim();
-        
-        setDocuments((prev) =>
-          prev.map((doc) =>
-            doc.id === selectedDocument.id
-              ? { ...doc, text: updatedText, size: updatedText.length }
-              : doc
-          )
-        );
-
-        // Re-analyze the updated document
-        setIsAnalyzing(true);
-        const analyzeResponse = await fetch('/api/analyze-document', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: updatedText,
-            fileName: selectedDocument.fileName,
-            fileType: selectedDocument.fileType,
-          }),
-        });
-
-        const analyzeData = await analyzeResponse.json();
-
-        if (analyzeResponse.ok && analyzeData.summary) {
-          const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-          const analyzedNotes: Note[] = (analyzeData.notes || [])
-            .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-            .map((note: ExtractedNote) => ({
-              id: generateId(),
-              content: note.content,
-              category: validCategories.includes(note.category) ? note.category : 'other',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              documentId: selectedDocument.id,
-            }));
-
-          setDocuments((prev) =>
-            prev.map((doc) =>
-              doc.id === selectedDocument.id
-                ? {
-                    ...doc,
-                    summary: analyzeData.summary,
-                    notes: analyzedNotes,
-                    analyzedAt: new Date(),
-                  }
-                : doc
-            )
-          );
+      // Parse the AI response
+      let parsedResponse;
+      try {
+        // Clean up the response - remove markdown code blocks if present
+        let cleanedContent = assistantContent.trim();
+        if (cleanedContent.startsWith('```json')) {
+          cleanedContent = cleanedContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (cleanedContent.startsWith('```')) {
+          cleanedContent = cleanedContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
         }
-        setIsAnalyzing(false);
+        
+        parsedResponse = JSON.parse(cleanedContent);
+      } catch (parseError) {
+        // If parsing fails, treat as a regular message
+        setChatMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: assistantContent.trim(), 
+          timestamp: new Date() 
+        }]);
+        setIsChatProcessing(false);
+        return;
+      }
+
+      // Handle the parsed response
+      if (parsedResponse.type === 'clarification' && Array.isArray(parsedResponse.questions)) {
+        // AI is asking clarifying questions
+        const questionText = parsedResponse.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+        setChatMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: `I need some clarification to make the best edits:\n\n${questionText}`, 
+          timestamp: new Date() 
+        }]);
+      } else if (parsedResponse.type === 'edit' && parsedResponse.content) {
+        // AI provided an edited document
+        const editMessage = parsedResponse.title 
+          ? `I've prepared an edited version with the new title "${parsedResponse.title}". Click "Apply Edits" below to update the document.`
+          : `I've prepared an edited version of the document. Click "Apply Edits" below to update the document.`;
+        
+        setChatMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: editMessage, 
+          timestamp: new Date() 
+        }]);
+        
+        // Store the pending edit
+        setPendingDocumentEdit({
+          content: parsedResponse.content,
+          title: parsedResponse.title
+        });
+      } else {
+        // Unexpected format, show as regular message
+        setChatMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: assistantContent.trim(), 
+          timestamp: new Date() 
+        }]);
       }
 
     } catch (err) {
@@ -623,6 +642,90 @@ Respond with either:
       }]);
     } finally {
       setIsChatProcessing(false);
+    }
+  };
+
+  const handleApplyEdits = async () => {
+    if (!pendingDocumentEdit || !selectedDocument) return;
+
+    setIsAnalyzing(true);
+
+    try {
+      const updatedText = pendingDocumentEdit.content.trim();
+      const updatedFileName = pendingDocumentEdit.title 
+        ? pendingDocumentEdit.title + (selectedDocument.fileType || '.txt')
+        : selectedDocument.fileName;
+
+      // Update the document
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === selectedDocument.id
+            ? { 
+                ...doc, 
+                text: updatedText, 
+                size: updatedText.length,
+                fileName: updatedFileName
+              }
+            : doc
+        )
+      );
+
+      // Re-analyze the updated document
+      const analyzeResponse = await fetch('/api/analyze-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: updatedText,
+          fileName: updatedFileName,
+          fileType: selectedDocument.fileType,
+        }),
+      });
+
+      const analyzeData = await analyzeResponse.json();
+
+      if (analyzeResponse.ok && analyzeData.summary) {
+        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
+          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
+          .map((note: ExtractedNote) => ({
+            id: generateId(),
+            content: note.content,
+            category: validCategories.includes(note.category) ? note.category : 'other',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            documentId: selectedDocument.id,
+          }));
+
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === selectedDocument.id
+              ? {
+                  ...doc,
+                  summary: analyzeData.summary,
+                  notes: analyzedNotes,
+                  analyzedAt: new Date(),
+                }
+              : doc
+          )
+        );
+      }
+
+      // Clear pending edit and add confirmation message
+      setPendingDocumentEdit(null);
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: '✅ Document updated successfully! The changes have been applied and the document has been re-analyzed.', 
+        timestamp: new Date() 
+      }]);
+
+    } catch (err) {
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `Error applying edits: ${err instanceof Error ? err.message : 'An error occurred'}`, 
+        timestamp: new Date() 
+      }]);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -1051,6 +1154,32 @@ Respond with either:
                   <div style={{ marginBottom: 12, padding: 8, backgroundColor: '#f3f4f6', borderRadius: 6, fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
                     ✨ AI is thinking...
                   </div>
+                )}
+                {isAnalyzing && (
+                  <div style={{ marginBottom: 12, padding: 8, backgroundColor: '#fef3c7', borderRadius: 6, fontSize: 13, color: '#92400e', textAlign: 'center' }}>
+                    🔍 Analyzing updated document...
+                  </div>
+                )}
+                {pendingDocumentEdit && (
+                  <button
+                    onClick={handleApplyEdits}
+                    disabled={isAnalyzing}
+                    style={{
+                      width: '100%',
+                      marginBottom: 12,
+                      padding: '12px 16px',
+                      backgroundColor: isAnalyzing ? '#d1d5db' : '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                      fontWeight: 700,
+                      fontSize: 14,
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                    }}
+                  >
+                    ✅ Apply Edits to Document
+                  </button>
                 )}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
