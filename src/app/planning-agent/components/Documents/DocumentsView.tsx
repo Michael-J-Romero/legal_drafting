@@ -58,6 +58,12 @@ export default function DocumentsView() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // AI chat panel states
+  const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'assistant', content: string, timestamp: Date}>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatProcessing, setIsChatProcessing] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   // Load documents from localStorage on mount
   useEffect(() => {
     try {
@@ -445,6 +451,186 @@ export default function DocumentsView() {
     );
   };
 
+  const handleChatSubmit = async () => {
+    if (!chatInput.trim() || !selectedDocument || isChatProcessing) return;
+
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    
+    // Add user message to chat
+    setChatMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
+    setIsChatProcessing(true);
+
+    try {
+      // Call AI agent to process the document editing request
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `You are helping to edit a document. The document is titled "${selectedDocument.fileName}". 
+
+Current document content:
+${selectedDocument.text}
+
+User request: ${userMessage}
+
+Instructions:
+1. Analyze the user's request carefully
+2. If you need more information or clarification to properly edit the document, ask specific questions
+3. If you have enough information, provide the edited version of the document
+4. Always respond in a helpful and professional manner
+
+Respond with either:
+- Questions you need answered (if clarification needed)
+- The complete edited document text (if you have enough information)`,
+          messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
+          settings: {
+            model: 'gpt-4o-mini',
+            maxIterations: 1,
+            confidenceThreshold: 85,
+            maxResponseLength: 10000,
+            contextWindowSize: 4000,
+            summaryMode: 'balanced',
+            reasoningEffort: 'medium',
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process chat request');
+      }
+
+      // Read the streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = '';
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          const messages = buffer.split('\n\n');
+          buffer = messages.pop() || '';
+
+          for (const message of messages) {
+            const lines = message.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+
+              try {
+                const data = JSON.parse(jsonStr);
+                
+                if (data.type === 'output_text_delta' && data.data?.delta) {
+                  assistantContent += data.data.delta;
+                } else if (data.type === 'raw_model_stream_event' && data.data) {
+                  const eventData = data.data;
+                  if (eventData.type === 'output_text_delta' && eventData.delta) {
+                    assistantContent += eventData.delta;
+                  }
+                }
+              } catch (e) {
+                // Skip malformed JSON
+              }
+            }
+          }
+        }
+      }
+
+      if (!assistantContent.trim()) {
+        throw new Error('No response from AI');
+      }
+
+      // Add assistant response to chat
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: assistantContent.trim(), 
+        timestamp: new Date() 
+      }]);
+
+      // Check if the response contains an edited document (heuristic: check for length and structure)
+      // If it looks like a full document replacement, update the document
+      const looksLikeFullDocument = assistantContent.length > 100 && 
+                                     !assistantContent.toLowerCase().includes('question') &&
+                                     !assistantContent.endsWith('?');
+      
+      if (looksLikeFullDocument && assistantContent.length > selectedDocument.text.length * 0.5) {
+        // Update the document with edited content
+        const updatedText = assistantContent.trim();
+        
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === selectedDocument.id
+              ? { ...doc, text: updatedText, size: updatedText.length }
+              : doc
+          )
+        );
+
+        // Re-analyze the updated document
+        setIsAnalyzing(true);
+        const analyzeResponse = await fetch('/api/analyze-document', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: updatedText,
+            fileName: selectedDocument.fileName,
+            fileType: selectedDocument.fileType,
+          }),
+        });
+
+        const analyzeData = await analyzeResponse.json();
+
+        if (analyzeResponse.ok && analyzeData.summary) {
+          const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
+          const analyzedNotes: Note[] = (analyzeData.notes || [])
+            .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
+            .map((note: ExtractedNote) => ({
+              id: generateId(),
+              content: note.content,
+              category: validCategories.includes(note.category) ? note.category : 'other',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              documentId: selectedDocument.id,
+            }));
+
+          setDocuments((prev) =>
+            prev.map((doc) =>
+              doc.id === selectedDocument.id
+                ? {
+                    ...doc,
+                    summary: analyzeData.summary,
+                    notes: analyzedNotes,
+                    analyzedAt: new Date(),
+                  }
+                : doc
+            )
+          );
+        }
+        setIsAnalyzing(false);
+      }
+
+    } catch (err) {
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `Error: ${err instanceof Error ? err.message : 'An error occurred'}`, 
+        timestamp: new Date() 
+      }]);
+    } finally {
+      setIsChatProcessing(false);
+    }
+  };
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
@@ -595,7 +781,7 @@ export default function DocumentsView() {
         </aside>
 
         {/* Main Content Area */}
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
           {!selectedDocument ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
               <div style={{ textAlign: 'center', maxWidth: 400, padding: 20 }}>
@@ -608,7 +794,9 @@ export default function DocumentsView() {
               </div>
             </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <>
+              {/* Document Content Column */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e5e7eb' }}>
               {/* Document Header */}
               <div style={{ padding: 20, borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
                 <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, marginBottom: 8, color: '#111827' }}>
@@ -789,6 +977,121 @@ export default function DocumentsView() {
                 </div>
               </div>
             </div>
+
+            {/* AI Chat Panel Column */}
+            <div style={{ width: 400, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
+              {/* Chat Header */}
+              <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+                <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0, marginBottom: 4 }}>
+                  💬 AI Document Editor
+                </h4>
+                <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+                  Ask AI to edit or modify the document
+                </p>
+              </div>
+
+              {/* Chat Messages */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 16, backgroundColor: '#f9fafb' }}>
+                {chatMessages.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>
+                    <p style={{ fontSize: 14, marginBottom: 8 }}>Start a conversation</p>
+                    <p style={{ fontSize: 12 }}>
+                      Ask AI to edit, improve, or modify the document. AI will ask clarifying questions if needed.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {chatMessages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          marginBottom: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                        }}
+                      >
+                        <div
+                          style={{
+                            maxWidth: '85%',
+                            padding: '10px 14px',
+                            borderRadius: 12,
+                            backgroundColor: msg.role === 'user' ? '#3b82f6' : '#fff',
+                            color: msg.role === 'user' ? '#fff' : '#111827',
+                            border: msg.role === 'assistant' ? '1px solid #e5e7eb' : 'none',
+                            fontSize: 14,
+                            lineHeight: 1.5,
+                            whiteSpace: 'pre-wrap',
+                            wordWrap: 'break-word',
+                          }}
+                        >
+                          {msg.content}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: '#9ca3af',
+                            marginTop: 4,
+                            paddingLeft: msg.role === 'user' ? 0 : 14,
+                            paddingRight: msg.role === 'user' ? 14 : 0,
+                          }}
+                        >
+                          {msg.timestamp.toLocaleTimeString()}
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={chatEndRef} />
+                  </>
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <div style={{ padding: 16, borderTop: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+                {isChatProcessing && (
+                  <div style={{ marginBottom: 12, padding: 8, backgroundColor: '#f3f4f6', borderRadius: 6, fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
+                    ✨ AI is thinking...
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSubmit()}
+                    placeholder="Ask AI to edit the document..."
+                    disabled={isChatProcessing}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={handleChatSubmit}
+                    disabled={!chatInput.trim() || isChatProcessing}
+                    style={{
+                      padding: '10px 16px',
+                      backgroundColor: !chatInput.trim() || isChatProcessing ? '#d1d5db' : '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: !chatInput.trim() || isChatProcessing ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: 14,
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: '8px 0 0 0' }}>
+                  Press Enter to send, Shift+Enter for new line
+                </p>
+              </div>
+            </div>
+          </>
           )}
         </main>
       </div>
