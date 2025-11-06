@@ -747,6 +747,17 @@ export default function PlanningAgentPage() {
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
   }
 
+  function setActiveChatNotes(newNotes: Note[]) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notes: newNotes, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  }
+
   // Extract notes from assistant's response using regex (fallback method)
   function extractNotesFromResponse(content: string): Note[] {
     const notePattern = /\[NOTE:\s*([^\|]+)\s*\|\s*([^\]]+)\]/gi;
@@ -2024,6 +2035,7 @@ export default function PlanningAgentPage() {
           acceptPendingNote={acceptPendingNote}
           rejectPendingNote={rejectPendingNote}
           deleteNote={deleteNote}
+          setNotes={setActiveChatNotes}
         />
       )}
 
