@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
  */
 export async function POST(request: Request) {
   try {
-    const { content, existingNotes } = await request.json();
+    const { content, existingNotes, model, originatingMessage, sourceUrl, documentName } = await request.json();
 
     if (!content || typeof content !== 'string') {
       return NextResponse.json({ error: 'Content is required' }, { status: 400 });
@@ -19,8 +19,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
     }
 
-    // Build the prompt for note extraction
-    const extractionPrompt = `You are an expert note-taker. Analyze the following AI assistant response and extract ALL noteworthy information as structured notes.
+    // Build the prompt for note extraction with enhanced context
+    const extractionPrompt = `You are an expert note-taker. Analyze the following AI assistant response and extract ALL noteworthy information as structured notes with full context.
 
 EXISTING NOTES (do not duplicate these):
 ${existingNotes || 'None'}
@@ -31,10 +31,15 @@ ${content}
 INSTRUCTIONS:
 - Extract ANY and ALL specific factual information (be VERY generous)
 - Look for: dates, times, deadlines, locations, addresses, building names, document types/names, file requirements, people's names, contact information, organizations, companies, goals, milestones, requirements, specifications, prices, amounts, quantities, URLs, legal terms, processes, steps, procedures
+- For EACH note, extract contextual information:
+  * WHO: People, organizations, stakeholders mentioned
+  * WHAT: The specific subject or topic
+  * WHEN: Temporal context (dates, times, deadlines)
+  * WHERE: Locations, places, venues
 - Group similar items together when appropriate (e.g., multiple documents in one note)
 - Avoid exact duplicates of existing notes, but capture new information even if related
 - Even seemingly minor details are important - capture them
-- Each note should be concise but complete
+- Each note should be self-contained and understandable in isolation
 
 CATEGORIES (choose the most specific):
 - dates: Specific dates, time periods, scheduled events
@@ -49,9 +54,26 @@ CATEGORIES (choose the most specific):
 RESPONSE FORMAT (JSON only):
 {
   "notes": [
-    {"category": "dates", "content": "Meeting on March 15, 2024 at 2pm"},
-    {"category": "documents", "content": "Need passport copy, driver's license, and proof of residence"},
-    {"category": "goals", "content": "Complete project proposal by end of month"}
+    {
+      "category": "dates",
+      "content": "Meeting on March 15, 2024 at 2pm",
+      "context": {
+        "who": ["John Smith", "Marketing Team"],
+        "what": "Quarterly review meeting",
+        "when": "March 15, 2024 at 2pm",
+        "where": "Conference Room A"
+      },
+      "confidence": 95
+    },
+    {
+      "category": "documents",
+      "content": "Need passport copy, driver's license, and proof of residence",
+      "context": {
+        "what": "Required identification documents",
+        "when": "Before March 1st"
+      },
+      "confidence": 90
+    }
   ]
 }
 
@@ -65,11 +87,11 @@ Return ONLY the JSON, no other text.`;
         'Authorization': `Bearer ${openaiApiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // Use mini model for cost efficiency
+        model: model || 'gpt-4o-mini', // Use provided model or default to mini for cost efficiency
         messages: [
           {
             role: 'system',
-            content: 'You are an expert note extraction assistant. Extract ALL noteworthy factual information from text. Be generous and thorough. Return only valid JSON.'
+            content: 'You are an expert note extraction assistant. Extract ALL noteworthy factual information from text with full context (who, what, when, where). Be generous and thorough. Return only valid JSON.'
           },
           {
             role: 'user',
@@ -77,7 +99,7 @@ Return ONLY the JSON, no other text.`;
           }
         ],
         temperature: 0.3, // Lower temperature for more consistent extraction
-        max_tokens: 2000,
+        max_tokens: 3000, // Increased for context extraction
       }),
     });
 
@@ -106,14 +128,26 @@ Return ONLY the JSON, no other text.`;
 
       const parsedNotes = JSON.parse(jsonContent);
       
-      // Validate the structure
+      // Validate the structure and add source information
       if (parsedNotes.notes && Array.isArray(parsedNotes.notes)) {
-        // Filter out any invalid notes
-        const validNotes = parsedNotes.notes.filter((note: any) => 
-          note.content && typeof note.content === 'string' && note.content.trim().length > 0
-        );
+        // Filter out any invalid notes and add source metadata
+        const validNotes = parsedNotes.notes
+          .filter((note: any) => 
+            note.content && typeof note.content === 'string' && note.content.trim().length > 0
+          )
+          .map((note: any) => ({
+            ...note,
+            source: {
+              type: sourceUrl ? 'website' : documentName ? 'document' : 'agent_ai',
+              url: sourceUrl,
+              documentName: documentName,
+              originatingMessage: originatingMessage,
+              aiModel: model || 'gpt-4o-mini',
+              sourceTimestamp: new Date().toISOString(),
+            },
+          }));
 
-        console.log(`[NOTE EXTRACTION] Extracted ${validNotes.length} notes from AI response`);
+        console.log(`[NOTE EXTRACTION] Extracted ${validNotes.length} notes with context from AI response`);
         return NextResponse.json({ notes: validNotes });
       }
 

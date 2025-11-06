@@ -1,6 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Note,
+  StoredNote,
+  createNote,
+  createAISource,
+  createWebSource,
+  createDocumentSource,
+  createUserSource,
+  generateNoteId,
+  assignNoteConfidence,
+  extractNotesFromResponse,
+  serializeNote,
+  deserializeNote,
+  extractContextFromContent,
+  validateCategory,
+  NoteSourceType,
+} from './notes';
 
 interface ModelConfig {
   name: string;
@@ -143,23 +160,8 @@ interface StoredMessage {
   usage?: TokenUsage;
 }
 
-interface Note {
-  id: string;
-  content: string;
-  category: string; // e.g., 'dates', 'places', 'documents', 'general', 'goals'
-  createdAt: Date;
-  updatedAt: Date;
-  isNew?: boolean; // For highlighting newly added notes
-  isPending?: boolean; // Waiting for user approval
-}
+// Note and StoredNote are now imported from './notes'
 
-interface StoredNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface ChatSession {
   id: string;
@@ -429,11 +431,7 @@ function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
       timestamp: new Date(m.timestamp),
       files: m.files?.map(f => ({ ...f, uploadedAt: new Date(f.uploadedAt) }))
     })),
-    notes: (c.notes || []).map((n) => ({
-      ...n,
-      createdAt: new Date(n.createdAt),
-      updatedAt: new Date(n.updatedAt)
-    }))
+    notes: (c.notes || []).map(deserializeNote)
   }));
 }
 
@@ -448,13 +446,7 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
       timestamp: m.timestamp.toISOString(),
       files: m.files?.map(f => ({ ...f, uploadedAt: f.uploadedAt.toISOString() }))
     })),
-    notes: (c.notes || []).map((n) => ({
-      id: n.id,
-      content: n.content,
-      category: n.category,
-      createdAt: n.createdAt.toISOString(),
-      updatedAt: n.updatedAt.toISOString()
-    }))
+    notes: (c.notes || []).map(serializeNote)
   }));
 }
 
@@ -748,95 +740,19 @@ export default function PlanningAgentPage() {
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
   }
 
-  // Extract notes from assistant's response using regex (fallback method)
-  function extractNotesFromResponse(content: string): Note[] {
-    const notePattern = /\[NOTE:\s*([^\|]+)\s*\|\s*([^\]]+)\]/gi;
-    const notes: Note[] = [];
-    let match;
 
-    while ((match = notePattern.exec(content)) !== null) {
-      const category = match[1].trim().toLowerCase();
-      const noteContent = match[2].trim();
-
-      // Validate category
-      const validCategories = ['dates', 'places', 'documents', 'people', 'goals', 'deadlines', 'requirements', 'other'];
-      const finalCategory = validCategories.includes(category) ? category : 'other';
-
-      notes.push({
-        id: generateId(),
-        content: noteContent,
-        category: finalCategory,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isPending: true,
-      });
-    }
-
-    return notes;
-  }
-
-  // Client-side heuristics to auto-filter notes when backend doesn't provide confidence levels
-  function assignNoteConfidence(note: any, existingNotes: Note[]): string {
-    const content = note.content?.toLowerCase() || '';
-    const category = note.category?.toLowerCase() || 'other';
-    
-    // Auto-reject criteria: vague, generic, or low-value notes
-    const rejectPatterns = [
-      /^(ok|okay|yes|no|sure|thanks|thank you)\.?$/i,
-      /^(noted|understood|got it|i see)\.?$/i,
-      /^.{1,10}$/,  // Too short (less than 10 chars)
-    ];
-    
-    const vagueWords = ['something', 'things', 'stuff', 'maybe', 'perhaps', 'might', 'possibly'];
-    const hasVagueWords = vagueWords.some(word => content.includes(word));
-    
-    // Check for duplicate or very similar content
-    const isDuplicate = existingNotes.some(existing => {
-      const existingContent = existing.content.toLowerCase();
-      return existingContent === content || 
-             (existingContent.length > 10 && content.includes(existingContent)) ||
-             (content.length > 10 && existingContent.includes(content));
-    });
-    
-    // Auto-reject conditions
-    if (rejectPatterns.some(pattern => pattern.test(content))) {
-      return 'auto-reject';
-    }
-    
-    if (isDuplicate) {
-      return 'auto-reject';
-    }
-    
-    if (content.length < 15 && hasVagueWords) {
-      return 'auto-reject';
-    }
-    
-    // Auto-accept criteria: specific, actionable notes with clear information
-    const hasDate = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.test(content);
-    const hasSpecificInfo = content.length > 30;
-    const isActionableCategory = ['dates', 'deadlines', 'documents', 'people', 'goals', 'requirements'].includes(category);
-    
-    // Strong indicators for auto-accept
-    if (hasDate && category === 'dates') {
-      return 'auto-accept';
-    }
-    
-    if (isActionableCategory && hasSpecificInfo && !hasVagueWords) {
-      return 'auto-accept';
-    }
-    
-    // Default: needs review
-    return 'needs-review';
-  }
-
-  // Intelligent note extraction using AI analysis
-  async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[]): Promise<Note[]> {
+  // Intelligent note extraction using AI analysis with enhanced context
+  async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[], userMessage?: string): Promise<Note[]> {
     try {
       // Build existing notes context
       const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
 
       // Determine the effective model for note extraction (always use quick model for this lightweight task)
       const effectiveModel = getEffectiveModel('extract-notes');
+      
+      // Determine source information based on available context
+      const  sourceUrl = undefined; // Could be extracted from assistantResponse if it contains web results
+      const documentName = uploadedFiles.length > 0 ? uploadedFiles[0].fileName : undefined;
 
       const response = await fetch('/api/extract-notes', {
         method: 'POST',
@@ -844,33 +760,51 @@ export default function PlanningAgentPage() {
         body: JSON.stringify({
           content: assistantResponse,
           existingNotes: existingNotesContext,
-          model: effectiveModel,  // Pass the effective model
-          autoFilter: true,  // Request automatic filtering of notes
+          model: effectiveModel,
+          originatingMessage: userMessage,
+          sourceUrl,
+          documentName,
+          autoFilter: true,
         }),
       });
 
       if (!response.ok) {
         console.error('Note extraction API failed, falling back to regex extraction');
-        return extractNotesFromResponse(assistantResponse);
+        // Fallback to regex with basic source
+        const source = createAISource({
+          originatingMessage: userMessage,
+          aiModel: effectiveModel,
+          sourceType: 'agent_ai',
+        });
+        return extractNotesFromResponse(assistantResponse, source);
       }
 
       const data = await response.json();
       
-      // Parse the extracted notes with automatic filtering
+      // Parse the extracted notes with automatic filtering and enhanced structure
       if (data.notes && Array.isArray(data.notes)) {
-        const allNotes = data.notes.map((note: any) => {
-          // Apply client-side confidence if backend doesn't provide it
-          const confidence = note.confidence || assignNoteConfidence(note, existingNotes);
+        const allNotes = data.notes.map((rawNote: any) => {
+          // Create properly structured note with enhanced fields
+          const note = createNote({
+            content: rawNote.content,
+            category: validateCategory(rawNote.category || 'other'),
+            source: rawNote.source || createAISource({
+              originatingMessage: userMessage,
+              aiModel: effectiveModel,
+            }),
+            context: rawNote.context || extractContextFromContent(rawNote.content),
+            confidence: rawNote.confidence,
+            isPending: true, // Will be filtered below
+          });
+          
+          // Apply confidence-based filtering
+          const confidenceLevel = assignNoteConfidence(note, existingNotes);
           
           return {
-            id: generateId(),
-            content: note.content,
-            category: note.category || 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            isPending: confidence !== 'auto-accept', // Only pending if not auto-accepted
-            autoAccept: confidence === 'auto-accept',
-            needsReview: confidence === 'needs-review',
+            ...note,
+            autoAccept: confidenceLevel === 'auto-accept',
+            needsReview: confidenceLevel === 'needs-review',
+            autoReject: confidenceLevel === 'auto-reject',
           };
         });
 
@@ -878,23 +812,29 @@ export default function PlanningAgentPage() {
         const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
         if (autoAcceptedNotes.length > 0) {
           autoAcceptedNotes.forEach((note: any) => {
-            const { autoAccept, needsReview, ...cleanNote } = note;
+            const { autoAccept, needsReview, autoReject, ...cleanNote } = note;
             addNote({ ...cleanNote, isPending: false });
           });
         }
 
         // Return only notes that need user review (filter out auto-rejected and auto-accepted)
-        return allNotes.filter((n: any) => n.needsReview).map((n: any) => {
-          const { autoAccept, needsReview, ...cleanNote } = n;
-          return cleanNote;
-        });
+        return allNotes
+          .filter((n: any) => n.needsReview)
+          .map((n: any) => {
+            const { autoAccept, needsReview, autoReject, ...cleanNote } = n;
+            return cleanNote;
+          });
       }
 
       return [];
     } catch (error) {
       console.error('Error in intelligent note extraction:', error);
-      // Fallback to regex extraction
-      return extractNotesFromResponse(assistantResponse);
+      // Fallback to regex extraction with basic source
+      const source = createAISource({
+        originatingMessage: userMessage,
+        aiModel: getEffectiveModel('extract-notes'),
+      });
+      return extractNotesFromResponse(assistantResponse, source);
     }
   }
 
@@ -1001,7 +941,7 @@ export default function PlanningAgentPage() {
         return acc;
       }, {} as Record<string, string[]>);
       
-      Object.entries(notesByCategory).forEach(([category, noteContents]) => {
+      Object.entries(notesByCategory).forEach(([category, noteContents]: [string, string[]]) => {
         messageContent += `${category.toUpperCase()}: ${noteContents.join('; ')}\n`;
       });
     }
@@ -1195,7 +1135,7 @@ export default function PlanningAgentPage() {
         });
 
         // Extract notes from the assistant's response using intelligent AI analysis
-        const extractedNotes = await intelligentNoteExtraction(assistantMessage, notes);
+        const extractedNotes = await intelligentNoteExtraction(assistantMessage, notes, input.trim());
         if (extractedNotes.length > 0) {
           setPendingNotes((prev) => [...prev, ...extractedNotes]);
         }

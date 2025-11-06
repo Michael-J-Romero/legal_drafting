@@ -1,4 +1,5 @@
 // Shared types for the planning agent
+// Note: Note and StoredNote types are now in ./notes module
 
 export interface ModelConfig {
   name: string;
@@ -64,23 +65,8 @@ export interface StoredMessage {
   usage?: TokenUsage;
 }
 
-export interface Note {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: Date;
-  updatedAt: Date;
-  isPending?: boolean;
-  isNew?: boolean;
-}
-
-export interface StoredNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: string;
-  updatedAt: string;
-}
+// Re-export Note types from notes module for backward compatibility
+export type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext } from './notes';
 
 export interface ChatSession {
   id: string;
@@ -88,7 +74,7 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   messages: Message[];
-  notes: Note[];
+  notes: import('./notes').Note[];
 }
 
 export interface StoredChatSession {
@@ -97,7 +83,7 @@ export interface StoredChatSession {
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];
-  notes: StoredNote[];
+  notes: import('./notes').StoredNote[];
 }
 
 export type TabView = 'main-chat' | 'notes' | 'plan' | 'documents' | 'goals';
