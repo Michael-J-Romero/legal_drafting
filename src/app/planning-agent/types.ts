@@ -41,6 +41,49 @@ export interface StoredUploadedFile {
   uploadedAt: string;
 }
 
+// Simplified note interface for documents (doesn't require full source/context)
+export interface DocumentNote {
+  id: string;
+  content: string;
+  category: string;
+  createdAt: Date;
+  updatedAt: Date;
+  documentId?: string;
+}
+
+export interface StoredDocumentNote {
+  id: string;
+  content: string;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
+  documentId?: string;
+}
+
+export interface Document {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  summary?: string;
+  notes: DocumentNote[];
+  uploadedAt: Date;
+  analyzedAt?: Date;
+}
+
+export interface StoredDocument {
+  id: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  text: string;
+  summary?: string;
+  notes: StoredDocumentNote[];
+  uploadedAt: string;
+  analyzedAt?: string;
+}
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;

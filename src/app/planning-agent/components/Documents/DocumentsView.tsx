@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Document, StoredDocument, Note } from '../../types';
+import { Document, StoredDocument, DocumentNote } from '../../types';
 import { generateId, formatFileSize } from '../../utils/helpers';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
@@ -157,7 +157,7 @@ export default function DocumentsView() {
       if (analyzeResponse.ok && analyzeData.summary) {
         // Update document with summary and notes
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => ({
             id: generateId(),
@@ -235,7 +235,7 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => ({
             id: generateId(),
@@ -386,7 +386,7 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => ({
             id: generateId(),
@@ -714,7 +714,7 @@ IMPORTANT:
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => ({
             id: generateId(),
