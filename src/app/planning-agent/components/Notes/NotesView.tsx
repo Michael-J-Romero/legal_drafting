@@ -37,6 +37,19 @@ interface NotesGraph {
   [key: string]: any;
 }
 
+// Helper to format source type for display
+function formatSourceType(sourceType: string): string {
+  const map: Record<string, string> = {
+    'website': '🌐 Website',
+    'document': '📄 Document',
+    'user_prompt': '👤 User Input',
+    'agent_ai': '🤖 AI Agent',
+    'research': '🔍 Research',
+    'conversation': '💬 Conversation',
+  };
+  return map[sourceType] || sourceType;
+}
+
 export default function NotesView({
   notes,
   pendingNotes,
@@ -170,7 +183,7 @@ export default function NotesView({
           </div>
         </div>
         <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
-          AI-extracted notes from your conversations
+          AI-extracted notes with full context from your conversations
         </p>
       </div>
 
@@ -334,6 +347,24 @@ export default function NotesView({
                 <div style={{ fontSize: 14, color: '#111827', marginBottom: 10, lineHeight: 1.5 }}>
                   {note.content}
                 </div>
+                
+                {/* Source Information */}
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <strong>Source:</strong> {formatSourceType(note.source.type)}
+                    {note.source.url && <> • <a href={note.source.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Link</a></>}
+                    {note.source.documentName && <> • {note.source.documentName}</>}
+                  </div>
+                  {(note.context.who || note.context.what || note.context.when || note.context.where) && (
+                    <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #e5e7eb' }}>
+                      {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}
+                      {note.context.what && <div><strong>What:</strong> {note.context.what}</div>}
+                      {note.context.when && <div><strong>When:</strong> {note.context.when}</div>}
+                      {note.context.where && <div><strong>Where:</strong> {note.context.where}</div>}
+                    </div>
+                  )}
+                </div>
+                
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     onClick={() => acceptPendingNote(note.id)}
@@ -414,9 +445,20 @@ export default function NotesView({
                       <div style={{ fontSize: 14, color: '#111827', marginBottom: 6, lineHeight: 1.5 }}>
                         {note.content}
                       </div>
+                      
+                      {/* Context Information */}
+                      {(note.context.who || note.context.what || note.context.when || note.context.where) && (
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
+                          {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}
+                          {note.context.what && <div><strong>What:</strong> {note.context.what}</div>}
+                          {note.context.when && <div><strong>When:</strong> {note.context.when}</div>}
+                          {note.context.where && <div><strong>Where:</strong> {note.context.where}</div>}
+                        </div>
+                      )}
+                      
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ fontSize: 11, color: '#9ca3af' }}>
-                          {new Date(note.updatedAt).toLocaleDateString()}
+                        <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                          {formatSourceType(note.source.type)} • {new Date(note.updatedAt).toLocaleDateString()}
                         </div>
                         <button
                           onClick={() => deleteNote(note.id)}

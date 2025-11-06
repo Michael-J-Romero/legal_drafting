@@ -1,4 +1,7 @@
 // Shared types for the planning agent
+// Note: Note and StoredNote types are now in ./notes module
+
+import type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext } from './notes';
 
 export interface ModelConfig {
   name: string;
@@ -43,6 +46,9 @@ export interface TokenUsage {
   outputTokens: number;
   totalTokens: number;
   breakdown?: any;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+  reasoningSummary?: string;
 }
 
 export interface Message {
@@ -61,23 +67,8 @@ export interface StoredMessage {
   usage?: TokenUsage;
 }
 
-export interface Note {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: Date;
-  updatedAt: Date;
-  isPending?: boolean;
-  isNew?: boolean;
-}
-
-export interface StoredNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: string;
-  updatedAt: string;
-}
+// Re-export Note types from notes module for backward compatibility
+export type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext };
 
 export interface ChatSession {
   id: string;
