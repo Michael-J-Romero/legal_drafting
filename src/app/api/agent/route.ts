@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { load as loadHtml } from 'cheerio';
 import { ContextManager } from './contextManager';
 
+// Constants for turn limits
+const MAX_TURNS_REASONING_MODEL = 100; // High limit for models with native reasoning (GPT-5, o1 series)
+const MAX_TURNS_REGULAR_MODEL = 25;    // Moderate limit for structured multi-phase responses
+
 // Use Node.js runtime for this route
 export const runtime = 'nodejs';
 
@@ -286,9 +290,17 @@ export async function POST(request: Request) {
     // - Increase maxTurns to 100 to accommodate their internal reasoning process
     // - Simplify agent instructions to avoid forcing multi-phase structure
     // - Let the model use its own reasoning to determine the best approach
-    const isReasoningModel = agentSettings.model.includes('gpt-5') || 
-                            agentSettings.model.includes('o1') ||
-                            agentSettings.model.includes('o3');
+    //
+    // Note: Using exact matches to avoid false positives with future model variants
+    const reasoningModelNames = new Set([
+      'gpt-5',
+      'gpt-5-mini',
+      'o1-preview',
+      'o1-mini',
+      'o3-mini', // Future model
+      'o3',      // Future model
+    ]);
+    const isReasoningModel = reasoningModelNames.has(agentSettings.model);
 
     console.log(`[MODEL] Using model: ${agentSettings.model}`);
     console.log(`[MODEL] Is reasoning model: ${isReasoningModel}`);
@@ -491,10 +503,10 @@ Always use the emoji markers to help users follow your thinking.`;
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // For reasoning models, increase maxTurns significantly or remove the limit
+          // For reasoning models, increase maxTurns significantly to allow internal reasoning
           // This allows the model to do its own internal reasoning without hitting the turn limit
-          // For regular models, use a moderate maxTurns limit
-          const maxTurns = isReasoningModel ? 100 : 25;
+          // For regular models, use a moderate maxTurns limit for structured responses
+          const maxTurns = isReasoningModel ? MAX_TURNS_REASONING_MODEL : MAX_TURNS_REGULAR_MODEL;
           
           console.log(`[AGENT] Using maxTurns: ${maxTurns} (reasoning model: ${isReasoningModel})`);
           
