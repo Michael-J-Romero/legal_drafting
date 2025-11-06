@@ -1,14 +1,32 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Document, StoredDocument, DocumentNote } from '../../types';
+import { Document, StoredDocument, Note } from '../../types';
 import { generateId, formatFileSize } from '../../utils/helpers';
+import { createNote, createDocumentSource, deserializeNote, serializeNote } from '../../notes';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 
 interface ExtractedNote {
   content: string;
   category: string;
+  context?: {
+    who?: string[];
+    what?: string;
+    when?: string;
+    where?: string;
+    relatedTo?: string[];
+  };
+  confidence?: number;
+  source?: {
+    type: string;
+    url?: string;
+    documentName?: string;
+    originatingMessage?: string;
+    aiModel?: string;
+    sourceTimestamp: string;
+    metadata?: Record<string, any>;
+  };
 }
 
 function hydrateDocuments(stored: StoredDocument[]): Document[] {
@@ -16,11 +34,7 @@ function hydrateDocuments(stored: StoredDocument[]): Document[] {
     ...doc,
     uploadedAt: new Date(doc.uploadedAt),
     analyzedAt: doc.analyzedAt ? new Date(doc.analyzedAt) : undefined,
-    notes: doc.notes.map((n) => ({
-      ...n,
-      createdAt: new Date(n.createdAt),
-      updatedAt: new Date(n.updatedAt),
-    })),
+    notes: doc.notes.map((n) => deserializeNote(n)),
   }));
 }
 
@@ -29,14 +43,7 @@ function dehydrateDocuments(documents: Document[]): StoredDocument[] {
     ...doc,
     uploadedAt: doc.uploadedAt.toISOString(),
     analyzedAt: doc.analyzedAt?.toISOString(),
-    notes: doc.notes.map((n) => ({
-      id: n.id,
-      content: n.content,
-      category: n.category,
-      createdAt: n.createdAt.toISOString(),
-      updatedAt: n.updatedAt.toISOString(),
-      documentId: n.documentId,
-    })),
+    notes: doc.notes.map((n) => serializeNote(n)),
   }));
 }
 
@@ -155,18 +162,36 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        // Update document with summary and notes
+        // Update document with summary and notes using centralized note creation
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              url: note.source.url,
+              documentName: note.source.documentName || uploadData.fileName,
+              originatingMessage: note.source.originatingMessage || `Analyzed document: ${uploadData.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: newDocument.id },
+            } : createDocumentSource({
+              documentName: uploadData.fileName,
+              originatingMessage: `Analyzed document: ${uploadData.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
+            
+            return createNote({
+              content: note.content,
+              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -235,16 +260,34 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              url: note.source.url,
+              documentName: note.source.documentName || newDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Analyzed pasted document: ${newDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: newDocument.id },
+            } : createDocumentSource({
+              documentName: newDocument.fileName,
+              originatingMessage: `Analyzed pasted document: ${newDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
+            
+            return createNote({
+              content: note.content,
+              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -386,16 +429,34 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              url: note.source.url,
+              documentName: note.source.documentName || newDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Analyzed AI-generated document: ${newDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: newDocument.id, aiGenerated: true },
+            } : createDocumentSource({
+              documentName: newDocument.fileName,
+              originatingMessage: `Analyzed AI-generated document: ${newDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id, aiGenerated: true };
+            
+            return createNote({
+              content: note.content,
+              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -714,16 +775,34 @@ IMPORTANT:
 
       if (analyzeResponse.ok && analyzeData.summary) {
         const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: selectedDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              url: note.source.url,
+              documentName: note.source.documentName || selectedDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Re-analyzed document: ${selectedDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: selectedDocument.id, reanalyzed: true },
+            } : createDocumentSource({
+              documentName: selectedDocument.fileName,
+              originatingMessage: `Re-analyzed document: ${selectedDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: selectedDocument.id, reanalyzed: true };
+            
+            return createNote({
+              content: note.content,
+              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -1095,29 +1174,52 @@ IMPORTANT:
                                   backgroundColor: '#fff',
                                   border: '1px solid #e5e7eb',
                                   borderRadius: 6,
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'start',
-                                  gap: 12,
                                 }}
                               >
-                                <div style={{ flex: 1, fontSize: 14, color: '#111827', lineHeight: 1.5 }}>
-                                  {note.content}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12, marginBottom: 6 }}>
+                                  <div style={{ flex: 1, fontSize: 14, color: '#111827', lineHeight: 1.5 }}>
+                                    {note.content}
+                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteNote(note.id)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      backgroundColor: 'transparent',
+                                      color: '#ef4444',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      fontSize: 16,
+                                    }}
+                                    title="Delete note"
+                                  >
+                                    🗑️
+                                  </button>
                                 </div>
-                                <button
-                                  onClick={() => handleDeleteNote(note.id)}
-                                  style={{
-                                    padding: '2px 8px',
-                                    backgroundColor: 'transparent',
-                                    color: '#ef4444',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    fontSize: 16,
-                                  }}
-                                  title="Delete note"
-                                >
-                                  🗑️
-                                </button>
+                                
+                                {/* Context Information */}
+                                {(note.context?.who || note.context?.what || note.context?.when || note.context?.where) && (
+                                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
+                                    {note.context.who && note.context.who.length > 0 && (
+                                      <div><strong>Who:</strong> {note.context.who.join(', ')}</div>
+                                    )}
+                                    {note.context.what && (
+                                      <div><strong>What:</strong> {note.context.what}</div>
+                                    )}
+                                    {note.context.when && (
+                                      <div><strong>When:</strong> {note.context.when}</div>
+                                    )}
+                                    {note.context.where && (
+                                      <div><strong>Where:</strong> {note.context.where}</div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Source Information */}
+                                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                                  Source: {note.source.documentName || 'Document'} • 
+                                  {note.source.aiModel && ` AI: ${note.source.aiModel} • `}
+                                  {new Date(note.updatedAt).toLocaleDateString()}
+                                </div>
                               </div>
                             ))}
                           </div>

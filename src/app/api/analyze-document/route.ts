@@ -38,6 +38,11 @@ INSTRUCTIONS:
    - Each note should be concise but complete
    - Group related items when appropriate
    - Be thorough and capture all important details
+   - For EACH note, extract contextual information:
+     * WHO: People, organizations, stakeholders mentioned
+     * WHAT: The specific subject or topic  
+     * WHEN: Temporal context (dates, times, deadlines)
+     * WHERE: Locations, places, venues
 
 CATEGORIES for notes (choose the most specific):
 - dates: Specific dates, time periods, scheduled events
@@ -53,9 +58,25 @@ RESPONSE FORMAT (JSON only):
 {
   "summary": "Your comprehensive summary here...",
   "notes": [
-    {"category": "dates", "content": "Specific date information"},
-    {"category": "documents", "content": "Referenced document details"},
-    {"category": "requirements", "content": "Specific requirement"}
+    {
+      "category": "dates",
+      "content": "Specific date information",
+      "context": {
+        "who": ["Person or organization"],
+        "what": "Event or subject",
+        "when": "Date/time",
+        "where": "Location"
+      },
+      "confidence": 95
+    },
+    {
+      "category": "documents",
+      "content": "Referenced document details",
+      "context": {
+        "what": "Document type and purpose"
+      },
+      "confidence": 90
+    }
   ]
 }
 
@@ -130,16 +151,30 @@ Return ONLY the JSON, no other text.`;
       // Validate and filter notes
       const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
       const validNotes = Array.isArray(parsedAnalysis.notes)
-        ? parsedAnalysis.notes.filter((note: { content?: string; category?: string }) => 
-            note.content && 
-            typeof note.content === 'string' && 
-            note.content.trim().length > 0 &&
-            note.category &&
-            validCategories.includes(note.category)
-          )
+        ? parsedAnalysis.notes
+            .filter((note: { content?: string; category?: string }) => 
+              note.content && 
+              typeof note.content === 'string' && 
+              note.content.trim().length > 0 &&
+              note.category &&
+              validCategories.includes(note.category)
+            )
+            .map((note: any) => ({
+              content: note.content,
+              category: note.category,
+              context: note.context || {},
+              confidence: note.confidence || 80,
+              source: {
+                type: 'document',
+                documentName: fileName,
+                originatingMessage: `Analyzed document: ${fileName}`,
+                aiModel: 'gpt-4o-mini',
+                sourceTimestamp: new Date().toISOString(),
+              }
+            }))
         : [];
 
-      console.log(`[DOCUMENT ANALYSIS] Generated summary and ${validNotes.length} notes for ${fileName}`);
+      console.log(`[DOCUMENT ANALYSIS] Generated summary and ${validNotes.length} notes with context for ${fileName}`);
       
       return NextResponse.json({
         summary: parsedAnalysis.summary,
