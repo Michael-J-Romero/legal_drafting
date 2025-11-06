@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Note } from '../../types';
 
 interface NotesViewProps {
@@ -8,6 +9,32 @@ interface NotesViewProps {
   acceptPendingNote: (noteId: string) => void;
   rejectPendingNote: (noteId: string) => void;
   deleteNote: (noteId: string) => void;
+  setNotes?: (notes: Note[]) => void;
+  notesGraph?: any;
+  setNotesGraph?: (graph: any) => void;
+}
+
+interface Contradiction {
+  note1: string;
+  note2: string;
+  reason: string;
+}
+
+interface RefinementResult {
+  removedDuplicates: number;
+  removedGeneric: number;
+  contradictions: Contradiction[];
+}
+
+interface NotesGraph {
+  case?: {
+    jurisdiction?: Record<string, any>;
+    parties?: Record<string, any>;
+    events?: Record<string, any>;
+    evidence?: any[];
+  };
+  documents?: Record<string, any>;
+  [key: string]: any;
 }
 
 export default function NotesView({
@@ -16,15 +43,272 @@ export default function NotesView({
   acceptPendingNote,
   rejectPendingNote,
   deleteNote,
+  setNotes,
+  notesGraph,
+  setNotesGraph,
 }: NotesViewProps) {
+  const [isRefining, setIsRefining] = useState(false);
+  const [isGraphing, setIsGraphing] = useState(false);
+  const [refinementResult, setRefinementResult] = useState<RefinementResult | null>(null);
+  const [showGraph, setShowGraph] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleRefineNotes = async () => {
+    if (notes.length === 0) {
+      return; // Button is already disabled when no notes
+    }
+
+    setIsRefining(true);
+    setRefinementResult(null);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/refine-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to refine notes');
+      }
+
+      const data = await response.json();
+      
+      if (data.refinedNotes && setNotes) {
+        setNotes(data.refinedNotes);
+        setRefinementResult({
+          removedDuplicates: data.removedDuplicates || 0,
+          removedGeneric: data.removedGeneric || 0,
+          contradictions: data.contradictions || [],
+        });
+      }
+    } catch (error) {
+      console.error('Error refining notes:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to refine notes');
+    } finally {
+      setIsRefining(false);
+    }
+  };
+
+  const handleGraphNotes = async () => {
+    if (notes.length === 0) {
+      return; // Button is already disabled when no notes
+    }
+
+    setIsGraphing(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/graph-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          notes,
+          existingGraph: notesGraph 
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create graph');
+      }
+
+      const data = await response.json();
+      
+      if (data.graph && setNotesGraph) {
+        setNotesGraph(data.graph);
+        setShowGraph(true);
+      }
+    } catch (error) {
+      console.error('Error graphing notes:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create graph');
+    } finally {
+      setIsGraphing(false);
+    }
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
       <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleRefineNotes}
+              disabled={isRefining || notes.length === 0}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: isRefining || notes.length === 0 ? '#d1d5db' : '#8b5cf6',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                cursor: isRefining || notes.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+              title="Remove duplicates, generic info, and flag contradictions"
+            >
+              {isRefining ? '⏳ Refining...' : '🧹 Refine Notes'}
+            </button>
+            <button
+              onClick={handleGraphNotes}
+              disabled={isGraphing || notes.length === 0}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: isGraphing || notes.length === 0 ? '#d1d5db' : '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                cursor: isGraphing || notes.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+              title="Convert notes into hierarchical graph structure"
+            >
+              {isGraphing ? '⏳ Graphing...' : '📊 Graph Notes'}
+            </button>
+          </div>
+        </div>
         <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
           AI-extracted notes from your conversations
         </p>
       </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b' }}>
+              ❌ Error: {errorMessage}
+            </div>
+            <button
+              onClick={() => setErrorMessage(null)}
+              style={{
+                padding: '4px 12px',
+                backgroundColor: '#ef4444',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Refinement Results */}
+      {refinementResult && (
+        <div style={{ padding: 16, backgroundColor: '#dbeafe', borderBottom: '1px solid #3b82f6' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af', marginBottom: 8 }}>
+            ✨ Refinement Complete
+          </div>
+          <div style={{ fontSize: 13, color: '#1e3a8a' }}>
+            <div>✓ Removed {refinementResult.removedDuplicates} duplicate(s)</div>
+            <div>✓ Removed {refinementResult.removedGeneric} generic/irrelevant note(s)</div>
+            {refinementResult.contradictions.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 600, color: '#dc2626' }}>⚠️ Found {refinementResult.contradictions.length} contradiction(s):</div>
+                {refinementResult.contradictions.map((c, idx) => (
+                  <div key={idx} style={{ marginLeft: 16, marginTop: 4, fontSize: 12 }}>
+                    <div>• "{c.note1}" vs "{c.note2}"</div>
+                    <div style={{ marginLeft: 12, color: '#6b7280' }}>{c.reason}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setRefinementResult(null)}
+            style={{
+              marginTop: 8,
+              padding: '4px 12px',
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Graph View Modal */}
+      {showGraph && notesGraph && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          right: 0, 
+          bottom: 0, 
+          backgroundColor: 'rgba(0,0,0,0.5)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          zIndex: 1000 
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: 8, 
+            padding: 24, 
+            maxWidth: '80%', 
+            maxHeight: '80%', 
+            overflow: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>📊 Notes Graph</h3>
+              <button
+                onClick={() => setShowGraph(false)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <pre style={{ 
+              fontSize: 12, 
+              backgroundColor: '#f3f4f6', 
+              padding: 16, 
+              borderRadius: 6, 
+              overflow: 'auto',
+              maxHeight: '60vh'
+            }}>
+              {JSON.stringify(notesGraph, null, 2)}
+            </pre>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(notesGraph, null, 2));
+              }}
+              style={{
+                marginTop: 12,
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              📋 Copy to Clipboard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Pending Notes (waiting for approval) */}
       {pendingNotes.length > 0 && (

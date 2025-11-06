@@ -167,6 +167,7 @@ interface ChatSession {
   updatedAt: string; // ISO
   messages: Message[];
   notes?: Note[]; // Notes/goals for this chat
+  notesGraph?: any; // Hierarchical graph structure generated from notes
 }
 
 interface StoredChatSession {
@@ -176,6 +177,7 @@ interface StoredChatSession {
   updatedAt: string;
   messages: StoredMessage[];
   notes?: StoredNote[];
+  notesGraph?: any; // Stored graph structure
 }
 
 const STORAGE_KEY = 'planningAgentChats';
@@ -432,7 +434,8 @@ function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
       ...n,
       createdAt: new Date(n.createdAt),
       updatedAt: new Date(n.updatedAt)
-    }))
+    })),
+    notesGraph: c.notesGraph || null
   }));
 }
 
@@ -453,7 +456,8 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
       category: n.category,
       createdAt: n.createdAt.toISOString(),
       updatedAt: n.updatedAt.toISOString()
-    }))
+    })),
+    notesGraph: c.notesGraph || undefined
   }));
 }
 
@@ -560,6 +564,7 @@ export default function PlanningAgentPage() {
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
   const notes = activeChat?.notes ?? [];
+  const notesGraph = activeChat?.notesGraph ?? null;
 
   const totalUsage = useMemo(() => {
     const messagesWithUsage = messages.filter(m => m.usage);
@@ -745,6 +750,28 @@ export default function PlanningAgentPage() {
 
   function rejectPendingNote(noteId: string) {
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
+  }
+
+  function setActiveChatNotes(newNotes: Note[]) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notes: newNotes, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  }
+
+  function setActiveChatGraph(newGraph: any) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notesGraph: newGraph, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
   }
 
   // Extract notes from assistant's response using regex (fallback method)
@@ -2024,6 +2051,9 @@ export default function PlanningAgentPage() {
           acceptPendingNote={acceptPendingNote}
           rejectPendingNote={rejectPendingNote}
           deleteNote={deleteNote}
+          setNotes={setActiveChatNotes}
+          notesGraph={notesGraph}
+          setNotesGraph={setActiveChatGraph}
         />
       )}
 
