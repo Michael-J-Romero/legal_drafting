@@ -1,6 +1,8 @@
 // Shared types for the planning agent
 // Note: Note and StoredNote types are now in ./notes module
 
+import type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext } from './notes';
+
 export interface ModelConfig {
   name: string;
   displayName: string;
@@ -66,7 +68,7 @@ export interface StoredMessage {
 }
 
 // Re-export Note types from notes module for backward compatibility
-export type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext } from './notes';
+export type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext };
 
 export interface ChatSession {
   id: string;
