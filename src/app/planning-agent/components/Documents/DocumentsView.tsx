@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Document, StoredDocument, Note } from '../../types';
 import { generateId, formatFileSize } from '../../utils/helpers';
-import { createNote, createDocumentSource, deserializeNote, serializeNote } from '../../notes';
+import { createNote, createDocumentSource, deserializeNote, serializeNote, validateCategory } from '../../notes';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 
@@ -163,13 +163,12 @@ export default function DocumentsView() {
 
       if (analyzeResponse.ok && analyzeData.summary) {
         // Update document with summary and notes using centralized note creation
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
         const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
             const baseSource = note.source ? {
-              type: note.source.type as any,
+              type: note.source.type as any, // Type comes from API, needs runtime validation
               url: note.source.url,
               documentName: note.source.documentName || uploadData.fileName,
               originatingMessage: note.source.originatingMessage || `Analyzed document: ${uploadData.fileName}`,
@@ -186,7 +185,7 @@ export default function DocumentsView() {
             
             return createNote({
               content: note.content,
-              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              category: validateCategory(note.category),
               source: baseSource,
               context: note.context || {},
               confidence: note.confidence,
@@ -259,13 +258,12 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
         const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
             const baseSource = note.source ? {
-              type: note.source.type as any,
+              type: note.source.type as any, // Type comes from API, needs runtime validation
               url: note.source.url,
               documentName: note.source.documentName || newDocument.fileName,
               originatingMessage: note.source.originatingMessage || `Analyzed pasted document: ${newDocument.fileName}`,
@@ -282,7 +280,7 @@ export default function DocumentsView() {
             
             return createNote({
               content: note.content,
-              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              category: validateCategory(note.category),
               source: baseSource,
               context: note.context || {},
               confidence: note.confidence,
@@ -428,13 +426,12 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
         const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
             const baseSource = note.source ? {
-              type: note.source.type as any,
+              type: note.source.type as any, // Type comes from API, needs runtime validation
               url: note.source.url,
               documentName: note.source.documentName || newDocument.fileName,
               originatingMessage: note.source.originatingMessage || `Analyzed AI-generated document: ${newDocument.fileName}`,
@@ -451,7 +448,7 @@ export default function DocumentsView() {
             
             return createNote({
               content: note.content,
-              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              category: validateCategory(note.category),
               source: baseSource,
               context: note.context || {},
               confidence: note.confidence,
@@ -774,13 +771,12 @@ IMPORTANT:
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
         const analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
             const baseSource = note.source ? {
-              type: note.source.type as any,
+              type: note.source.type as any, // Type comes from API, needs runtime validation
               url: note.source.url,
               documentName: note.source.documentName || selectedDocument.fileName,
               originatingMessage: note.source.originatingMessage || `Re-analyzed document: ${selectedDocument.fileName}`,
@@ -797,7 +793,7 @@ IMPORTANT:
             
             return createNote({
               content: note.content,
-              category: validCategories.includes(note.category) ? note.category as any : 'other',
+              category: validateCategory(note.category),
               source: baseSource,
               context: note.context || {},
               confidence: note.confidence,
