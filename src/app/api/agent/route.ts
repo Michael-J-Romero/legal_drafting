@@ -276,8 +276,10 @@ export async function POST(request: Request) {
       model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
-    // Detect if using a reasoning model (o1, o1-preview, o1-mini)
-    const isReasoningModel = agentSettings.model.toLowerCase().includes('o1');
+    // Detect if using a reasoning model (o1-preview, o1-mini, o1)
+    // These models have internal reasoning that counts against turn limits
+    const REASONING_MODELS = ['o1-preview', 'o1-mini', 'o1'];
+    const isReasoningModel = REASONING_MODELS.includes(agentSettings.model);
     console.log(`[MODEL] Using model: ${agentSettings.model}, isReasoningModel: ${isReasoningModel}`);
 
     // Get context manager instance with configured context window
