@@ -276,6 +276,12 @@ export async function POST(request: Request) {
       model: settings?.model ?? 'gpt-4o-2024-11-20'
     };
 
+    // Detect if we're using a reasoning model (GPT-5, o1 series)
+    // These models have their own internal reasoning and should be orchestrated differently
+    const isReasoningModel = agentSettings.model.includes('gpt-5') || 
+                            agentSettings.model.includes('o1') ||
+                            agentSettings.model.includes('o3');
+
     // Get context manager instance with configured context window
     const ctxManager = new ContextManager(agentSettings.contextWindowSize);
     
@@ -383,7 +389,29 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
       ? 'Provide comprehensive explanations with detailed reasoning.'
       : 'Balance conciseness with clarity - 2-3 sentences per phase.';
     
-    const agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
+    // Different instructions for reasoning models vs regular models
+    // Reasoning models (GPT-5, o1) have their own internal reasoning, so we simplify the instructions
+    // and do step-by-step orchestration on our end
+    let agentInstructions: string;
+    
+    if (isReasoningModel) {
+      // For reasoning models: simplified instructions for single-step tasks
+      // The orchestration logic will call this multiple times for different phases
+      agentInstructions = `You are a research assistant. Use your reasoning capabilities to help answer the user's question.
+
+**Tools Available:**
+- search_web: Search the web for information (returns AI-generated summary + top 3 results)
+- browse: Fetch content from a specific URL (returns optimized, relevant content)
+
+**Your Task:**
+Respond to the user's query in a clear, well-structured way. If you need to research something, use the tools available. Include source citations when relevant.
+
+**Important:** Focus on providing thorough, detailed responses with specific information - dates, names, locations, requirements, deadlines, etc. These details will be automatically captured as notes for the user.
+
+Keep responses under ${agentSettings.maxResponseLength} characters.`;
+    } else {
+      // For regular models: detailed multi-phase instructions
+      agentInstructions = `You are a research assistant that shows transparent reasoning. Structure responses with these phases:
 
 🤔 **THINKING:** Analyze the question, plan your approach (${verbosityGuidance})
 🔍 **RESEARCH:** Use tools, explain what you're searching for. Note: Tools return pre-optimized summaries to save tokens - you receive only relevant info, not full pages. (${agentSettings.summaryMode === 'brief' ? 'mention key findings very briefly' : agentSettings.summaryMode === 'detailed' ? 'describe findings in detail' : 'concisely mention key findings'})
@@ -413,6 +441,7 @@ ${relevantResearch ? `[Research Context]\n${relevantResearch}\n\n` : ''}Query: $
 - Keep total response under ${agentSettings.maxResponseLength} characters
 
 Always use the emoji markers to help users follow your thinking.`;
+    }
 
     // Calculate system instructions tokens
     contextBreakdown.systemInstructionsTokens = estimateTokens(agentInstructions);
@@ -451,9 +480,17 @@ Always use the emoji markers to help users follow your thinking.`;
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // For reasoning models, increase maxTurns significantly or remove the limit
+          // This allows the model to do its own internal reasoning without hitting the turn limit
+          // For regular models, use a moderate maxTurns limit
+          const maxTurns = isReasoningModel ? 100 : 25;
+          
+          console.log(`[AGENT] Using maxTurns: ${maxTurns} (reasoning model: ${isReasoningModel})`);
+          
           // Run the agent with streaming
           const result = await run(agent, inputText, {
             stream: true,
+            maxTurns: maxTurns,
           });
 
           // Accumulate full response for context extraction
