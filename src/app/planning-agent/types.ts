@@ -43,6 +43,9 @@ export interface TokenUsage {
   outputTokens: number;
   totalTokens: number;
   breakdown?: any;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+  reasoningSummary?: string;
 }
 
 export interface Message {

@@ -30,8 +30,9 @@ interface UsageData {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  inputTokensDetails?: Array<Record<string, number>>;
-  outputTokensDetails?: Array<Record<string, number>>;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+  reasoningSummary?: string;
 }
 
 // Helper function to estimate tokens from text
@@ -561,8 +562,15 @@ Always use the emoji markers to help users follow your thinking.`;
                     totalTokens: rawUsage.total_tokens || 0,
                     inputTokensDetails: rawUsage.input_tokens_details,
                     outputTokensDetails: rawUsage.output_tokens_details,
+                    reasoningSummary: eventData.response.reasoning_summary,
                   };
                   console.log('[BACKEND] ✅ Usage data captured from response.completed:', JSON.stringify(usageData, null, 2));
+                  if (usageData.outputTokensDetails) {
+                    console.log('[BACKEND] 📊 Output token details:', JSON.stringify(usageData.outputTokensDetails, null, 2));
+                  }
+                  if (usageData.reasoningSummary) {
+                    console.log('[BACKEND] 🧠 Reasoning summary:', usageData.reasoningSummary);
+                  }
                 }
                 
                 // Accumulate text chunks for later processing
@@ -602,10 +610,17 @@ Always use the emoji markers to help users follow your thinking.`;
                 inputTokens: lastResponse.usage.inputTokens || 0,
                 outputTokens: lastResponse.usage.outputTokens || 0,
                 totalTokens: lastResponse.usage.totalTokens || 0,
-                inputTokensDetails: lastResponse.usage.inputTokensDetails,
-                outputTokensDetails: lastResponse.usage.outputTokensDetails,
+                inputTokensDetails: lastResponse.usage.inputTokensDetails as any,
+                outputTokensDetails: lastResponse.usage.outputTokensDetails as any,
+                reasoningSummary: (lastResponse as any).reasoningSummary || (lastResponse as any).reasoning_summary,
               };
               console.log('[BACKEND] ✅ Usage data extracted from rawResponses:', JSON.stringify(usageData, null, 2));
+              if (usageData.outputTokensDetails) {
+                console.log('[BACKEND] 📊 Output token details:', JSON.stringify(usageData.outputTokensDetails, null, 2));
+              }
+              if (usageData.reasoningSummary) {
+                console.log('[BACKEND] 🧠 Reasoning summary:', usageData.reasoningSummary);
+              }
             }
           }
           

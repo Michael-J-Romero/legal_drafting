@@ -124,6 +124,7 @@ interface TokenUsage {
   inputTokensDetails?: Record<string, number>;
   outputTokensDetails?: Record<string, number>;
   breakdown?: TokenUsageBreakdown;
+  reasoningSummary?: string;
 }
 
 interface Message {
@@ -1802,6 +1803,57 @@ export default function PlanningAgentPage() {
                         <span>Total:</span>
                         <span style={{ fontWeight: 600, color: '#059669' }}>{message.usage.totalTokens.toLocaleString()} tokens</span>
                       </div>
+                      
+                      {/* Output Token Details */}
+                      {message.usage.outputTokensDetails && (
+                        <details style={{ marginTop: 8, cursor: 'pointer' }}>
+                          <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>📤 Output Token Details</summary>
+                          <div style={{ marginTop: 6, paddingLeft: 12, fontSize: 11 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', color: '#6b7280' }}>
+                              {message.usage.outputTokensDetails.reasoning_tokens !== undefined && (
+                                <>
+                                  <span>Reasoning:</span>
+                                  <span style={{ fontWeight: 600, color: '#7c3aed' }}>
+                                    {message.usage.outputTokensDetails.reasoning_tokens.toLocaleString()} tokens
+                                  </span>
+                                </>
+                              )}
+                              {message.usage.outputTokensDetails.text_tokens !== undefined && (
+                                <>
+                                  <span>Text:</span>
+                                  <span style={{ fontWeight: 600, color: '#059669' }}>
+                                    {message.usage.outputTokensDetails.text_tokens.toLocaleString()} tokens
+                                  </span>
+                                </>
+                              )}
+                              {message.usage.outputTokensDetails.audio_tokens !== undefined && (
+                                <>
+                                  <span>Audio:</span>
+                                  <span style={{ fontWeight: 600, color: '#2563eb' }}>
+                                    {message.usage.outputTokensDetails.audio_tokens.toLocaleString()} tokens
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            {message.usage.outputTokensDetails.reasoning_tokens !== undefined && (
+                              <div style={{ marginTop: 6, padding: 4, backgroundColor: '#f3e8ff', borderRadius: 4, fontSize: 9, color: '#6b21a8' }}>
+                                🧠 Reasoning tokens represent internal "thinking" by the model before generating the response
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      )}
+                      
+                      {/* Reasoning Summary */}
+                      {message.usage.reasoningSummary && (
+                        <details style={{ marginTop: 8, cursor: 'pointer' }}>
+                          <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>🧠 Reasoning Summary</summary>
+                          <div style={{ marginTop: 6, paddingLeft: 12, fontSize: 11, color: '#6b7280', whiteSpace: 'pre-wrap' }}>
+                            {message.usage.reasoningSummary}
+                          </div>
+                        </details>
+                      )}
+                      
                       {message.usage.breakdown && (
                         <details style={{ marginTop: 8, cursor: 'pointer' }}>
                           <summary style={{ fontWeight: 600, color: '#374151', fontSize: 11 }}>📋 Input Breakdown</summary>
