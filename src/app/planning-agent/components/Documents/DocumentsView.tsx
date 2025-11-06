@@ -82,7 +82,14 @@ export default function DocumentsView() {
         const parsed = JSON.parse(raw) as StoredDocument[];
         const hydrated = hydrateDocuments(parsed);
         setDocuments(hydrated);
-        if (hydrated.length > 0) {
+        
+        // Check if there's a selected document ID from navigation
+        const preSelectedId = typeof window !== 'undefined' ? localStorage.getItem('selectedDocumentId') : null;
+        if (preSelectedId && hydrated.some(d => d.id === preSelectedId)) {
+          setSelectedDocumentId(preSelectedId);
+          // Clear the stored ID after using it
+          localStorage.removeItem('selectedDocumentId');
+        } else if (hydrated.length > 0) {
           setSelectedDocumentId(hydrated[0].id);
         }
       }
@@ -95,6 +102,23 @@ export default function DocumentsView() {
       setDocuments([]);
     }
   }, []);
+
+  // Listen for document selection events from notes
+  useEffect(() => {
+    const handleSelectDocument = (event: CustomEvent) => {
+      const { documentId } = event.detail;
+      if (documentId && documents.some(d => d.id === documentId)) {
+        setSelectedDocumentId(documentId);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('selectDocument', handleSelectDocument as EventListener);
+      return () => {
+        window.removeEventListener('selectDocument', handleSelectDocument as EventListener);
+      };
+    }
+  }, [documents]);
 
   // Persist documents to localStorage when they change
   useEffect(() => {

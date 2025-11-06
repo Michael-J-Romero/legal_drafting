@@ -12,6 +12,7 @@ interface NotesViewProps {
   setNotes?: (notes: Note[]) => void;
   notesGraph?: any;
   setNotesGraph?: (graph: any) => void;
+  onNoteClick?: (note: Note) => void; // Callback when a note is clicked
 }
 
 interface Contradiction {
@@ -59,12 +60,17 @@ export default function NotesView({
   setNotes,
   notesGraph,
   setNotesGraph,
+  onNoteClick,
 }: NotesViewProps) {
   const [isRefining, setIsRefining] = useState(false);
   const [isGraphing, setIsGraphing] = useState(false);
   const [refinementResult, setRefinementResult] = useState<RefinementResult | null>(null);
   const [showGraph, setShowGraph] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Filter states
+  const [filterSource, setFilterSource] = useState<string>('all');
+  const [filterContext, setFilterContext] = useState<string>('all');
 
   const handleRefineNotes = async () => {
     if (notes.length === 0) {
@@ -140,6 +146,36 @@ export default function NotesView({
     }
   };
 
+  // Filter notes based on selected filters
+  const filteredNotes = notes.filter((note) => {
+    // Source filter
+    if (filterSource !== 'all' && note.source.type !== filterSource) {
+      return false;
+    }
+    
+    // Context filter
+    if (filterContext !== 'all') {
+      const context = note.context;
+      switch (filterContext) {
+        case 'who':
+          return context.who && context.who.length > 0;
+        case 'what':
+          return context.what && context.what.trim().length > 0;
+        case 'when':
+          return context.when && context.when.trim().length > 0;
+        case 'where':
+          return context.where && context.where.trim().length > 0;
+        default:
+          return true;
+      }
+    }
+    
+    return true;
+  });
+
+  // Get unique source types from notes
+  const sourceTypes = Array.from(new Set(notes.map(n => n.source.type)));
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
       <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
@@ -182,9 +218,59 @@ export default function NotesView({
             </button>
           </div>
         </div>
-        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
+        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4, marginBottom: 12 }}>
           AI-extracted notes with full context from your conversations
         </p>
+        
+        {/* Filter Controls */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Filter by Source:</label>
+            <select
+              value={filterSource}
+              onChange={(e) => setFilterSource(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #d1d5db',
+                borderRadius: 6,
+                fontSize: 13,
+                backgroundColor: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Sources</option>
+              {sourceTypes.map((type) => (
+                <option key={type} value={type}>{formatSourceType(type)}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Filter by Context:</label>
+            <select
+              value={filterContext}
+              onChange={(e) => setFilterContext(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #d1d5db',
+                borderRadius: 6,
+                fontSize: 13,
+                backgroundColor: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Context</option>
+              <option value="who">Has Who</option>
+              <option value="what">Has What</option>
+              <option value="when">Has When</option>
+              <option value="where">Has Where</option>
+            </select>
+          </div>
+          
+          <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 'auto' }}>
+            Showing {filteredNotes.length} of {notes.length} notes
+          </div>
+        </div>
       </div>
 
       {/* Error Message */}
@@ -405,16 +491,25 @@ export default function NotesView({
 
       {/* Notes List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-        {notes.length === 0 ? (
+        {filteredNotes.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#9ca3af', padding: 40, fontSize: 14 }}>
-            <p style={{ fontSize: 16, marginBottom: 10 }}>No notes yet</p>
-            <p>The AI will create notes as you chat about dates, documents, goals, etc.</p>
+            {notes.length === 0 ? (
+              <>
+                <p style={{ fontSize: 16, marginBottom: 10 }}>No notes yet</p>
+                <p>The AI will create notes as you chat about dates, documents, goals, etc.</p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 16, marginBottom: 10 }}>No notes match the selected filters</p>
+                <p>Try adjusting your filters to see more notes</p>
+              </>
+            )}
           </div>
         ) : (
           <>
             {/* Group notes by category */}
             {['goals', 'dates', 'deadlines', 'documents', 'requirements', 'places', 'people', 'other'].map((category) => {
-              const categoryNotes = notes.filter((n) => n.category === category);
+              const categoryNotes = filteredNotes.filter((n) => n.category === category);
               if (categoryNotes.length === 0) return null;
 
               return (
@@ -432,6 +527,7 @@ export default function NotesView({
                   {categoryNotes.map((note) => (
                     <div
                       key={note.id}
+                      onClick={() => onNoteClick && onNoteClick(note)}
                       style={{
                         marginBottom: 10,
                         padding: 12,
@@ -440,6 +536,19 @@ export default function NotesView({
                         borderRadius: 6,
                         position: 'relative',
                         transition: 'all 0.3s ease',
+                        cursor: onNoteClick ? 'pointer' : 'default',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (onNoteClick) {
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.1)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (onNoteClick) {
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }
                       }}
                     >
                       <div style={{ fontSize: 14, color: '#111827', marginBottom: 6, lineHeight: 1.5 }}>
@@ -459,9 +568,13 @@ export default function NotesView({
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ fontSize: 10, color: '#9ca3af' }}>
                           {formatSourceType(note.source.type)} • {new Date(note.updatedAt).toLocaleDateString()}
+                          {onNoteClick && <span style={{ marginLeft: 8, color: '#3b82f6' }}>→ Click to view source</span>}
                         </div>
                         <button
-                          onClick={() => deleteNote(note.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteNote(note.id);
+                          }}
                           style={{
                             padding: '2px 8px',
                             backgroundColor: 'transparent',

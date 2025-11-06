@@ -767,6 +767,31 @@ export default function PlanningAgentPage() {
     );
   }
 
+  // Handle note click - navigate to the source
+  function handleNoteClick(note: Note) {
+    const sourceType = note.source.type;
+    const metadata = note.source.metadata;
+    
+    if (sourceType === 'document' && metadata?.documentId) {
+      // Navigate to documents tab and select the document
+      setActiveTab('documents');
+      // The DocumentsView will need to receive the documentId to select
+      // For now, we'll store it in a way DocumentsView can access
+      // We'll use localStorage or a ref to pass this information
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('selectedDocumentId', metadata.documentId as string);
+        // Trigger a custom event to notify DocumentsView
+        window.dispatchEvent(new CustomEvent('selectDocument', { detail: { documentId: metadata.documentId } }));
+      }
+    } else if (sourceType === 'agent_ai' || sourceType === 'user_prompt' || sourceType === 'conversation') {
+      // Navigate back to main chat
+      setActiveTab('main-chat');
+    } else if (sourceType === 'website' && note.source.url) {
+      // Open the URL in a new tab
+      window.open(note.source.url, '_blank');
+    }
+  }
+
   // Intelligent note extraction using AI analysis with enhanced context
   async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[], userMessage?: string): Promise<Note[]> {
     try {
@@ -2045,6 +2070,7 @@ export default function PlanningAgentPage() {
           setNotes={setActiveChatNotes}
           notesGraph={notesGraph}
           setNotesGraph={setActiveChatGraph}
+          onNoteClick={handleNoteClick}
         />
       )}
 
