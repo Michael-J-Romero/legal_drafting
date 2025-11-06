@@ -4,9 +4,26 @@ This guide explains the enhanced agent capabilities that make your chat act more
 
 ## Overview
 
-The planning agent now demonstrates advanced reasoning capabilities with transparent "inner dialogue" and **iterative structured thinking** processes. Instead of just providing answers, the agent shows you exactly how it thinks, plans, researches, reflects on confidence, and iterates until it arrives at a solid conclusion with no logic holes.
+The planning agent demonstrates advanced reasoning capabilities with transparent "inner dialogue" and structured thinking processes. The reasoning approach adapts based on the AI model being used to provide optimal performance.
 
-## Key Features
+## Model-Specific Behavior
+
+### Standard Models (GPT-4o, GPT-4 Turbo, GPT-3.5)
+
+These models use an **explicit multi-phase approach** with visible reasoning steps, making the thought process transparent through structured phases.
+
+### Reasoning Models (o1, o1-preview, o1-mini)
+
+These models leverage **native reasoning capabilities** and work more efficiently with:
+- Streamlined prompts that don't force specific phases
+- Higher turn limits (50 vs 25) to accommodate internal reasoning
+- Natural integration of research and tool usage
+- More efficient token usage
+- Elimination of "max turns exceeded" errors
+
+The system automatically detects your selected model and applies the appropriate strategy.
+
+## Key Features (Standard Models)
 
 ### 1. Iterative Reasoning Process
 
