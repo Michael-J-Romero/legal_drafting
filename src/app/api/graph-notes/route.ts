@@ -30,81 +30,39 @@ export async function POST(request: Request) {
     }
 
     // Build the prompt for graph conversion
-    const graphPrompt = `You are an expert at structuring legal case information into hierarchical JSON graphs. Convert the following notes into a well-organized graph structure.
+    const graphPrompt = `You are an expert at organizing information into hierarchical graph structures. Analyze the following notes and create a logical, context-aware graph structure.
 
-${existingGraph ? `EXISTING GRAPH (merge intelligently with this):
+${existingGraph ? `EXISTING GRAPH (intelligently merge new notes into this structure):
 ${JSON.stringify(existingGraph, null, 2)}
 ` : ''}
 
-NOTES TO CONVERT:
-${notes.map((n: Note, idx: number) => `[${idx}] [${n.category}] ${n.content}`).join('\n')}
+NOTES TO ORGANIZE:
+${notes.map((n: Note, idx: number) => `[${idx}] ${n.content}`).join('\n')}
 
 INSTRUCTIONS:
-1. Create a hierarchical JSON structure organizing all information
-2. Use dot notation for cross-references to avoid repetition (e.g., "belongs_to": "case.parties.plaintiff")
-3. Group related information logically
-4. Common top-level categories: case, parties, events, evidence, documents, drafts
-5. Use arrays for lists of similar items
-6. Preserve all specific details from the notes
-${existingGraph ? '7. Intelligently merge with existing graph - add new data, update existing nodes, restructure if needed' : ''}
+1. Analyze the FULL CONTEXT of each note to understand what it represents
+2. Look at ALL notes together to identify natural groupings and relationships
+3. DO NOT force notes into predefined categories - let the content guide the structure
+4. For each note, decide where it best fits in the graph based on its meaning and relationship to other notes:
+   - If it relates to existing nodes, add it there
+   - If it represents a new concept, create a new branch for it
+   - Empty branches or singleton nodes are perfectly fine
+5. Create a hierarchical structure that reflects the natural relationships in the data
+6. Use arrays for collections of similar items
+7. Use dot notation references for cross-references (e.g., "@parent.child.item")
+8. Connect each note to the most relevant part of the tree, even if it means creating new top-level categories
+9. Preserve all specific details from each note
+${existingGraph ? '10. When merging with existing graph:\n   - Add new information to appropriate existing nodes\n   - Create new branches where needed\n   - Restructure if it improves organization\n   - Never remove existing information unless it\'s truly redundant' : ''}
 
-EXAMPLE STRUCTURE (adapt to the actual notes):
-{
-  "case": {
-    "jurisdiction": {
-      "court": "Superior Court",
-      "location": "Los Angeles",
-      "address": "123 Main St"
-    },
-    "parties": {
-      "plaintiff": {
-        "name": "John Doe",
-        "type": "individual"
-      },
-      "defendant": {
-        "name": "Acme Corp",
-        "type": "corporation"
-      }
-    },
-    "events": {
-      "hearings": [
-        {
-          "id": "motion_to_compel",
-          "title": "Motion to Compel",
-          "date": "2024-03-15",
-          "summary": "Discovery dispute regarding financial records",
-          "documents": ["@documents.motion_to_compel", "@documents.opposition_motion_to_compel"]
-        }
-      ]
-    },
-    "evidence": [
-      {
-        "id": "bank_statements",
-        "type": "financial",
-        "date_range": "2023-01-01 to 2023-12-31",
-        "belongs_to": "case.parties.plaintiff"
-      }
-    ]
-  },
-  "documents": {
-    "motion_to_compel": {
-      "title": "Motion to Compel Discovery",
-      "date_filed": "2024-02-01",
-      "summary": "Requesting court order for document production",
-      "drafts": [
-        {"version": "v1", "date": "2024-01-15"},
-        {"version": "v2", "date": "2024-01-25"}
-      ]
-    },
-    "opposition_motion_to_compel": {
-      "title": "Opposition to Motion to Compel",
-      "date_filed": "2024-02-10"
-    }
-  }
-}
+APPROACH:
+- First, identify what concepts/entities are mentioned across all notes
+- Group related notes by their semantic meaning, not by predefined categories
+- Build a hierarchy that makes sense for THIS specific set of notes
+- The structure should emerge naturally from the content
 
 RESPONSE FORMAT (JSON only):
-Return ONLY the complete graph JSON structure, no other text.`;
+Return ONLY the complete graph JSON structure, no other text. The structure should be a nested JSON object where keys represent concepts/entities and values contain the related information.`;
+
 
     // Call OpenAI API for graph conversion
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -118,7 +76,7 @@ Return ONLY the complete graph JSON structure, no other text.`;
         messages: [
           {
             role: 'system',
-            content: 'You are an expert at structuring legal case information into hierarchical JSON graphs. Create well-organized, logical structures with cross-references using dot notation. Return only valid JSON.'
+            content: 'You are an expert at analyzing information and creating logical hierarchical structures. Build graphs that emerge naturally from the content, not from predefined templates. Focus on semantic relationships and context. Return only valid JSON.'
           },
           {
             role: 'user',

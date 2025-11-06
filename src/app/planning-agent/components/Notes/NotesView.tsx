@@ -10,6 +10,8 @@ interface NotesViewProps {
   rejectPendingNote: (noteId: string) => void;
   deleteNote: (noteId: string) => void;
   setNotes?: (notes: Note[]) => void;
+  notesGraph?: any;
+  setNotesGraph?: (graph: any) => void;
 }
 
 interface Contradiction {
@@ -42,11 +44,12 @@ export default function NotesView({
   rejectPendingNote,
   deleteNote,
   setNotes,
+  notesGraph,
+  setNotesGraph,
 }: NotesViewProps) {
   const [isRefining, setIsRefining] = useState(false);
   const [isGraphing, setIsGraphing] = useState(false);
   const [refinementResult, setRefinementResult] = useState<RefinementResult | null>(null);
-  const [notesGraph, setNotesGraph] = useState<NotesGraph | null>(null);
   const [showGraph, setShowGraph] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -112,7 +115,7 @@ export default function NotesView({
 
       const data = await response.json();
       
-      if (data.graph) {
+      if (data.graph && setNotesGraph) {
         setNotesGraph(data.graph);
         setShowGraph(true);
       }
