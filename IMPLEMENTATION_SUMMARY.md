@@ -1,5 +1,27 @@
 # Implementation Summary: Agent-like Chat with Inner Dialogue
 
+## Recent Update: Reasoning Model Support (GPT-5, o1 Series)
+
+### Problem
+When using reasoning models (GPT-5, o1-preview, o1-mini), the system was hitting a "Max turns (10) exceeded" error. This happened because:
+- Reasoning models have their own internal reasoning process
+- Each internal reasoning step counts as a "turn" in the OpenAI Agents SDK
+- The multi-phase instructions (THINKING → RESEARCH → SYNTHESIS → ANSWER) were forcing many turns
+- The default maxTurns limit of 10 was too low
+
+### Solution Implemented
+1. **Model Detection**: Automatically detect when using reasoning models (GPT-5, o1, o3)
+2. **Increased Turn Limit**: Set maxTurns to 100 for reasoning models (vs 25 for regular models)
+3. **Simplified Instructions**: For reasoning models, use simplified instructions that don't force a specific multi-phase structure
+4. **Native Reasoning**: Let reasoning models use their own internal reasoning capabilities instead of forcing our structure
+
+### Code Changes
+- Added `isReasoningModel` detection in `/src/app/api/agent/route.ts`
+- Created separate instruction sets for reasoning vs regular models
+- Pass appropriate `maxTurns` value to the OpenAI Agents SDK `run()` function
+
+## Original Implementation: Agent-like Chat with Inner Dialogue
+
 ## Problem Statement
 The user wanted to make their chat act more like an agent with:
 - Organized thoughts

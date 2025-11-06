@@ -11,6 +11,7 @@ An AI-powered research assistant that works like GitHub Copilot Agent or ChatGPT
 - **Inner Dialogue**: Visible planning, decision-making, and self-questioning
 - **Web Research**: Search and browse capabilities with source citations
 - **Visual Indicators**: Color-coded sections for each reasoning phase
+- **Reasoning Model Support**: Optimized for GPT-5 and o1 series models with native reasoning capabilities
 
 ### 📄 Document Creator
 Tools for legal document drafting and management.

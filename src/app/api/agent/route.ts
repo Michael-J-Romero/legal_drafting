@@ -277,10 +277,21 @@ export async function POST(request: Request) {
     };
 
     // Detect if we're using a reasoning model (GPT-5, o1 series)
-    // These models have their own internal reasoning and should be orchestrated differently
+    // These models have their own internal reasoning capabilities:
+    // - They do their own "thinking" and "reasoning" internally
+    // - Each internal reasoning step counts as a "turn" in the OpenAI Agents SDK
+    // - The default maxTurns of 10 is too low, causing "Max turns exceeded" errors
+    // 
+    // Solution:
+    // - Increase maxTurns to 100 to accommodate their internal reasoning process
+    // - Simplify agent instructions to avoid forcing multi-phase structure
+    // - Let the model use its own reasoning to determine the best approach
     const isReasoningModel = agentSettings.model.includes('gpt-5') || 
                             agentSettings.model.includes('o1') ||
                             agentSettings.model.includes('o3');
+
+    console.log(`[MODEL] Using model: ${agentSettings.model}`);
+    console.log(`[MODEL] Is reasoning model: ${isReasoningModel}`);
 
     // Get context manager instance with configured context window
     const ctxManager = new ContextManager(agentSettings.contextWindowSize);
