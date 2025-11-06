@@ -1,4 +1,7 @@
 // Shared types for the planning agent
+// Note: Note and StoredNote types are now in ./notes module
+
+import type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext } from './notes';
 
 export interface ModelConfig {
   name: string;
@@ -43,6 +46,9 @@ export interface TokenUsage {
   outputTokens: number;
   totalTokens: number;
   breakdown?: any;
+  inputTokensDetails?: Record<string, number>;
+  outputTokensDetails?: Record<string, number>;
+  reasoningSummary?: string;
 }
 
 export interface Message {
@@ -61,49 +67,8 @@ export interface StoredMessage {
   usage?: TokenUsage;
 }
 
-export interface Note {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: Date;
-  updatedAt: Date;
-  isPending?: boolean;
-  isNew?: boolean;
-  documentId?: string; // Optional: associates note with a document
-}
-
-export interface StoredNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: string;
-  updatedAt: string;
-  documentId?: string;
-}
-
-export interface Document {
-  id: string;
-  fileName: string;
-  fileType: string;
-  size: number;
-  text: string;
-  summary?: string;
-  notes: Note[];
-  uploadedAt: Date;
-  analyzedAt?: Date;
-}
-
-export interface StoredDocument {
-  id: string;
-  fileName: string;
-  fileType: string;
-  size: number;
-  text: string;
-  summary?: string;
-  notes: StoredNote[];
-  uploadedAt: string;
-  analyzedAt?: string;
-}
+// Re-export Note types from notes module for backward compatibility
+export type { Note, StoredNote, NoteCategory, NoteSourceType, NoteSource, NoteContext };
 
 export interface ChatSession {
   id: string;
@@ -112,6 +77,7 @@ export interface ChatSession {
   updatedAt: string;
   messages: Message[];
   notes: Note[];
+  notesGraph?: any; // Hierarchical graph structure generated from notes
 }
 
 export interface StoredChatSession {
@@ -121,6 +87,7 @@ export interface StoredChatSession {
   updatedAt: string;
   messages: StoredMessage[];
   notes: StoredNote[];
+  notesGraph?: any; // Stored graph structure
 }
 
 export type TabView = 'main-chat' | 'notes' | 'plan' | 'documents' | 'goals';
