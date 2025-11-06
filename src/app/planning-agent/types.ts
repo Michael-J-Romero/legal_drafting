@@ -74,7 +74,8 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   messages: Message[];
-  notes: import('./notes').Note[];
+  notes: Note[];
+  notesGraph?: any; // Hierarchical graph structure generated from notes
 }
 
 export interface StoredChatSession {
@@ -83,7 +84,8 @@ export interface StoredChatSession {
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];
-  notes: import('./notes').StoredNote[];
+  notes: StoredNote[];
+  notesGraph?: any; // Stored graph structure
 }
 
 export type TabView = 'main-chat' | 'notes' | 'plan' | 'documents' | 'goals';

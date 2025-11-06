@@ -170,6 +170,7 @@ interface ChatSession {
   updatedAt: string; // ISO
   messages: Message[];
   notes?: Note[]; // Notes/goals for this chat
+  notesGraph?: any; // Hierarchical graph structure generated from notes
 }
 
 interface StoredChatSession {
@@ -179,6 +180,7 @@ interface StoredChatSession {
   updatedAt: string;
   messages: StoredMessage[];
   notes?: StoredNote[];
+  notesGraph?: any; // Stored graph structure
 }
 
 const STORAGE_KEY = 'planningAgentChats';
@@ -431,7 +433,12 @@ function hydrateChats(stored: StoredChatSession[]): ChatSession[] {
       timestamp: new Date(m.timestamp),
       files: m.files?.map(f => ({ ...f, uploadedAt: new Date(f.uploadedAt) }))
     })),
-    notes: (c.notes || []).map(deserializeNote)
+    notes: (c.notes || []).map((n) => ({
+      ...n,
+      createdAt: new Date(n.createdAt),
+      updatedAt: new Date(n.updatedAt)
+    })),
+    notesGraph: c.notesGraph || null
   }));
 }
 
@@ -446,7 +453,14 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
       timestamp: m.timestamp.toISOString(),
       files: m.files?.map(f => ({ ...f, uploadedAt: f.uploadedAt.toISOString() }))
     })),
-    notes: (c.notes || []).map(serializeNote)
+    notes: (c.notes || []).map((n) => ({
+      id: n.id,
+      content: n.content,
+      category: n.category,
+      createdAt: n.createdAt.toISOString(),
+      updatedAt: n.updatedAt.toISOString()
+    })),
+    notesGraph: c.notesGraph || undefined
   }));
 }
 
@@ -553,6 +567,7 @@ export default function PlanningAgentPage() {
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
   const notes = activeChat?.notes ?? [];
+  const notesGraph = activeChat?.notesGraph ?? null;
 
   const totalUsage = useMemo(() => {
     const messagesWithUsage = messages.filter(m => m.usage);
@@ -740,6 +755,108 @@ export default function PlanningAgentPage() {
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
   }
 
+  function setActiveChatNotes(newNotes: Note[]) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notes: newNotes, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  }
+
+  function setActiveChatGraph(newGraph: any) {
+    if (!activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, notesGraph: newGraph, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  }
+
+  // Extract notes from assistant's response using regex (fallback method)
+  function extractNotesFromResponse(content: string): Note[] {
+    const notePattern = /\[NOTE:\s*([^\|]+)\s*\|\s*([^\]]+)\]/gi;
+    const notes: Note[] = [];
+    let match;
+
+    while ((match = notePattern.exec(content)) !== null) {
+      const category = match[1].trim().toLowerCase();
+      const noteContent = match[2].trim();
+
+      // Validate category
+      const validCategories = ['dates', 'places', 'documents', 'people', 'goals', 'deadlines', 'requirements', 'other'];
+      const finalCategory = validCategories.includes(category) ? category : 'other';
+
+      notes.push({
+        id: generateId(),
+        content: noteContent,
+        category: finalCategory,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isPending: true,
+      });
+    }
+
+    return notes;
+  }
+
+  // Client-side heuristics to auto-filter notes when backend doesn't provide confidence levels
+  function assignNoteConfidence(note: any, existingNotes: Note[]): string {
+    const content = note.content?.toLowerCase() || '';
+    const category = note.category?.toLowerCase() || 'other';
+    
+    // Auto-reject criteria: vague, generic, or low-value notes
+    const rejectPatterns = [
+      /^(ok|okay|yes|no|sure|thanks|thank you)\.?$/i,
+      /^(noted|understood|got it|i see)\.?$/i,
+      /^.{1,10}$/,  // Too short (less than 10 chars)
+    ];
+    
+    const vagueWords = ['something', 'things', 'stuff', 'maybe', 'perhaps', 'might', 'possibly'];
+    const hasVagueWords = vagueWords.some(word => content.includes(word));
+    
+    // Check for duplicate or very similar content
+    const isDuplicate = existingNotes.some(existing => {
+      const existingContent = existing.content.toLowerCase();
+      return existingContent === content || 
+             (existingContent.length > 10 && content.includes(existingContent)) ||
+             (content.length > 10 && existingContent.includes(content));
+    });
+    
+    // Auto-reject conditions
+    if (rejectPatterns.some(pattern => pattern.test(content))) {
+      return 'auto-reject';
+    }
+    
+    if (isDuplicate) {
+      return 'auto-reject';
+    }
+    
+    if (content.length < 15 && hasVagueWords) {
+      return 'auto-reject';
+    }
+    
+    // Auto-accept criteria: specific, actionable notes with clear information
+    const hasDate = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.test(content);
+    const hasSpecificInfo = content.length > 30;
+    const isActionableCategory = ['dates', 'deadlines', 'documents', 'people', 'goals', 'requirements'].includes(category);
+    
+    // Strong indicators for auto-accept
+    if (hasDate && category === 'dates') {
+      return 'auto-accept';
+    }
+    
+    if (isActionableCategory && hasSpecificInfo && !hasVagueWords) {
+      return 'auto-accept';
+    }
+    
+    // Default: needs review
+    return 'needs-review';
+  }
 
   // Intelligent note extraction using AI analysis with enhanced context
   async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[], userMessage?: string): Promise<Note[]> {
@@ -2016,6 +2133,9 @@ export default function PlanningAgentPage() {
           acceptPendingNote={acceptPendingNote}
           rejectPendingNote={rejectPendingNote}
           deleteNote={deleteNote}
+          setNotes={setActiveChatNotes}
+          notesGraph={notesGraph}
+          setNotesGraph={setActiveChatGraph}
         />
       )}
 
