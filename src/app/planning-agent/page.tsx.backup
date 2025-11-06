@@ -457,15 +457,7 @@ function dehydrateChats(chats: ChatSession[]): StoredChatSession[] {
   }));
 }
 
-import NotesView from './components/Notes/NotesView';
-import PlanView from './components/Plan/PlanView';
-import DocumentsView from './components/Documents/DocumentsView';
-import GoalsView from './components/Goals/GoalsView';
-
-type TabView = 'main-chat' | 'notes' | 'plan' | 'documents' | 'goals';
-
 export default function PlanningAgentPage() {
-  const [activeTab, setActiveTab] = useState<TabView>('main-chat');
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
@@ -478,6 +470,7 @@ export default function PlanningAgentPage() {
   const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
+  const [showNotesPanel, setShowNotesPanel] = useState(true); // Toggle notes panel visibility
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editedContent, setEditedContent] = useState('');
   
@@ -1211,96 +1204,7 @@ export default function PlanningAgentPage() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      {/* Top Navigation Bar with Tabs */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px', borderBottom: '2px solid #e5e7eb', backgroundColor: '#fff' }}>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button
-            onClick={() => setActiveTab('main-chat')}
-            style={{
-              padding: '8px 20px',
-              backgroundColor: activeTab === 'main-chat' ? '#3b82f6' : 'transparent',
-              color: activeTab === 'main-chat' ? 'white' : '#6b7280',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-              transition: 'all 0.2s',
-            }}
-          >
-            💬 Main Chat
-          </button>
-          <button
-            onClick={() => setActiveTab('notes')}
-            style={{
-              padding: '8px 20px',
-              backgroundColor: activeTab === 'notes' ? '#3b82f6' : 'transparent',
-              color: activeTab === 'notes' ? 'white' : '#6b7280',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-              transition: 'all 0.2s',
-            }}
-          >
-            📝 Notes
-          </button>
-          <button
-            onClick={() => setActiveTab('plan')}
-            style={{
-              padding: '8px 20px',
-              backgroundColor: activeTab === 'plan' ? '#3b82f6' : 'transparent',
-              color: activeTab === 'plan' ? 'white' : '#6b7280',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-              transition: 'all 0.2s',
-            }}
-          >
-            📋 Plan
-          </button>
-          <button
-            onClick={() => setActiveTab('documents')}
-            style={{
-              padding: '8px 20px',
-              backgroundColor: activeTab === 'documents' ? '#3b82f6' : 'transparent',
-              color: activeTab === 'documents' ? 'white' : '#6b7280',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-              transition: 'all 0.2s',
-            }}
-          >
-            📄 Documents
-          </button>
-          <button
-            onClick={() => setActiveTab('goals')}
-            style={{
-              padding: '8px 20px',
-              backgroundColor: activeTab === 'goals' ? '#3b82f6' : 'transparent',
-              color: activeTab === 'goals' ? 'white' : '#6b7280',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-              transition: 'all 0.2s',
-            }}
-          >
-            🎯 Goals
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content Area - show different views based on active tab */}
-      {activeTab === 'main-chat' && (
-        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {/* Sidebar */}
       <aside style={{ width: 280, borderRight: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: 12, borderBottom: '1px solid #e5e7eb', display: 'flex', gap: 8 }}>
@@ -2013,28 +1917,177 @@ export default function PlanningAgentPage() {
           </form>
         </div>
       </main>
-        </div>
+
+      {/* Notes/Goals Panel */}
+      {showNotesPanel && (
+        <aside style={{ width: 320, borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
+          <div style={{ padding: 12, borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
+            <button
+              onClick={() => setShowNotesPanel(false)}
+              style={{ padding: '4px 8px', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: '#6b7280' }}
+              title="Hide panel"
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Pending Notes (waiting for approval) */}
+          {pendingNotes.length > 0 && (
+            <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7' }}>
+              <div style={{ padding: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 8 }}>
+                  ⚠️ New Notes (Review & Accept)
+                </div>
+                {pendingNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    style={{
+                      marginBottom: 8,
+                      padding: 10,
+                      backgroundColor: '#fff',
+                      border: '2px solid #fbbf24',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#92400e', marginBottom: 4 }}>
+                      {note.category.toUpperCase()}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#111827', marginBottom: 8, lineHeight: 1.4 }}>
+                      {note.content}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => acceptPendingNote(note.id)}
+                        style={{
+                          padding: '4px 12px',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✓ Accept
+                      </button>
+                      <button
+                        onClick={() => rejectPendingNote(note.id)}
+                        style={{
+                          padding: '4px 12px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        × Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Notes List */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+            {notes.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#9ca3af', padding: 20, fontSize: 13 }}>
+                No notes yet. The AI will create notes as you chat about dates, documents, goals, etc.
+              </div>
+            ) : (
+              <>
+                {/* Group notes by category */}
+                {['goals', 'dates', 'deadlines', 'documents', 'requirements', 'places', 'people', 'other'].map((category) => {
+                  const categoryNotes = notes.filter((n) => n.category === category);
+                  if (categoryNotes.length === 0) return null;
+
+                  return (
+                    <div key={category} style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8, textTransform: 'uppercase' }}>
+                        {category === 'goals' && '🎯 '}
+                        {category === 'dates' && '📅 '}
+                        {category === 'deadlines' && '⏰ '}
+                        {category === 'documents' && '📄 '}
+                        {category === 'requirements' && '✓ '}
+                        {category === 'places' && '📍 '}
+                        {category === 'people' && '👤 '}
+                        {category}
+                      </div>
+                      {categoryNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          style={{
+                            marginBottom: 8,
+                            padding: 10,
+                            backgroundColor: note.isNew ? '#d1fae5' : '#fff',
+                            border: note.isNew ? '2px solid #10b981' : '1px solid #e5e7eb',
+                            borderRadius: 6,
+                            position: 'relative',
+                            transition: 'all 0.3s ease',
+                          }}
+                        >
+                          <div style={{ fontSize: 13, color: '#111827', marginBottom: 4, lineHeight: 1.4 }}>
+                            {note.content}
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                              {new Date(note.updatedAt).toLocaleDateString()}
+                            </div>
+                            <button
+                              onClick={() => deleteNote(note.id)}
+                              style={{
+                                padding: '2px 6px',
+                                backgroundColor: 'transparent',
+                                color: '#ef4444',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: 12,
+                              }}
+                              title="Delete note"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </aside>
       )}
 
-      {/* Notes Tab */}
-      {activeTab === 'notes' && (
-        <NotesView
-          notes={notes}
-          pendingNotes={pendingNotes}
-          acceptPendingNote={acceptPendingNote}
-          rejectPendingNote={rejectPendingNote}
-          deleteNote={deleteNote}
-        />
+      {/* Show/hide notes panel button (when hidden) */}
+      {!showNotesPanel && (
+        <button
+          onClick={() => setShowNotesPanel(true)}
+          style={{
+            position: 'fixed',
+            right: 20,
+            top: 20,
+            padding: '8px 12px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 13,
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+            zIndex: 100,
+          }}
+        >
+          📝 Show Notes
+        </button>
       )}
-
-      {/* Plan Tab */}
-      {activeTab === 'plan' && <PlanView />}
-
-      {/* Documents Tab */}
-      {activeTab === 'documents' && <DocumentsView />}
-
-      {/* Goals Tab */}
-      {activeTab === 'goals' && <GoalsView />}
     </div>
   );
 }
