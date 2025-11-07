@@ -96,10 +96,17 @@ export default function DocumentsView() {
     if (pathGraphResult.success && pathGraphResult.updatedNotes) {
       console.log('[DocumentsView] Path graph assigned paths to', pathGraphResult.updatedNotes.length, 'notes');
       
+      // Log the path graph data for debugging
+      const pathGraph = loadPathGraph();
+      console.log('[PATH GRAPH DATA] Current graph structure:', JSON.stringify(pathGraph, null, 2));
+      console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
+      console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
+      
       // Update notes with paths from graph
       return notes.map(note => {
         const updatedNote = pathGraphResult.updatedNotes.find(n => n.id === note.id);
         if (updatedNote && updatedNote.path) {
+          console.log('[PATH GRAPH DATA] Note path assigned:', updatedNote.path);
           return { ...note, path: updatedNote.path };
         }
         return note;
@@ -210,10 +217,23 @@ export default function DocumentsView() {
       
       console.log(`[CHUNKED EXTRACTION] Completed! Total notes: ${accumulatedNotes.length}, Questions: ${allQuestions.length}`);
       
-      // Show clarification dialog if there are questions
+      // Show clarification dialog AND add questions to chat
       if (allQuestions.length > 0) {
         setClarificationQuestions(allQuestions);
         setShowClarificationDialog(true);
+        
+        // Add clarification questions to the chat
+        const questionsText = allQuestions.map((q, i) => 
+          `${i + 1}. ${q.question}\n   Context: ${q.context}`
+        ).join('\n\n');
+        
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `I've extracted ${accumulatedNotes.length} notes from the document. I have some clarifying questions to improve accuracy:\n\n${questionsText}\n\nPlease provide answers in the chat, or you can skip these questions.`,
+          timestamp: new Date()
+        }]);
+        
+        console.log('[CLARIFICATIONS] Added', allQuestions.length, 'questions to chat');
       } else {
         // No questions, we're done
         setIsExtractingChunked(false);
@@ -399,11 +419,15 @@ export default function DocumentsView() {
         uploadedAt: new Date(),
       };
 
-      // Add document to list
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
 
-      // Analyze the pasted text
+      // Analyze the pasted text with timeout
+      console.log('[CREATE FROM TEXT] Starting analysis for pasted document');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -412,9 +436,22 @@ export default function DocumentsView() {
           fileName: newDocument.fileName,
           fileType: '.txt',
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[CREATE FROM TEXT] Analysis response:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
         let analyzedNotes: Note[] = (analyzeData.notes || [])
@@ -468,8 +505,21 @@ export default function DocumentsView() {
       setShowCreateDialog(false);
       setPastedText('');
       setDocumentName('');
+      
+      console.log('[CREATE FROM TEXT] Document created successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred while creating document');
+      console.error('[CREATE FROM TEXT] Error:', err);
+      
+      let errorMessage = 'An error occurred while creating document';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. Try with a shorter document.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsAnalyzing(false);
     }
@@ -574,8 +624,13 @@ export default function DocumentsView() {
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
 
-      // Analyze the generated document
+      // Analyze the generated document with timeout
+      console.log('[GENERATE DOCUMENT] Starting analysis for generated document');
       setIsAnalyzing(true);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -584,9 +639,22 @@ export default function DocumentsView() {
           fileName: newDocument.fileName,
           fileType: '.txt',
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[GENERATE DOCUMENT] Analysis response:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
         let analyzedNotes: Note[] = (analyzeData.notes || [])
@@ -634,6 +702,10 @@ export default function DocumentsView() {
               : doc
           )
         );
+        
+        console.log('[GENERATE DOCUMENT] Successfully created and analyzed document');
+      } else {
+        throw new Error('No summary returned from analysis API');
       }
 
       // Close dialog and reset
@@ -641,7 +713,18 @@ export default function DocumentsView() {
       setAiPrompt('');
       setDocumentName('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred while generating document');
+      console.error('[GENERATE DOCUMENT] Error:', err);
+      
+      let errorMessage = 'An error occurred while generating document';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. Try generating a shorter document.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsGenerating(false);
       setIsAnalyzing(false);
@@ -922,9 +1005,15 @@ IMPORTANT:
     if (!selectedDocument) return;
 
     setIsAnalyzing(true);
+    setError('');
+    
+    console.log('[REANALYZE] Starting re-analysis for document:', selectedDocument.fileName);
 
     try {
-      // Re-analyze the updated document
+      // Re-analyze the updated document with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -933,9 +1022,22 @@ IMPORTANT:
           fileName: selectedDocument.fileName,
           fileType: selectedDocument.fileType,
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[REANALYZE] Analysis response received:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
         let analyzedNotes: Note[] = (analyzeData.notes || [])
@@ -989,12 +1091,28 @@ IMPORTANT:
           ...prev,
           [selectedDocument.id]: false
         }));
+        
+        console.log('[REANALYZE] Successfully updated document with summary and', analyzedNotes.length, 'notes');
+      } else {
+        throw new Error('No summary returned from analysis API');
       }
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred during re-analysis');
+      console.error('[REANALYZE] Error:', err);
+      
+      let errorMessage = 'An error occurred during re-analysis';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. The document may be too long. Try breaking it into smaller sections.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsAnalyzing(false);
+      console.log('[REANALYZE] Analysis complete, isAnalyzing set to false');
     }
   };
 
