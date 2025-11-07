@@ -71,6 +71,9 @@ export default function NotesView({
   // Filter states
   const [filterSource, setFilterSource] = useState<string>('all');
   const [filterContext, setFilterContext] = useState<string>('all');
+  
+  // Raw data view state
+  const [viewingRawNote, setViewingRawNote] = useState<Note | null>(null);
 
   const handleRefineNotes = async () => {
     if (notes.length === 0) {
@@ -595,25 +598,46 @@ export default function NotesView({
                         </div>
                       )}
                       
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ fontSize: 10, color: '#9ca3af' }}>
                           {formatSourceType(note.source.type)} • {new Date(note.updatedAt).toLocaleDateString()}
                           {onNoteClick && <span style={{ marginLeft: 8, color: '#3b82f6' }}>→ Click to view source</span>}
                         </div>
-                        <button
-                          onClick={(e) => handleDeleteNote(e, note.id)}
-                          style={{
-                            padding: '2px 8px',
-                            backgroundColor: 'transparent',
-                            color: '#ef4444',
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontSize: 13,
-                          }}
-                          title="Delete note"
-                        >
-                          🗑️
-                        </button>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewingRawNote(note);
+                            }}
+                            style={{
+                              padding: '4px 8px',
+                              backgroundColor: '#3b82f6',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              fontWeight: 600,
+                            }}
+                            title="View raw note data"
+                          >
+                            📊 Raw
+                          </button>
+                          <button
+                            onClick={(e) => handleDeleteNote(e, note.id)}
+                            style={{
+                              padding: '2px 8px',
+                              backgroundColor: 'transparent',
+                              color: '#ef4444',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: 13,
+                            }}
+                            title="Delete note"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -623,6 +647,125 @@ export default function NotesView({
           </>
         )}
       </div>
+
+      {/* Raw Data Modal */}
+      {viewingRawNote && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          right: 0, 
+          bottom: 0, 
+          backgroundColor: 'rgba(0,0,0,0.5)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          zIndex: 1000 
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: 8, 
+            padding: 24, 
+            maxWidth: '90%', 
+            maxHeight: '90%', 
+            overflow: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>📊 Raw Note Data</h3>
+              <button
+                onClick={() => setViewingRawNote(null)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                Close
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Note Content
+              </div>
+              <div style={{ padding: 12, backgroundColor: '#f9fafb', borderRadius: 6, fontSize: 14, lineHeight: 1.5 }}>
+                {viewingRawNote.content}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Hierarchical Path
+              </div>
+              {viewingRawNote.path ? (
+                <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#2563eb', marginBottom: 8 }}>
+                    <strong>Full Path:</strong> {viewingRawNote.path.path}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 8 }}>
+                    <strong>Segments:</strong> {viewingRawNote.path.segments.join(' → ')}
+                  </div>
+                  {viewingRawNote.path.references && viewingRawNote.path.references.length > 0 && (
+                    <div style={{ fontSize: 12, color: '#7c3aed' }}>
+                      <strong>References:</strong>
+                      <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
+                        {viewingRawNote.path.references.map((ref, idx) => (
+                          <li key={idx}>{ref}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: 12, backgroundColor: '#fef3c7', borderRadius: 6, color: '#92400e', fontSize: 13 }}>
+                  No hierarchical path defined
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Complete JSON Data
+              </div>
+              <pre style={{ 
+                fontSize: 11, 
+                backgroundColor: '#1e293b', 
+                color: '#e2e8f0',
+                padding: 16, 
+                borderRadius: 6, 
+                overflow: 'auto',
+                maxHeight: '400px',
+                lineHeight: 1.5
+              }}>
+                {JSON.stringify(viewingRawNote, null, 2)}
+              </pre>
+            </div>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(viewingRawNote, null, 2));
+              }}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              📋 Copy JSON to Clipboard
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
