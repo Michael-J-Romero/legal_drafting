@@ -75,7 +75,10 @@ export interface NotePath {
 
 /**
  * Contextual information (who, what, when, where)
- * @deprecated Use NotePath for more precise location tracking
+ * @deprecated Since v2.0 - Use NotePath for more precise location tracking
+ * Migration: Gradually migrate existing notes to use path-based tracking.
+ * The context field will be maintained for backward compatibility but new notes
+ * should prioritize using the path field for hierarchical organization.
  */
 export interface NoteContext {
   // Who: People, organizations involved

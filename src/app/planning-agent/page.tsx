@@ -18,6 +18,7 @@ import {
   validateCategory,
   NoteSourceType,
 } from './notes';
+import type { StoredDocument } from './types';
 
 interface ModelConfig {
   name: string;
@@ -561,12 +562,12 @@ export default function PlanningAgentPage() {
       try {
         const documentsRaw = typeof window !== 'undefined' ? localStorage.getItem('planningAgentDocuments') : null;
         if (documentsRaw) {
-          const documents = JSON.parse(documentsRaw);
+          const documents = JSON.parse(documentsRaw) as StoredDocument[];
           const allDocNotes: Note[] = [];
           
-          documents.forEach((doc: any) => {
+          documents.forEach((doc) => {
             if (doc.notes && Array.isArray(doc.notes)) {
-              doc.notes.forEach((storedNote: any) => {
+              doc.notes.forEach((storedNote) => {
                 allDocNotes.push(deserializeNote(storedNote));
               });
             }

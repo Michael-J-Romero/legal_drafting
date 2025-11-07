@@ -3,6 +3,14 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 /**
+ * Sanitize filename for use in paths
+ * Converts to lowercase and replaces non-alphanumeric characters with underscores
+ */
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+}
+
+/**
  * API route for analyzing documents - generates summary and extracts notes
  */
 export async function POST(request: Request) {
@@ -17,6 +25,8 @@ export async function POST(request: Request) {
     if (!openaiApiKey) {
       return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
     }
+
+    const sanitizedFileName = sanitizeFilename(fileName || 'unknown');
 
     // Build the prompt for document analysis
     const analysisPrompt = `You are an expert document analyzer. Analyze the following document and provide:
@@ -54,8 +64,8 @@ INSTRUCTIONS:
    - document.motion_to_compel.title
    - document.motion_to_compel.date_filed
    - document.motion_to_compel.summary
-   - document.${fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.title
-   - document.${fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.date
+   - document.${sanitizedFileName}.title
+   - document.${sanitizedFileName}.date
    - evidence.bank_statements.belongs_to (references: ["case.parties.plaintiff"])
    
    Path segments should use underscores instead of spaces and be lowercase.
