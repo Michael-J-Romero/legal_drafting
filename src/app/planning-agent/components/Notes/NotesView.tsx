@@ -440,6 +440,18 @@ export default function NotesView({
                   {note.content}
                 </div>
                 
+                {/* Hierarchical Path */}
+                {note.path && (
+                  <div style={{ fontSize: 11, color: '#2563eb', marginBottom: 8, padding: 6, backgroundColor: '#eff6ff', borderRadius: 4, fontFamily: 'monospace' }}>
+                    <strong>Path:</strong> {note.path.path}
+                    {note.path.references && note.path.references.length > 0 && (
+                      <div style={{ marginTop: 4, color: '#7c3aed' }}>
+                        <strong>References:</strong> {note.path.references.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 {/* Source Information */}
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
                   <div style={{ marginBottom: 4 }}>
@@ -561,7 +573,19 @@ export default function NotesView({
                         {note.content}
                       </div>
                       
-                      {/* Context Information */}
+                      {/* Hierarchical Path */}
+                      {note.path && (
+                        <div style={{ fontSize: 11, color: '#2563eb', marginBottom: 6, padding: 6, backgroundColor: '#eff6ff', borderRadius: 4, fontFamily: 'monospace' }}>
+                          <strong>Path:</strong> {note.path.path}
+                          {note.path.references && note.path.references.length > 0 && (
+                            <div style={{ marginTop: 4, color: '#7c3aed' }}>
+                              <strong>References:</strong> {note.path.references.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Context Information (legacy) */}
                       {(note.context.who || note.context.what || note.context.when || note.context.where) && (
                         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
                           {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}

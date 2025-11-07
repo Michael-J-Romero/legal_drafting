@@ -476,6 +476,7 @@ export default function PlanningAgentPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [documentNotes, setDocumentNotes] = useState<Note[]>([]); // Notes from documents
   const [editedContent, setEditedContent] = useState('');
   
   // Agent settings with defaults
@@ -554,9 +555,56 @@ export default function PlanningAgentPage() {
     return () => window.removeEventListener('click', handleWindowClick);
   }, []);
 
+  // Load document notes from localStorage
+  useEffect(() => {
+    const loadDocumentNotes = () => {
+      try {
+        const documentsRaw = typeof window !== 'undefined' ? localStorage.getItem('planningAgentDocuments') : null;
+        if (documentsRaw) {
+          const documents = JSON.parse(documentsRaw);
+          const allDocNotes: Note[] = [];
+          
+          documents.forEach((doc: any) => {
+            if (doc.notes && Array.isArray(doc.notes)) {
+              doc.notes.forEach((storedNote: any) => {
+                allDocNotes.push(deserializeNote(storedNote));
+              });
+            }
+          });
+          
+          setDocumentNotes(allDocNotes);
+        }
+      } catch (e) {
+        console.error('Failed to load document notes', e);
+      }
+    };
+
+    loadDocumentNotes();
+    
+    // Listen for document updates
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'planningAgentDocuments') {
+        loadDocumentNotes();
+      }
+    };
+    
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageChange);
+      // Also listen for custom event from DocumentsView
+      window.addEventListener('documentsUpdated', loadDocumentNotes as EventListener);
+      
+      return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('documentsUpdated', loadDocumentNotes as EventListener);
+      };
+    }
+  }, []);
+
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
-  const notes = activeChat?.notes ?? [];
+  const chatNotes = activeChat?.notes ?? [];
+  // Aggregate notes from chat and documents
+  const notes = useMemo(() => [...chatNotes, ...documentNotes], [chatNotes, documentNotes]);
   const notesGraph = activeChat?.notesGraph ?? null;
 
   const totalUsage = useMemo(() => {

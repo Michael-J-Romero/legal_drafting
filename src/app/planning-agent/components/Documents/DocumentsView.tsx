@@ -128,6 +128,11 @@ export default function DocumentsView() {
     try {
       const dehydrated = dehydrateDocuments(documents);
       localStorage.setItem(DOCUMENTS_STORAGE_KEY, JSON.stringify(dehydrated));
+      
+      // Dispatch event to notify other components
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('documentsUpdated'));
+      }
     } catch (e) {
       console.error('Failed to save documents to storage', e);
     }
