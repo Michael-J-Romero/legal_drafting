@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Document, StoredDocument, Note } from '../../types';
 import { generateId, formatFileSize } from '../../utils/helpers';
 import { createNote, createDocumentSource, deserializeNote, serializeNote, validateCategory } from '../../notes';
+import { addNotesToPathGraph, loadPathGraph } from '../../pathGraph';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 
@@ -78,6 +79,28 @@ export default function DocumentsView() {
   const [showViewEditsModal, setShowViewEditsModal] = useState(false);
   const [documentHasUnappliedEdits, setDocumentHasUnappliedEdits] = useState<{[docId: string]: boolean}>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Helper function to process notes through path graph
+  const processNotesWithPathGraph = async (notes: Note[]): Promise<Note[]> => {
+    console.log('[DocumentsView] Sending', notes.length, 'notes to path graph API');
+    const pathGraphResult = await addNotesToPathGraph(notes);
+    
+    if (pathGraphResult.success && pathGraphResult.updatedNotes) {
+      console.log('[DocumentsView] Path graph assigned paths to', pathGraphResult.updatedNotes.length, 'notes');
+      
+      // Update notes with paths from graph
+      return notes.map(note => {
+        const updatedNote = pathGraphResult.updatedNotes.find(n => n.id === note.id);
+        if (updatedNote && updatedNote.path) {
+          return { ...note, path: updatedNote.path };
+        }
+        return note;
+      });
+    } else {
+      console.warn('[DocumentsView] Path graph assignment failed:', pathGraphResult.error);
+      return notes;
+    }
+  };
 
   // Load documents from localStorage on mount
   useEffect(() => {
@@ -200,8 +223,8 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        // Update document with summary and notes using centralized note creation
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        // Create initial notes from API response
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
@@ -230,6 +253,9 @@ export default function DocumentsView() {
               confidence: note.confidence,
             });
           });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -297,7 +323,7 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
@@ -326,6 +352,9 @@ export default function DocumentsView() {
               confidence: note.confidence,
             });
           });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -466,7 +495,7 @@ export default function DocumentsView() {
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
@@ -495,6 +524,9 @@ export default function DocumentsView() {
               confidence: note.confidence,
             });
           });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -812,7 +844,7 @@ IMPORTANT:
       const analyzeData = await analyzeResponse.json();
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const analyzedNotes: Note[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
           .map((note: ExtractedNote) => {
             // Use centralized note creation with full context
@@ -841,6 +873,9 @@ IMPORTANT:
               confidence: note.confidence,
             });
           });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
