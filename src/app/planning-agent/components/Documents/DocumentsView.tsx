@@ -80,6 +80,14 @@ export default function DocumentsView() {
   const [documentHasUnappliedEdits, setDocumentHasUnappliedEdits] = useState<{[docId: string]: boolean}>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Chunked extraction states
+  const [isExtractingChunked, setIsExtractingChunked] = useState(false);
+  const [extractionProgress, setExtractionProgress] = useState<{current: number, total: number} | null>(null);
+  const [accumulatedNotes, setAccumulatedNotes] = useState<Note[]>([]);
+  const [clarificationQuestions, setClarificationQuestions] = useState<Array<{question: string, context: string, relatedNotes: number[], answer?: string}>>([]);
+  const [showClarificationDialog, setShowClarificationDialog] = useState(false);
+  const [currentExtractionDocId, setCurrentExtractionDocId] = useState<string | null>(null);
+
   // Helper function to process notes through path graph
   const processNotesWithPathGraph = async (notes: Note[]): Promise<Note[]> => {
     console.log('[DocumentsView] Sending', notes.length, 'notes to path graph API');
@@ -100,6 +108,150 @@ export default function DocumentsView() {
       console.warn('[DocumentsView] Path graph assignment failed:', pathGraphResult.error);
       return notes;
     }
+  };
+
+  // Chunked note extraction with progressive updates
+  const extractNotesChunked = async (documentId: string, text: string, fileName: string, fileType: string) => {
+    setIsExtractingChunked(true);
+    setCurrentExtractionDocId(documentId);
+    setAccumulatedNotes([]);
+    setClarificationQuestions([]);
+    
+    try {
+      let chunkIndex = 0;
+      let hasMoreChunks = true;
+      const allQuestions: any[] = [];
+      
+      console.log('[CHUNKED EXTRACTION] Starting extraction for document:', fileName);
+      
+      while (hasMoreChunks) {
+        setExtractionProgress({ current: chunkIndex + 1, total: -1 }); // -1 means unknown total
+        
+        console.log(`[CHUNKED EXTRACTION] Processing chunk ${chunkIndex + 1}...`);
+        
+        const response = await fetch('/api/extract-notes-chunked', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            fileName,
+            fileType,
+            chunkIndex,
+            mode: 'extract',
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Chunked extraction failed');
+        }
+        
+        const data = await response.json();
+        
+        // Update progress with actual total
+        setExtractionProgress({ current: chunkIndex + 1, total: data.totalChunks });
+        
+        // Process extracted notes from this chunk
+        if (data.notes && data.notes.length > 0) {
+          const chunkNotes: Note[] = data.notes.map((note: ExtractedNote) => {
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              documentName: note.source.documentName || fileName,
+              originatingMessage: note.source.originatingMessage || `Extracted from document: ${fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId },
+            } : createDocumentSource({
+              documentName: fileName,
+              originatingMessage: `Extracted from document: ${fileName}`,
+            });
+            
+            baseSource.metadata = { ...baseSource.metadata, documentId };
+            
+            return createNote({
+              path: note.path,
+              content: note.content,
+              category: validateCategory(note.category),
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
+          
+          // Process through path graph
+          const notesWithPaths = await processNotesWithPathGraph(chunkNotes);
+          
+          // Accumulate notes
+          setAccumulatedNotes(prev => {
+            const updated = [...prev, ...notesWithPaths];
+            
+            // Progressively update the document with accumulated notes
+            setDocuments(docs =>
+              docs.map(doc =>
+                doc.id === documentId
+                  ? { ...doc, notes: updated, analyzedAt: new Date() }
+                  : doc
+              )
+            );
+            
+            return updated;
+          });
+          
+          console.log(`[CHUNKED EXTRACTION] Chunk ${chunkIndex + 1}: Added ${notesWithPaths.length} notes (total: ${chunkNotes.length + (accumulatedNotes.length || 0)})`);
+        }
+        
+        // Collect clarification questions
+        if (data.clarificationQuestions && data.clarificationQuestions.length > 0) {
+          allQuestions.push(...data.clarificationQuestions);
+        }
+        
+        hasMoreChunks = data.hasMoreChunks;
+        chunkIndex++;
+      }
+      
+      console.log(`[CHUNKED EXTRACTION] Completed! Total notes: ${accumulatedNotes.length}, Questions: ${allQuestions.length}`);
+      
+      // Show clarification dialog if there are questions
+      if (allQuestions.length > 0) {
+        setClarificationQuestions(allQuestions);
+        setShowClarificationDialog(true);
+      } else {
+        // No questions, we're done
+        setIsExtractingChunked(false);
+        setExtractionProgress(null);
+        setCurrentExtractionDocId(null);
+      }
+      
+    } catch (error) {
+      console.error('[CHUNKED EXTRACTION] Error:', error);
+      setError(error instanceof Error ? error.message : 'Extraction failed');
+      setIsExtractingChunked(false);
+      setExtractionProgress(null);
+      setCurrentExtractionDocId(null);
+    }
+  };
+
+  // Handle clarification answers
+  const handleClarificationSubmit = async () => {
+    if (!currentExtractionDocId) return;
+    
+    // For now, just close the dialog and finish
+    // In the future, we can send clarifications back to AI to update notes
+    setShowClarificationDialog(false);
+    setIsExtractingChunked(false);
+    setExtractionProgress(null);
+    setCurrentExtractionDocId(null);
+    
+    console.log('[CLARIFICATIONS] User provided clarifications:', clarificationQuestions.filter(q => q.answer));
+  };
+
+  // Skip clarifications
+  const handleSkipClarifications = () => {
+    setShowClarificationDialog(false);
+    setIsExtractingChunked(false);
+    setExtractionProgress(null);
+    setCurrentExtractionDocId(null);
+    
+    console.log('[CLARIFICATIONS] User skipped clarifications');
   };
 
   // Load documents from localStorage on mount
@@ -206,78 +358,20 @@ export default function DocumentsView() {
       // Add document to list
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
+      setIsUploading(false);
 
-      // Step 2: Analyze document (generate summary and notes)
-      setIsAnalyzing(true);
-      
-      const analyzeResponse = await fetch('/api/analyze-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: uploadData.text,
-          fileName: uploadData.fileName,
-          fileType: uploadData.fileType,
-        }),
-      });
-
-      const analyzeData = await analyzeResponse.json();
-
-      if (analyzeResponse.ok && analyzeData.summary) {
-        // Create initial notes from API response
-        let analyzedNotes: Note[] = (analyzeData.notes || [])
-          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => {
-            // Use centralized note creation with full context
-            const baseSource = note.source ? {
-              type: note.source.type as any, // Type comes from API, needs runtime validation
-              url: note.source.url,
-              documentName: note.source.documentName || uploadData.fileName,
-              originatingMessage: note.source.originatingMessage || `Analyzed document: ${uploadData.fileName}`,
-              aiModel: note.source.aiModel || 'gpt-4o-mini',
-              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
-              metadata: { documentId: newDocument.id },
-            } : createDocumentSource({
-              documentName: uploadData.fileName,
-              originatingMessage: `Analyzed document: ${uploadData.fileName}`,
-            });
-            
-            // Ensure metadata is added
-            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
-            
-            return createNote({
-              path: note.path,
-              content: note.content,
-              category: validateCategory(note.category),
-              source: baseSource,
-              context: note.context || {},
-              confidence: note.confidence,
-            });
-          });
-
-        // Process notes through path graph to get hierarchical paths
-        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
-
-        setDocuments((prev) =>
-          prev.map((doc) =>
-            doc.id === newDocument.id
-              ? {
-                  ...doc,
-                  summary: analyzeData.summary,
-                  notes: analyzedNotes,
-                  analyzedAt: new Date(),
-                }
-              : doc
-          )
-        );
-      } else {
-        console.warn('Document analysis failed:', analyzeData.error);
-      }
+      // Step 2: Extract notes using chunked extraction with clarifications
+      await extractNotesChunked(
+        newDocument.id,
+        uploadData.text,
+        uploadData.fileName,
+        uploadData.fileType
+      );
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during upload');
-    } finally {
       setIsUploading(false);
-      setIsAnalyzing(false);
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -934,27 +1028,27 @@ IMPORTANT:
             {/* Primary Create Button */}
             <button
               onClick={() => setShowCreateDialog(true)}
-              disabled={isUploading || isAnalyzing || isGenerating}
+              disabled={isUploading || isAnalyzing || isGenerating || isExtractingChunked}
               style={{
                 width: '100%',
                 padding: '10px 16px',
-                backgroundColor: isUploading || isAnalyzing || isGenerating ? '#d1d5db' : '#10b981',
+                backgroundColor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? '#d1d5db' : '#10b981',
                 color: 'white',
                 border: 'none',
                 borderRadius: 6,
-                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? 'not-allowed' : 'pointer',
                 fontWeight: 600,
                 fontSize: 14,
                 marginBottom: 8,
               }}
             >
-              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : isGenerating ? '✨ Generating...' : '+ Create Document'}
+              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : isGenerating ? '✨ Generating...' : isExtractingChunked ? '📝 Extracting...' : '+ Create Document'}
             </button>
             
             {/* Quick upload shortcut */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading || isAnalyzing || isGenerating}
+              disabled={isUploading || isAnalyzing || isGenerating || isExtractingChunked}
               style={{
                 width: '100%',
                 padding: '8px 12px',
@@ -962,7 +1056,7 @@ IMPORTANT:
                 color: '#6b7280',
                 border: '1px solid #d1d5db',
                 borderRadius: 6,
-                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? 'not-allowed' : 'pointer',
                 fontWeight: 500,
                 fontSize: 13,
               }}
@@ -1865,6 +1959,178 @@ IMPORTANT:
                 }}
               >
                 ✅ Apply These Edits
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chunked Extraction Progress Indicator */}
+      {isExtractingChunked && extractionProgress && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            backgroundColor: '#fff',
+            borderRadius: 12,
+            padding: 20,
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+            minWidth: 300,
+            zIndex: 999,
+          }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              📝 Extracting Notes...
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>
+              {extractionProgress.total > 0
+                ? `Processing chunk ${extractionProgress.current} of ${extractionProgress.total}`
+                : `Processing chunk ${extractionProgress.current}...`}
+            </div>
+          </div>
+          <div style={{ 
+            height: 4, 
+            backgroundColor: '#e5e7eb', 
+            borderRadius: 2,
+            overflow: 'hidden',
+            marginBottom: 8,
+          }}>
+            <div
+              style={{
+                height: '100%',
+                backgroundColor: '#10b981',
+                width: extractionProgress.total > 0 
+                  ? `${(extractionProgress.current / extractionProgress.total) * 100}%`
+                  : '50%',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            {accumulatedNotes.length} notes extracted so far
+          </div>
+        </div>
+      )}
+
+      {/* Clarification Questions Dialog */}
+      {showClarificationDialog && clarificationQuestions.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleSkipClarifications();
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 700,
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+          >
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              ❓ Clarification Questions
+            </h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 20 }}>
+              The AI has some questions to better understand the document. Providing answers will improve note accuracy.
+            </p>
+
+            {clarificationQuestions.map((q, index) => (
+              <div
+                key={index}
+                style={{
+                  marginBottom: 20,
+                  padding: 16,
+                  backgroundColor: '#f9fafb',
+                  borderRadius: 8,
+                  border: '1px solid #e5e7eb',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+                  Question {index + 1}:
+                </div>
+                <div style={{ fontSize: 14, marginBottom: 12, color: '#374151' }}>
+                  {q.question}
+                </div>
+                {q.context && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12, fontStyle: 'italic' }}>
+                    Context: {q.context}
+                  </div>
+                )}
+                <textarea
+                  value={q.answer || ''}
+                  onChange={(e) => {
+                    const updated = [...clarificationQuestions];
+                    updated[index].answer = e.target.value;
+                    setClarificationQuestions(updated);
+                  }}
+                  placeholder="Your answer (optional)..."
+                  style={{
+                    width: '100%',
+                    minHeight: 60,
+                    padding: 10,
+                    border: '1px solid #d1d5db',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+              <button
+                onClick={handleSkipClarifications}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                Skip Questions
+              </button>
+              <button
+                onClick={handleClarificationSubmit}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                Submit Answers
               </button>
             </div>
           </div>
