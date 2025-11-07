@@ -573,10 +573,13 @@ export default function PlanningAgentPage() {
             }
           });
           
+          console.log('[NotesSync] Loaded document notes:', allDocNotes.length);
           setDocumentNotes(allDocNotes);
+        } else {
+          console.log('[NotesSync] No documents found in localStorage');
         }
       } catch (e) {
-        console.error('Failed to load document notes', e);
+        console.error('[NotesSync] Failed to load document notes', e);
       }
     };
 
@@ -585,18 +588,24 @@ export default function PlanningAgentPage() {
     // Listen for document updates
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'planningAgentDocuments') {
+        console.log('[NotesSync] Storage change detected, reloading notes');
         loadDocumentNotes();
       }
+    };
+    
+    const handleDocumentsUpdated = () => {
+      console.log('[NotesSync] documentsUpdated event received');
+      loadDocumentNotes();
     };
     
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', handleStorageChange);
       // Also listen for custom event from DocumentsView
-      window.addEventListener('documentsUpdated', loadDocumentNotes as EventListener);
+      window.addEventListener('documentsUpdated', handleDocumentsUpdated as EventListener);
       
       return () => {
         window.removeEventListener('storage', handleStorageChange);
-        window.removeEventListener('documentsUpdated', loadDocumentNotes as EventListener);
+        window.removeEventListener('documentsUpdated', handleDocumentsUpdated as EventListener);
       };
     }
   }, []);
@@ -605,7 +614,11 @@ export default function PlanningAgentPage() {
   const messages = activeChat?.messages ?? [];
   const chatNotes = activeChat?.notes ?? [];
   // Aggregate notes from chat and documents
-  const notes = useMemo(() => [...chatNotes, ...documentNotes], [chatNotes, documentNotes]);
+  const notes = useMemo(() => {
+    const aggregated = [...chatNotes, ...documentNotes];
+    console.log('[NotesAggregation] Chat notes:', chatNotes.length, 'Document notes:', documentNotes.length, 'Total:', aggregated.length);
+    return aggregated;
+  }, [chatNotes, documentNotes]);
   const notesGraph = activeChat?.notesGraph ?? null;
 
   const totalUsage = useMemo(() => {

@@ -131,6 +131,7 @@ export default function DocumentsView() {
       
       // Dispatch event to notify other components
       if (typeof window !== 'undefined') {
+        console.log('[DocumentsView] Dispatching documentsUpdated event, documents:', documents.length);
         window.dispatchEvent(new CustomEvent('documentsUpdated'));
       }
     } catch (e) {
