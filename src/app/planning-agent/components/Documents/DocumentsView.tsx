@@ -10,6 +10,11 @@ const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 interface ExtractedNote {
   content: string;
   category: string;
+  path?: {
+    path: string;
+    segments: string[];
+    references?: string[];
+  };
   context?: {
     who?: string[];
     what?: string;
@@ -217,6 +222,7 @@ export default function DocumentsView() {
             baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
             
             return createNote({
+              path: note.path,
               content: note.content,
               category: validateCategory(note.category),
               source: baseSource,
@@ -312,6 +318,7 @@ export default function DocumentsView() {
             baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
             
             return createNote({
+              path: note.path,
               content: note.content,
               category: validateCategory(note.category),
               source: baseSource,
@@ -480,6 +487,7 @@ export default function DocumentsView() {
             baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id, aiGenerated: true };
             
             return createNote({
+              path: note.path,
               content: note.content,
               category: validateCategory(note.category),
               source: baseSource,
@@ -825,6 +833,7 @@ IMPORTANT:
             baseSource.metadata = { ...baseSource.metadata, documentId: selectedDocument.id, reanalyzed: true };
             
             return createNote({
+              path: note.path,
               content: note.content,
               category: validateCategory(note.category),
               source: baseSource,
