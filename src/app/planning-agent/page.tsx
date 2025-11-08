@@ -19,6 +19,7 @@ import {
   NoteSourceType,
 } from './notes';
 import type { StoredDocument } from './types';
+import { addNotesToPathGraph, loadPathGraph } from './pathGraph';
 
 interface ModelConfig {
   name: string;
@@ -746,6 +747,41 @@ export default function PlanningAgentPage() {
     updateActiveChatMessages((prev) => prev.filter((_, idx) => idx !== index));
   }
 
+  // Helper function to process notes with path graph
+  async function processNotesWithPathGraph(notes: Note[]): Promise<Note[]> {
+    if (notes.length === 0) return notes;
+    
+    console.log('[Main Chat] Sending', notes.length, 'notes to path graph API');
+    
+    try {
+      const pathGraphResult = await addNotesToPathGraph(notes);
+      
+      if (pathGraphResult.success && pathGraphResult.updatedNotes) {
+        console.log('[Main Chat] Path graph assigned paths to', pathGraphResult.updatedNotes.length, 'notes');
+        
+        // Log the path graph data for debugging
+        const pathGraph = loadPathGraph();
+        console.log('[PATH GRAPH DATA] Current graph structure:', JSON.stringify(pathGraph, null, 2));
+        console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
+        console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
+        
+        // Update notes with paths from graph
+        return notes.map(note => {
+          const updatedNote = pathGraphResult.updatedNotes.find((n: Note) => n.id === note.id);
+          if (updatedNote && updatedNote.path) {
+            console.log('[PATH GRAPH DATA] Note path assigned:', updatedNote.path);
+            return { ...note, path: updatedNote.path };
+          }
+          return note;
+        });
+      }
+    } catch (error) {
+      console.error('[Main Chat] Error processing notes with path graph:', error);
+    }
+    
+    return notes;
+  }
+
   // Note management functions
   function addNote(note: Note) {
     if (!activeChat) return;
@@ -786,13 +822,19 @@ export default function PlanningAgentPage() {
     );
   }
 
-  function acceptPendingNote(noteId: string) {
+  async function acceptPendingNote(noteId: string) {
     const pendingNote = pendingNotes.find((n) => n.id === noteId);
     if (!pendingNote) return;
     
-    // Remove isPending flag and add to chat notes
+    // Remove isPending flag
     const acceptedNote: Note = { ...pendingNote, isPending: false, isNew: true };
-    addNote(acceptedNote);
+    
+    // Process through path graph to assign hierarchical path
+    const notesWithPaths = await processNotesWithPathGraph([acceptedNote]);
+    const noteWithPath = notesWithPaths[0] || acceptedNote;
+    
+    // Add to chat notes
+    addNote(noteWithPath);
     
     // Remove from pending
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -921,16 +963,23 @@ export default function PlanningAgentPage() {
           };
         });
 
-        // Automatically accept high-confidence notes
+        // Automatically accept high-confidence notes - process through path graph first
         const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
         if (autoAcceptedNotes.length > 0) {
-          autoAcceptedNotes.forEach((note: any) => {
+          const cleanAutoAcceptedNotes = autoAcceptedNotes.map((note: any) => {
             const { autoAccept, needsReview, autoReject, ...cleanNote } = note;
-            addNote({ ...cleanNote, isPending: false });
+            return { ...cleanNote, isPending: false };
+          });
+          
+          // Process through path graph to assign hierarchical paths
+          const notesWithPaths = await processNotesWithPathGraph(cleanAutoAcceptedNotes);
+          notesWithPaths.forEach((note: Note) => {
+            addNote(note);
           });
         }
 
         // Return only notes that need user review (filter out auto-rejected and auto-accepted)
+        // These will also be processed through path graph when accepted
         return allNotes
           .filter((n: any) => n.needsReview)
           .map((n: any) => {
