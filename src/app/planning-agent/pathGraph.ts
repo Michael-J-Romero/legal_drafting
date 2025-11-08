@@ -53,7 +53,38 @@ export function savePathGraph(graph: PathGraph): void {
 }
 
 /**
- * Add notes to the path graph using AI
+ * Generate a fallback path for a note when AI processing fails
+ */
+function generateFallbackPath(note: any): { path: string; segments: string[]; references?: string[] } {
+  const sanitize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  
+  // Start with category
+  const segments: string[] = [sanitize(note.category || 'other')];
+  
+  // Add context-based segments if available
+  if (note.context?.who?.[0]) {
+    segments.push(sanitize(note.context.who[0]));
+  } else if (note.context?.what) {
+    segments.push(sanitize(note.context.what));
+  }
+  
+  // Add a segment from content if we don't have enough specificity
+  if (segments.length < 2 && note.content) {
+    const words = note.content.split(' ').filter((w: string) => w.length > 3);
+    if (words[0]) {
+      segments.push(sanitize(words[0]));
+    }
+  }
+  
+  return {
+    path: segments.join('.'),
+    segments,
+    references: []
+  };
+}
+
+/**
+ * Add notes to the path graph using AI (with fallback)
  */
 export async function addNotesToPathGraph(notes: any[], existingGraph?: PathGraph): Promise<{
   graph: PathGraph;
@@ -65,6 +96,8 @@ export async function addNotesToPathGraph(notes: any[], existingGraph?: PathGrap
   const graph = existingGraph || loadPathGraph();
 
   try {
+    console.log('[PATH GRAPH] Processing', notes.length, 'notes');
+    
     const response = await fetch('/api/manage-path-graph', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -83,16 +116,31 @@ export async function addNotesToPathGraph(notes: any[], existingGraph?: PathGrap
     
     if (result.success && result.graph) {
       savePathGraph(result.graph);
+      console.log('[PATH GRAPH] API call successful, all', notes.length, 'notes now have paths');
+      return result;
+    } else {
+      throw new Error(result.error || 'Unknown API error');
     }
-
-    return result;
   } catch (error) {
-    console.error('[PathGraph] Error adding notes:', error);
+    console.warn('[PATH GRAPH] API failed, using fallback paths:', error instanceof Error ? error.message : error);
+    
+    // Generate fallback paths for all notes
+    const updatedNotes = notes.map(note => {
+      const fallbackPath = generateFallbackPath(note);
+      console.log('[PATH GRAPH] Generated fallback path for note:', fallbackPath.path);
+      return {
+        ...note,
+        path: fallbackPath
+      };
+    });
+    
+    console.log('[PATH GRAPH] All', notes.length, 'notes assigned fallback paths');
+    
     return {
       graph,
-      updatedNotes: notes,
+      updatedNotes,
       restructured: false,
-      success: false,
+      success: true, // Still success, just with fallback paths
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }

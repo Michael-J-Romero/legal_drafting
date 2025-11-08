@@ -83,18 +83,28 @@ Each note should have:
 4. Context (who/what/when/where if applicable)
 5. Confidence score (0-100)
 
-PATH STRUCTURE:
-Use paths like:
+PATH STRUCTURE - DATA-DRIVEN:
+Create paths based on the ACTUAL CONTENT of the note. Examples:
+
+If note mentions a court case:
 - case.jurisdiction.court.location.address
 - case.parties.plaintiff.name
-- case.parties.defendant.contact.email
 - case.events.hearings.motion_to_compel.date
-- case.events.hearings.motion_to_compel.location
-- case.evidence.contracts.parties
-- case.evidence.bank_statements.date
-- document.${fileName?.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.title
-- document.${fileName?.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.date_signed
-- document.${fileName?.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.parties
+
+If note is about a general meeting:
+- meetings.john_smith.march_15.details
+
+If note is about a financial transaction:
+- financial.payments.invoice_12345.amount
+
+If note is about a document:
+- documents.${fileName?.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.title
+- documents.${fileName?.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.date_signed
+
+If note is about general information:
+- information.topic.subtopic.details
+
+IMPORTANT: Use paths that reflect what's ACTUALLY in the note, not what you assume it might be
 
 CATEGORIES:
 - dates: Dates, times, time periods

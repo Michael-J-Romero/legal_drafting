@@ -139,7 +139,7 @@ function buildAddNotesPrompt(notes: any[], existingGraph: any): string {
     ? `EXISTING PATH GRAPH:
 ${JSON.stringify(existingGraph, null, 2)}
 
-IMPORTANT: Analyze this existing graph to understand the established path structure. Maintain consistency with existing paths where appropriate, but don't hesitate to restructure if the new notes suggest a better organization.
+IMPORTANT: Analyze this existing graph to understand the established path structure. Maintain consistency with existing paths where appropriate.
 `
     : 'No existing graph. You will create the initial path structure based on these notes.\n';
 
@@ -152,54 +152,68 @@ Current Path: ${n.path ? n.path.path : 'none'}
 Context: ${JSON.stringify(n.context || {})}`).join('\n\n')}
 
 YOUR CRITICAL TASK:
-Create HIGHLY GRANULAR and SPECIFIC hierarchical paths where the path ALONE (with descriptors) provides complete unambiguous context.
+Create hierarchical paths based ONLY on the ACTUAL DATA in the notes. BE DATA-DRIVEN, NOT OPINIONATED.
 
-GRANULARITY REQUIREMENTS:
-1. Each path must be detailed enough to be self-explanatory
-2. Avoid generic segments like "deadlines" - instead be specific like "motion_to_compel.deadlines.payment_due"
-3. Include intermediate organizational layers (e.g., proceedings, motions, evidence_types)
-4. Each segment must have a clear, specific descriptor that explains what it represents
-5. The full path with descriptors should answer: what case/document/item, what proceeding/event, what specific aspect
+DATA-DRIVEN PATH GENERATION:
+1. READ THE NOTE CONTENT CAREFULLY - extract specific entities, events, and relationships
+2. USE ACTUAL DATA from the note (names, numbers, dates, document titles) in descriptors
+3. BUILD PATHS that reflect the actual information structure in the content
+4. DO NOT impose predetermined legal/case structures if the note doesn't mention them
+5. LET THE HIERARCHY emerge naturally from the data
+
+DESCRIPTOR REQUIREMENTS - REFERENCE ACTUAL DATA:
+Each descriptor must quote or reference specific data from the notes:
+- If a note mentions "Case #CS-2024-0187", descriptor should include "case CS-2024-0187"
+- If a note mentions "John Smith", descriptor should include "John Smith"
+- If a note mentions "Motion to Compel", descriptor should include "Motion to Compel"
+- If a note mentions "$5,000 due", descriptor should include "$5,000"
+- If no specific data exists, use general but accurate descriptions from the content
+
+PATH EXAMPLES (DATA-DRIVEN):
+
+Example Note: "Meeting with John Smith (plaintiff attorney) on March 15, 2024"
+GOOD: meetings.john_smith.march_15_2024
+Descriptors:
+  meetings → "meetings and appointments"
+  john_smith → "meeting with John Smith (plaintiff attorney)"
+  march_15_2024 → "scheduled for March 15, 2024"
+
+Example Note: "Contract signed by ABC Corp and XYZ Inc on January 10, 2023"
+GOOD: contracts.abc_corp_xyz_inc.signing_date  
+Descriptors:
+  contracts → "contracts and agreements"
+  abc_corp_xyz_inc → "contract between ABC Corp and XYZ Inc"
+  signing_date → "signed on January 10, 2023"
+
+Example Note: "Payment of $5,000 due for invoice #12345"
+GOOD: financial.payments.invoice_12345.amount_due
+Descriptors:
+  financial → "financial information and transactions"
+  payments → "payments and monetary obligations"
+  invoice_12345 → "invoice number 12345"
+  amount_due → "$5,000 due"
+
+Example Note: "Court hearing in Department 12 on Friday"
+GOOD: court_hearings.department_12.date
+Descriptors:
+  court_hearings → "court hearings and proceedings"
+  department_12 → "Department 12"
+  date → "scheduled for Friday"
+
+DO NOT DO THIS (Opinionated, not based on data):
+- If note says "Meeting on Friday", do NOT create path: case.proceedings.motion.meetings
+- If note says "$500 due", do NOT create path: case.financial.sanctions.payment
+- Let the path reflect what's actually IN the note
+
+ONLY create "case.*" paths if the note explicitly mentions a case
+ONLY create legal proceeding paths if the note explicitly mentions legal proceedings
+ONLY create evidence paths if the note explicitly mentions evidence
 
 PATH STRUCTURE PRINCIPLES:
-- Flow from most general → most specific
-- Use underscores for multi-word segments (motion_to_compel, bank_statements)
-- Include case identifiers, document types, proceeding names in descriptors
-- Be specific enough to avoid ambiguity
-
-GOOD vs BAD PATH EXAMPLES:
-
-BAD (too generic):
-- case.deadlines.payment_due
-  Descriptors: ["civil case csrv01874", "sanctions deadline for motion to compel deposition", "amount due in sanctions"]
-  Problem: "deadlines" is ambiguous - which proceeding?
-
-GOOD (granular and specific):
-- case.proceedings.motion_to_compel.deadlines.payment_due
-  Descriptors: ["civil case csrv01874", "hearings, motions and other court proceedings for this case", "motion to compel deposition of defendant", "deadlines for this motion", "amount due in sanctions"]
-  Better: Clear hierarchy from case → proceedings → specific motion → deadlines → specific payment
-
-BAD:
-- case.parties.name
-  Descriptors: ["civil case csrv01874", "parties involved", "plaintiff name"]
-
-GOOD:
-- case.parties.plaintiff.name
-  Descriptors: ["civil case csrv01874", "parties involved in the case", "plaintiff party", "full legal name of plaintiff"]
-
-BAD:
-- document.dates.filed
-  
-GOOD:
-- document.motion_to_compel.filing_details.date_filed
-  Descriptors: ["legal documents related to case", "motion to compel deposition of defendant", "filing and submission details", "date document was filed with court"]
-
-DESCRIPTOR REQUIREMENTS:
-Each node must have a "descriptor" field that:
-1. Provides specific, contextual information about that segment
-2. Includes identifiers (case numbers, document names, party names)
-3. Explains the organizational purpose of that level
-4. Makes the segment understandable in isolation
+- Flow from most general → most specific based on note content
+- Use underscores for multi-word segments (john_smith, invoice_12345)
+- Be specific using actual names, numbers, dates from the note
+- Include enough intermediate layers for clarity but don't over-structure
 
 RESPONSE FORMAT (JSON only):
 {
