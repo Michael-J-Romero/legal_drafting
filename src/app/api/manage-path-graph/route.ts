@@ -8,11 +8,21 @@ interface PathNode {
   descriptor: string; // Human-readable description of what this path segment represents
   noteIds: string[];
   children?: Record<string, PathNode>;
+  contextSignature?: string; // Optional: Key entities for matching
+}
+
+interface PathMigration {
+  oldPath: string;
+  newPath: string;
+  noteIds: string[];
+  reason: string;
+  timestamp: string;
 }
 
 interface PathGraph {
   nodes: Record<string, PathNode>;
   lastUpdated: string;
+  migrations?: PathMigration[];
 }
 
 /**
@@ -107,11 +117,22 @@ export async function POST(request: Request) {
       const result = JSON.parse(jsonContent);
 
       console.log(`[PATH GRAPH] Processed ${notes?.length || 0} notes, graph has ${Object.keys(result.graph.nodes).length} top-level paths`);
+      
+      if (result.restructured) {
+        console.log('[PATH GRAPH] Graph was restructured');
+        if (result.migrations && result.migrations.length > 0) {
+          console.log('[PATH GRAPH] Migrations:', result.migrations.length);
+          result.migrations.forEach((m: any) => {
+            console.log(`[PATH GRAPH] Migration: ${m.oldPath} → ${m.newPath} (${m.noteIds.length} notes)`);
+          });
+        }
+      }
 
       return NextResponse.json({
         graph: result.graph,
         updatedNotes: result.updatedNotes || notes,
         restructured: result.restructured || false,
+        migrations: result.migrations || [],
         success: true
       });
     } catch (parseError) {
@@ -136,10 +157,15 @@ export async function POST(request: Request) {
 
 function buildAddNotesPrompt(notes: any[], existingGraph: any): string {
   const graphSection = existingGraph && Object.keys(existingGraph.nodes || {}).length > 0
-    ? `EXISTING PATH GRAPH:
+    ? `EXISTING PATH GRAPH (Your Single Source of Truth):
 ${JSON.stringify(existingGraph, null, 2)}
 
-IMPORTANT: Analyze this existing graph to understand the established path structure. Maintain consistency with existing paths where appropriate.
+CRITICAL: This is the COMPLETE current state. Study it carefully:
+- Examine ALL existing nodes and their descriptors
+- Check context signatures to identify entities
+- Understand what each path represents
+- Maintain consistency where appropriate
+- Identify ambiguities that need disambiguation
 `
     : 'No existing graph. You will create the initial path structure based on these notes.\n';
 
@@ -151,129 +177,203 @@ Category: ${n.category}
 Current Path: ${n.path ? n.path.path : 'none'}
 Context: ${JSON.stringify(n.context || {})}`).join('\n\n')}
 
-YOUR CRITICAL TASK:
-Create hierarchical paths based ONLY on the ACTUAL DATA in the notes. BE DATA-DRIVEN, NOT OPINIONATED.
+YOUR CRITICAL TASK - CONTEXT-AWARE PATH ASSIGNMENT WITH DISAMBIGUATION:
 
-DATA-DRIVEN PATH GENERATION:
-1. READ THE NOTE CONTENT CAREFULLY - extract specific entities, events, and relationships
-2. USE ACTUAL DATA from the note (names, numbers, dates, document titles) in descriptors
-3. BUILD PATHS that reflect the actual information structure in the content
-4. DO NOT impose predetermined legal/case structures if the note doesn't mention them
-5. LET THE HIERARCHY emerge naturally from the data
+═══════════════════════════════════════════════════════════════════════
+PHASE 1: ANALYZE EXISTING GRAPH (if it exists)
+═══════════════════════════════════════════════════════════════════════
 
-DESCRIPTOR REQUIREMENTS - REFERENCE ACTUAL DATA:
-Each descriptor must quote or reference specific data from the notes:
-- If a note mentions "Case #CS-2024-0187", descriptor should include "case CS-2024-0187"
-- If a note mentions "John Smith", descriptor should include "John Smith"
-- If a note mentions "Motion to Compel", descriptor should include "Motion to Compel"
-- If a note mentions "$5,000 due", descriptor should include "$5,000"
-- If no specific data exists, use general but accurate descriptions from the content
+1. READ ALL EXISTING NODE DESCRIPTORS:
+   - Each descriptor contains specific entity information
+   - Look for names, IDs, case numbers, dates, identifiers
+   - These identify WHICH entity the node represents
 
-PATH EXAMPLES (DATA-DRIVEN):
+2. EXTRACT CONTEXT SIGNATURES:
+   - From "John's car color: blue" → entity: "John"
+   - From "case CS-2024-0187" → entity: "CS-2024-0187"
+   - From "Meeting with Mary on March 15" → entities: "Mary", "March 15"
 
-Example Note: "Meeting with John Smith (plaintiff attorney) on March 15, 2024"
-GOOD: meetings.john_smith.march_15_2024
-Descriptors:
-  meetings → "meetings and appointments"
-  john_smith → "meeting with John Smith (plaintiff attorney)"
-  march_15_2024 → "scheduled for March 15, 2024"
+3. IDENTIFY AMBIGUOUS NODES (need restructuring):
+   - Descriptor lacks entity identifiers: "car color" (which car?)
+   - Descriptor could apply to multiple entities
+   - Mark these for potential restructuring
 
-Example Note: "Contract signed by ABC Corp and XYZ Inc on January 10, 2023"
-GOOD: contracts.abc_corp_xyz_inc.signing_date  
-Descriptors:
-  contracts → "contracts and agreements"
-  abc_corp_xyz_inc → "contract between ABC Corp and XYZ Inc"
-  signing_date → "signed on January 10, 2023"
+═══════════════════════════════════════════════════════════════════════
+PHASE 2: PROCESS NEW NOTES - CONTEXT-AWARE PLACEMENT
+═══════════════════════════════════════════════════════════════════════
 
-Example Note: "Payment of $5,000 due for invoice #12345"
-GOOD: financial.payments.invoice_12345.amount_due
-Descriptors:
-  financial → "financial information and transactions"
-  payments → "payments and monetary obligations"
-  invoice_12345 → "invoice number 12345"
-  amount_due → "$5,000 due"
+For EACH new note:
 
-Example Note: "Court hearing in Department 12 on Friday"
-GOOD: court_hearings.department_12.date
-Descriptors:
-  court_hearings → "court hearings and proceedings"
-  department_12 → "Department 12"
-  date → "scheduled for Friday"
+STEP 1: EXTRACT ENTITIES from the note
+  - Parse content and context for: names, IDs, case numbers, document titles, dates
+  - Example: "John's car is blue" → entity: "John"
+  - Example: "Case #CS-123 hearing" → entity: "CS-123"
 
-DO NOT DO THIS (Opinionated, not based on data):
-- If note says "Meeting on Friday", do NOT create path: case.proceedings.motion.meetings
-- If note says "$500 due", do NOT create path: case.financial.sanctions.payment
-- Let the path reflect what's actually IN the note
+STEP 2: CHECK IF MATCHING NODE EXISTS
+  - Look for existing nodes with same path structure
+  - Compare entities in node's descriptor vs note's entities
+  - Check contextSignature if present
+  
+  Example:
+  - Note: "Mary's car is red" → entity: "Mary"
+  - Existing: properties.john.car.color (descriptor: "John's car color")
+  - Entity check: "Mary" ≠ "John" → DO NOT use this node
+  - Create new: properties.mary.car.color
 
-ONLY create "case.*" paths if the note explicitly mentions a case
-ONLY create legal proceeding paths if the note explicitly mentions legal proceedings
-ONLY create evidence paths if the note explicitly mentions evidence
+STEP 3: DECISION - USE EXISTING NODE OR CREATE NEW?
+  
+  ✅ USE EXISTING if:
+  - Entities EXACTLY match (John === John)
+  - Context truly refers to same thing
+  - Descriptor confirms it's the right entity
+  
+  ❌ CREATE NEW if:
+  - Entities differ (John ≠ Mary)
+  - Context refers to different entity
+  - Would create ambiguity to combine
 
-PATH STRUCTURE PRINCIPLES:
-- Flow from most general → most specific based on note content
-- Use underscores for multi-word segments (john_smith, invoice_12345)
-- Be specific using actual names, numbers, dates from the note
-- Include enough intermediate layers for clarity but don't over-structure
+STEP 4: HANDLE AMBIGUOUS EXISTING NODES
+  If existing node lacks entity identifier:
+  - Example: "car.color" without owner
+  - And new note has entity: "Mary's car"
+  - RESTRUCTURE to disambiguate:
+    * Old: properties.car.color → properties.default_car.color
+    * New: properties.mary.car.color
+  - Add to migrations array
 
-RESPONSE FORMAT (JSON only):
+═══════════════════════════════════════════════════════════════════════
+DISAMBIGUATION EXAMPLES (CRITICAL - FOLLOW THESE)
+═══════════════════════════════════════════════════════════════════════
+
+EXAMPLE 1: Two Different People's Cars
+─────────────────────────────────────
+Note 1: "John's car is blue"
+  Context: { who: ["John"], what: "car color" }
+  
+Note 2: "Mary's car is red"
+  Context: { who: ["Mary"], what: "car color" }
+
+✅ CORRECT - Separate paths:
+  - properties.john.car.color
+    Descriptor: "John's car color: blue"
+  - properties.mary.car.color
+    Descriptor: "Mary's car color: red"
+
+❌ WRONG - Same path (creates confusion):
+  - properties.car.color (Which car? John's or Mary's?)
+
+EXAMPLE 2: Two Different Cases
+─────────────────────────────────────
+Note 1: "Hearing for case CS-2024-0187 on March 15"
+  Content: mentions "case CS-2024-0187"
+  
+Note 2: "Hearing for case CS-2024-0190 on March 20"
+  Content: mentions "case CS-2024-0190"
+
+✅ CORRECT - Separate paths:
+  - case_cs_2024_0187.hearings.march_15
+    Descriptor: "hearing for case CS-2024-0187 on March 15"
+  - case_cs_2024_0190.hearings.march_20
+    Descriptor: "hearing for case CS-2024-0190 on March 20"
+
+EXAMPLE 3: Restructuring Ambiguous Node
+─────────────────────────────────────
+Existing: properties.car.color
+  Descriptor: "car color: blue" (NO entity identifier - ambiguous!)
+  noteIds: ["note-1"]
+
+New Note: "Mary's car is red"
+  Context: { who: ["Mary"], what: "car color" }
+
+✅ CORRECT - Restructure:
+  1. Existing note unclear which car → rename to default_car
+  2. New note is Mary's car → create mary.car
+  
+  New structure:
+  - properties.default_car.color (note-1 migrated here)
+    Descriptor: "default car color: blue"
+  - properties.mary.car.color (note-2 here)
+    Descriptor: "Mary's car color: red"
+  
+  Add migration:
+  {
+    "oldPath": "properties.car.color",
+    "newPath": "properties.default_car.color",
+    "noteIds": ["note-1"],
+    "reason": "Disambiguated to differentiate from Mary's car",
+    "timestamp": "2025-11-08T12:00:00Z"
+  }
+
+═══════════════════════════════════════════════════════════════════════
+PATH STRUCTURE PRINCIPLES (Data-Driven)
+═══════════════════════════════════════════════════════════════════════
+
+1. USE ACTUAL DATA from notes:
+   - Specific names: "john_smith", "mary_johnson"
+   - Specific IDs: "case_cs_2024_0187", "invoice_12345"
+   - Specific dates: "march_15_2024", "jan_10_2023"
+
+2. ENTITY IDENTIFIERS in paths:
+   - If note mentions person → include their name in path
+   - If note mentions case → include case ID in path
+   - If note mentions document → include document name in path
+
+3. DESCRIPTORS reference actual data:
+   - Quote specific values from note content
+   - Include entity identifiers
+   - Make it clear WHICH entity this refers to
+
+4. FLOW: General → Specific
+   - Start broad: category/domain
+   - Add entity: specific person/case/document
+   - Add detail: what about that entity
+   - End specific: the actual data point
+
+═══════════════════════════════════════════════════════════════════════
+RESPONSE FORMAT (JSON only)
+═══════════════════════════════════════════════════════════════════════
+
 {
   "graph": {
-    "nodes": {
-      "case": {
-        "path": "case",
-        "segments": ["case"],
-        "descriptor": "civil case csrv01874",
-        "noteIds": [],
-        "children": {
-          "proceedings": {
-            "path": "case.proceedings",
-            "segments": ["case", "proceedings"],
-            "descriptor": "hearings, motions and other court proceedings for this case",
-            "noteIds": [],
-            "children": {
-              "motion_to_compel": {
-                "path": "case.proceedings.motion_to_compel",
-                "segments": ["case", "proceedings", "motion_to_compel"],
-                "descriptor": "motion to compel deposition of defendant",
-                "noteIds": [],
-                "children": {
-                  "deadlines": {
-                    "path": "case.proceedings.motion_to_compel.deadlines",
-                    "segments": ["case", "proceedings", "motion_to_compel", "deadlines"],
-                    "descriptor": "deadlines and time requirements for this motion",
-                    "noteIds": [],
-                    "children": {
-                      "payment_due": {
-                        "path": "case.proceedings.motion_to_compel.deadlines.payment_due",
-                        "segments": ["case", "proceedings", "motion_to_compel", "deadlines", "payment_due"],
-                        "descriptor": "amount due in sanctions for this motion",
-                        "noteIds": ["note-123"]
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "lastUpdated": "${new Date().toISOString()}"
+    "nodes": { ...complete updated graph structure... },
+    "lastUpdated": "${new Date().toISOString()}",
+    "migrations": [ ...optional, if restructured... ]
   },
   "updatedNotes": [
     {
       "id": "note-123",
       "path": {
-        "path": "case.proceedings.motion_to_compel.deadlines.payment_due",
-        "segments": ["case", "proceedings", "motion_to_compel", "deadlines", "payment_due"],
+        "path": "properties.john.car.color",
+        "segments": ["properties", "john", "car", "color"],
         "references": []
       }
     }
   ],
-  "restructured": false
+  "restructured": false (or true if graph was restructured),
+  "migrations": [ ...if restructured, list all path changes... ]
 }
 
-REMEMBER: Be VERY specific and granular. Each path should have enough intermediate segments to be completely unambiguous.
+MIGRATION OBJECT FORMAT (when restructured):
+{
+  "oldPath": "properties.car.color",
+  "newPath": "properties.john.car.color",
+  "noteIds": ["note-123"],
+  "reason": "Added entity identifier to disambiguate from other cars",
+  "timestamp": "${new Date().toISOString()}"
+}
+
+═══════════════════════════════════════════════════════════════════════
+REMEMBER - CRITICAL SUCCESS CRITERIA:
+═══════════════════════════════════════════════════════════════════════
+
+✅ Check existing node descriptors before reusing paths
+✅ Extract entities from notes (names, IDs, case numbers)
+✅ Compare entities - only combine if EXACT match
+✅ Different entities = different paths (John's car ≠ Mary's car)
+✅ Include entity identifiers in paths and descriptors
+✅ Restructure ambiguous existing nodes when needed
+✅ Provide migrations when restructuring
+✅ Make every path self-explanatory with its descriptor
 
 Return ONLY the JSON, no other text.`;
 }

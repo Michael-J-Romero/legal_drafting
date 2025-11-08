@@ -9,11 +9,21 @@ export interface PathNode {
   descriptor: string; // Human-readable description of what this path segment represents
   noteIds: string[];
   children?: Record<string, PathNode>;
+  contextSignature?: string; // Optional: Key entities for matching (e.g., "john_smith", "case_123")
+}
+
+export interface PathMigration {
+  oldPath: string;
+  newPath: string;
+  noteIds: string[];
+  reason: string;
+  timestamp: string;
 }
 
 export interface PathGraph {
   nodes: Record<string, PathNode>;
   lastUpdated: string;
+  migrations?: PathMigration[]; // Track path changes for reference integrity
 }
 
 const PATH_GRAPH_STORAGE_KEY = 'planningAgentPathGraph';
@@ -90,6 +100,7 @@ export async function addNotesToPathGraph(notes: any[], existingGraph?: PathGrap
   graph: PathGraph;
   updatedNotes: any[];
   restructured: boolean;
+  migrations?: PathMigration[];
   success: boolean;
   error?: string;
 }> {
@@ -115,6 +126,15 @@ export async function addNotesToPathGraph(notes: any[], existingGraph?: PathGrap
     const result = await response.json();
     
     if (result.success && result.graph) {
+      // Add migrations to graph if restructuring occurred
+      if (result.restructured && result.migrations) {
+        result.graph.migrations = [
+          ...(result.graph.migrations || []),
+          ...result.migrations
+        ];
+        console.log('[PATH GRAPH] Added', result.migrations.length, 'migrations to graph');
+      }
+      
       savePathGraph(result.graph);
       console.log('[PATH GRAPH] API call successful, all', notes.length, 'notes now have paths');
       return result;
@@ -231,4 +251,42 @@ export function getNotesInPath(graph: PathGraph, pathString: string): string[] {
   }
 
   return [...new Set(noteIds)]; // Remove duplicates
+}
+
+/**
+ * Apply path migrations to notes
+ * Ensures all note references use current paths after restructuring
+ */
+export function applyMigrations(notes: any[], graph: PathGraph): any[] {
+  if (!graph.migrations || graph.migrations.length === 0) {
+    return notes;
+  }
+
+  console.log('[PATH GRAPH] Applying', graph.migrations.length, 'path migrations');
+
+  const migratedNotes = notes.map(note => {
+    if (!note.path || !note.path.path) return note;
+
+    // Check if this note's path has been migrated
+    const migration = graph.migrations?.find(m => 
+      m.noteIds.includes(note.id) && m.oldPath === note.path.path
+    );
+
+    if (migration) {
+      console.log('[PATH GRAPH] Migrating note', note.id, 'from', migration.oldPath, 'to', migration.newPath);
+      const newSegments = migration.newPath.split('.');
+      return {
+        ...note,
+        path: {
+          path: migration.newPath,
+          segments: newSegments,
+          references: note.path.references || []
+        }
+      };
+    }
+
+    return note;
+  });
+
+  return migratedNotes;
 }
