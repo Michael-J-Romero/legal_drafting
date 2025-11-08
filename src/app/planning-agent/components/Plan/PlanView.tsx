@@ -291,6 +291,10 @@ function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] }
 export default function PlanView() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [editingNode, setEditingNode] = useState<PlanNode | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStatus, setEditStatus] = useState<'pending' | 'in-progress' | 'completed' | 'blocked'>('pending');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -367,9 +371,78 @@ export default function PlanView() {
     [setFlowEdges]
   );
 
-  const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     setSelectedNodeId(node.id);
-  }, []);
+    
+    // Don't allow editing start/goal nodes
+    if (node.id === 'start' || node.id === 'goal') return;
+    
+    // Find the plan node to edit
+    if (plan) {
+      const findNode = (nodes: PlanNode[]): PlanNode | null => {
+        for (const n of nodes) {
+          if (n.id === node.id) return n;
+          const found = findNode(n.children);
+          if (found) return found;
+        }
+        return null;
+      };
+      
+      const nodeToEdit = findNode(plan.rootNodes);
+      if (nodeToEdit) {
+        setEditingNode(nodeToEdit);
+        setEditTitle(nodeToEdit.title);
+        setEditDescription(nodeToEdit.description || '');
+        setEditStatus(nodeToEdit.status);
+      }
+    }
+  }, [plan]);
+
+  const handleClearPlan = () => {
+    if (confirm('Are you sure you want to clear this plan? This cannot be undone.')) {
+      setPlan(null);
+      setMessages([]);
+      setSelectedNodeId(null);
+      setEditingNode(null);
+      localStorage.removeItem(PLAN_STORAGE_KEY);
+    }
+  };
+
+  const handleSaveNodeEdit = () => {
+    if (!editingNode || !plan) return;
+
+    const now = new Date();
+    
+    const updateNode = (nodes: PlanNode[]): PlanNode[] => {
+      return nodes.map((node) => {
+        if (node.id === editingNode.id) {
+          return {
+            ...node,
+            title: editTitle,
+            description: editDescription,
+            status: editStatus,
+            updatedAt: now,
+          };
+        }
+        if (node.children.length > 0) {
+          return { ...node, children: updateNode(node.children) };
+        }
+        return node;
+      });
+    };
+
+    setPlan({
+      ...plan,
+      rootNodes: updateNode(plan.rootNodes),
+      updatedAt: now,
+    });
+
+    setEditingNode(null);
+  };
+
+  const handleCancelNodeEdit = () => {
+    setEditingNode(null);
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -387,26 +460,41 @@ export default function PlanView() {
     setIsLoading(true);
 
     try {
-      // Build context-aware prompt with better instructions for multiple steps
-      let systemPrompt = `You are a planning assistant helping users build hierarchical project plans.
+      // Build context-aware prompt with better instructions for multiple steps and branching
+      let systemPrompt = `You are an expert planning assistant helping users build hierarchical project plans with intelligent branching.
 
 Current state:
 ${plan ? `- Plan exists: "${plan.title}"
 - End Goal: ${plan.context.endGoal}
 - Starting Point: ${plan.context.startingPoint}
 - Current steps: ${plan.rootNodes.length} root nodes
-${plan.rootNodes.length > 0 ? `\nExisting nodes:\n${JSON.stringify(plan.rootNodes.map(n => ({ id: n.id, title: n.title, children: n.children.map(c => ({ id: c.id, title: c.title })) })), null, 2)}` : ''}` : '- No plan created yet'}
+${plan.rootNodes.length > 0 ? `\nExisting nodes:\n${JSON.stringify(plan.rootNodes.map(n => ({ id: n.id, title: n.title, status: n.status, children: n.children.map(c => ({ id: c.id, title: c.title, status: c.status })) })), null, 2)}` : ''}` : '- No plan created yet'}
 
-Your role:
-1. If no plan exists and user defines goal/starting point, create the plan
-2. If plan exists, suggest intermediate steps based on user's request
-3. When suggesting multiple steps, include ALL of them in a single response
-4. For parallel steps (branches), set the same parentId for all siblings
-5. Always respond conversationally AND provide structured data
+CRITICAL PLANNING PRINCIPLES:
+1. **Think in layers**: Break down the journey from starting point to end goal into logical phases
+2. **Identify parallel work**: When multiple tasks can happen simultaneously, create branches (same parentId)
+3. **Sequential dependencies**: When one step must complete before another, use different phases
+4. **Avoid linear chains**: Don't just create A→B→C→Goal. Think about what can happen in parallel
+5. **Natural grouping**: Group related tasks that serve a common sub-goal
+
+EXAMPLES OF GOOD PLANNING:
+
+Bad (linear): Start → Step1 → Step2 → Step3 → Goal
+Good (branched): Start → [Development, Marketing, Legal] (parallel) → Integration → Goal
+
+Bad (everything sequential): Design → Code → Test → Deploy
+Good (phases with branches): 
+  Design phase → [Frontend Dev, Backend Dev, Database] (parallel) → Integration Testing → Deployment
+
+When suggesting multiple steps:
+- Identify which tasks are independent and can run in parallel
+- Use the same parentId for all parallel tasks
+- Create logical groupings (e.g., all "research" tasks, all "development" tasks)
+- Think about dependencies: what MUST happen before what else can start
 
 Format your response as:
-1. Natural language explanation of the steps
-2. A JSON block with one of these structures:
+1. Natural language explanation showing your reasoning about phases and branches
+2. A JSON block with the structure below
 
 **For creating a new plan:**
 \`\`\`json
@@ -420,59 +508,31 @@ Format your response as:
 }
 \`\`\`
 
-**For adding ONE step:**
-\`\`\`json
-{
-  "action": "add_step",
-  "data": {
-    "title": "step title",
-    "description": "step description",
-    "parentId": null
-  }
-}
-\`\`\`
-
-**For adding MULTIPLE steps (use this when user asks for a plan with multiple steps):**
+**For adding MULTIPLE steps with smart branching:**
 \`\`\`json
 {
   "action": "add_steps",
   "data": {
     "steps": [
       {
-        "title": "First step",
-        "description": "Description",
+        "title": "Research phase",
+        "description": "Gather information",
         "parentId": null
       },
       {
-        "title": "Second step",
-        "description": "Description",
-        "parentId": null
+        "title": "Market research",
+        "description": "Parallel task 1",
+        "parentId": "research-phase-id-from-above"
       },
       {
-        "title": "Third step",
-        "description": "Description",
-        "parentId": null
-      }
-    ]
-  }
-}
-\`\`\`
-
-**For creating branches (parallel steps from same parent):**
-\`\`\`json
-{
-  "action": "add_steps",
-  "data": {
-    "steps": [
-      {
-        "title": "Branch A",
-        "description": "First parallel path",
-        "parentId": "parent-node-id"
+        "title": "Technical research",
+        "description": "Parallel task 2",
+        "parentId": "research-phase-id-from-above"
       },
       {
-        "title": "Branch B",
-        "description": "Second parallel path",
-        "parentId": "parent-node-id"
+        "title": "Legal research",
+        "description": "Parallel task 3",
+        "parentId": "research-phase-id-from-above"
       }
     ]
   }
@@ -490,7 +550,11 @@ Format your response as:
 }
 \`\`\`
 
-IMPORTANT: When the user asks for a plan or multiple steps, use "add_steps" (plural) with an array of steps, NOT multiple separate "add_step" calls.
+IMPORTANT: 
+- When user asks for a plan, suggest 3-5 major phases/areas
+- For each phase, suggest 2-4 specific tasks that can run in parallel
+- Explain WHY tasks are parallel vs sequential
+- Use "add_steps" action with ALL steps in one response
 
 User request: ${userMessage.content}`;
 
@@ -790,13 +854,32 @@ User request: ${userMessage.content}`;
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ padding: '16px 24px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
-        <h1 style={{ fontSize: 24, fontWeight: 600, color: '#111827', margin: 0 }}>
-          📋 {plan?.title || 'Plan Builder'}
-        </h1>
-        <p style={{ fontSize: 14, color: '#6b7280', margin: '4px 0 0 0' }}>
-          {plan ? 'Manage your plan with AI assistance' : 'Define your end goal and starting point to create a plan'}
-        </p>
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 600, color: '#111827', margin: 0 }}>
+            📋 {plan?.title || 'Plan Builder'}
+          </h1>
+          <p style={{ fontSize: 14, color: '#6b7280', margin: '4px 0 0 0' }}>
+            {plan ? 'Manage your plan with AI assistance' : 'Define your end goal and starting point to create a plan'}
+          </p>
+        </div>
+        {plan && (
+          <button
+            onClick={handleClearPlan}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#ef4444',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              fontSize: 14,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            🗑️ Clear Plan
+          </button>
+        )}
       </div>
 
       {/* Main content area */}
@@ -943,6 +1026,136 @@ User request: ${userMessage.content}`;
           </form>
         </div>
       </div>
+
+      {/* Node editing modal */}
+      {editingNode && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={handleCancelNodeEdit}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              width: '90%',
+              maxWidth: 500,
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 16, color: '#111827' }}>
+              Edit Node
+            </h2>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, marginBottom: 4, color: '#374151' }}>
+                Title
+              </label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, marginBottom: 4, color: '#374151' }}>
+                Description
+              </label>
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={3}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontSize: 14,
+                  outline: 'none',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, marginBottom: 4, color: '#374151' }}>
+                Status
+              </label>
+              <select
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value as any)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              >
+                <option value="pending">Pending</option>
+                <option value="in-progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="blocked">Blocked</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleCancelNodeEdit}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#fff',
+                  color: '#374151',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveNodeEdit}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: '#3b82f6',
+                  color: '#fff',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
