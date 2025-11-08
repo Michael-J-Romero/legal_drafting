@@ -102,11 +102,33 @@ export default function DocumentsView() {
       console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
       console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
       
-      // Update notes with paths from graph
+      // Update notes with paths from graph and log with descriptors
       return notes.map(note => {
         const updatedNote = pathGraphResult.updatedNotes.find(n => n.id === note.id);
         if (updatedNote && updatedNote.path) {
           console.log('[PATH GRAPH DATA] Note path assigned:', updatedNote.path);
+          
+          // Extract and log descriptors for this path
+          const segments = updatedNote.path.path.split('.');
+          const descriptors: string[] = [];
+          let currentNodes = pathGraph.nodes;
+          
+          for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            const node = currentNodes[segment];
+            if (node && node.descriptor) {
+              descriptors.push(node.descriptor);
+              currentNodes = node.children || {};
+            }
+          }
+          
+          if (descriptors.length > 0) {
+            console.log('[PATH GRAPH DATA] Path descriptors for', updatedNote.path.path);
+            descriptors.forEach((desc, idx) => {
+              console.log(`  ${segments[idx]} → ${desc}`);
+            });
+          }
+          
           return { ...note, path: updatedNote.path };
         }
         return note;

@@ -5,6 +5,7 @@ export const runtime = 'nodejs';
 interface PathNode {
   path: string;
   segments: string[];
+  descriptor: string; // Human-readable description of what this path segment represents
   noteIds: string[];
   children?: Record<string, PathNode>;
 }
@@ -150,33 +151,55 @@ Category: ${n.category}
 Current Path: ${n.path ? n.path.path : 'none'}
 Context: ${JSON.stringify(n.context || {})}`).join('\n\n')}
 
-YOUR TASK:
-1. Analyze each note's content, category, and context
-2. Assign a hierarchical path to each note that flows from broad → specific
-3. Paths should use dot notation: category.subcategory.item.detail
-4. Use underscores for multi-word segments: motion_to_compel, bank_statements
-5. Be consistent with existing paths when notes are related
-6. Create new path branches when notes represent new concepts
+YOUR CRITICAL TASK:
+Create HIGHLY GRANULAR and SPECIFIC hierarchical paths where the path ALONE (with descriptors) provides complete unambiguous context.
 
-PATH EXAMPLES:
-- case.jurisdiction.court.location.address
+GRANULARITY REQUIREMENTS:
+1. Each path must be detailed enough to be self-explanatory
+2. Avoid generic segments like "deadlines" - instead be specific like "motion_to_compel.deadlines.payment_due"
+3. Include intermediate organizational layers (e.g., proceedings, motions, evidence_types)
+4. Each segment must have a clear, specific descriptor that explains what it represents
+5. The full path with descriptors should answer: what case/document/item, what proceeding/event, what specific aspect
+
+PATH STRUCTURE PRINCIPLES:
+- Flow from most general → most specific
+- Use underscores for multi-word segments (motion_to_compel, bank_statements)
+- Include case identifiers, document types, proceeding names in descriptors
+- Be specific enough to avoid ambiguity
+
+GOOD vs BAD PATH EXAMPLES:
+
+BAD (too generic):
+- case.deadlines.payment_due
+  Descriptors: ["civil case csrv01874", "sanctions deadline for motion to compel deposition", "amount due in sanctions"]
+  Problem: "deadlines" is ambiguous - which proceeding?
+
+GOOD (granular and specific):
+- case.proceedings.motion_to_compel.deadlines.payment_due
+  Descriptors: ["civil case csrv01874", "hearings, motions and other court proceedings for this case", "motion to compel deposition of defendant", "deadlines for this motion", "amount due in sanctions"]
+  Better: Clear hierarchy from case → proceedings → specific motion → deadlines → specific payment
+
+BAD:
+- case.parties.name
+  Descriptors: ["civil case csrv01874", "parties involved", "plaintiff name"]
+
+GOOD:
 - case.parties.plaintiff.name
-- case.parties.defendant.attorney
-- case.events.hearings.motion_to_compel.date
-- case.events.hearings.motion_to_compel.summary
-- case.evidence.bank_statements.date
-- case.evidence.bank_statements.amount
-- document.contract.title
-- document.contract.date_signed
-- document.motion_to_compel.date_filed
-- evidence.emails.from
-- evidence.emails.subject
+  Descriptors: ["civil case csrv01874", "parties involved in the case", "plaintiff party", "full legal name of plaintiff"]
 
-RESTRUCTURING:
-If adding these notes reveals that the existing graph should be reorganized:
-- Set "restructured": true
-- Update paths for affected notes in updatedNotes array
-- Include ALL notes that have path changes (old notes + new notes)
+BAD:
+- document.dates.filed
+  
+GOOD:
+- document.motion_to_compel.filing_details.date_filed
+  Descriptors: ["legal documents related to case", "motion to compel deposition of defendant", "filing and submission details", "date document was filed with court"]
+
+DESCRIPTOR REQUIREMENTS:
+Each node must have a "descriptor" field that:
+1. Provides specific, contextual information about that segment
+2. Includes identifiers (case numbers, document names, party names)
+3. Explains the organizational purpose of that level
+4. Makes the segment understandable in isolation
 
 RESPONSE FORMAT (JSON only):
 {
@@ -185,22 +208,34 @@ RESPONSE FORMAT (JSON only):
       "case": {
         "path": "case",
         "segments": ["case"],
+        "descriptor": "civil case csrv01874",
         "noteIds": [],
         "children": {
-          "parties": {
-            "path": "case.parties",
-            "segments": ["case", "parties"],
+          "proceedings": {
+            "path": "case.proceedings",
+            "segments": ["case", "proceedings"],
+            "descriptor": "hearings, motions and other court proceedings for this case",
             "noteIds": [],
             "children": {
-              "plaintiff": {
-                "path": "case.parties.plaintiff",
-                "segments": ["case", "parties", "plaintiff"],
+              "motion_to_compel": {
+                "path": "case.proceedings.motion_to_compel",
+                "segments": ["case", "proceedings", "motion_to_compel"],
+                "descriptor": "motion to compel deposition of defendant",
                 "noteIds": [],
                 "children": {
-                  "name": {
-                    "path": "case.parties.plaintiff.name",
-                    "segments": ["case", "parties", "plaintiff", "name"],
-                    "noteIds": ["note-123"]
+                  "deadlines": {
+                    "path": "case.proceedings.motion_to_compel.deadlines",
+                    "segments": ["case", "proceedings", "motion_to_compel", "deadlines"],
+                    "descriptor": "deadlines and time requirements for this motion",
+                    "noteIds": [],
+                    "children": {
+                      "payment_due": {
+                        "path": "case.proceedings.motion_to_compel.deadlines.payment_due",
+                        "segments": ["case", "proceedings", "motion_to_compel", "deadlines", "payment_due"],
+                        "descriptor": "amount due in sanctions for this motion",
+                        "noteIds": ["note-123"]
+                      }
+                    }
                   }
                 }
               }
@@ -215,14 +250,16 @@ RESPONSE FORMAT (JSON only):
     {
       "id": "note-123",
       "path": {
-        "path": "case.parties.plaintiff.name",
-        "segments": ["case", "parties", "plaintiff", "name"],
+        "path": "case.proceedings.motion_to_compel.deadlines.payment_due",
+        "segments": ["case", "proceedings", "motion_to_compel", "deadlines", "payment_due"],
         "references": []
       }
     }
   ],
   "restructured": false
 }
+
+REMEMBER: Be VERY specific and granular. Each path should have enough intermediate segments to be completely unambiguous.
 
 Return ONLY the JSON, no other text.`;
 }

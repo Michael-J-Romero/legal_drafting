@@ -6,6 +6,7 @@
 export interface PathNode {
   path: string;
   segments: string[];
+  descriptor: string; // Human-readable description of what this path segment represents
   noteIds: string[];
   children?: Record<string, PathNode>;
 }

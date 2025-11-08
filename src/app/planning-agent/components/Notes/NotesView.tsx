@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Note } from '../../types';
+import { loadPathGraph, PathGraph, PathNode } from '../../pathGraph';
 
 interface NotesViewProps {
   notes: Note[];
@@ -74,6 +75,38 @@ export default function NotesView({
   
   // Raw data view state
   const [viewingRawNote, setViewingRawNote] = useState<Note | null>(null);
+  
+  // Path graph for descriptors
+  const [pathGraph, setPathGraph] = useState<PathGraph | null>(null);
+  
+  // Load path graph on mount
+  useEffect(() => {
+    const graph = loadPathGraph();
+    setPathGraph(graph);
+  }, [notes]); // Reload when notes change
+  
+  // Helper to get path descriptors from the graph
+  const getPathDescriptors = (path: string): string[] => {
+    if (!pathGraph || !path) return [];
+    
+    const segments = path.split('.');
+    const descriptors: string[] = [];
+    let currentNodes = pathGraph.nodes;
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const node = currentNodes[segment];
+      
+      if (node && node.descriptor) {
+        descriptors.push(node.descriptor);
+        currentNodes = node.children || {};
+      } else {
+        break;
+      }
+    }
+    
+    return descriptors;
+  };
 
   const handleRefineNotes = async () => {
     if (notes.length === 0) {
@@ -704,12 +737,47 @@ export default function NotesView({
               </div>
               {viewingRawNote.path ? (
                 <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6 }}>
-                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#2563eb', marginBottom: 8 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#2563eb', marginBottom: 12 }}>
                     <strong>Full Path:</strong> {viewingRawNote.path.path}
                   </div>
-                  <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 12 }}>
                     <strong>Segments:</strong> {viewingRawNote.path.segments.join(' → ')}
                   </div>
+                  
+                  {/* Display descriptors */}
+                  {(() => {
+                    const descriptors = getPathDescriptors(viewingRawNote.path.path);
+                    if (descriptors.length > 0) {
+                      return (
+                        <div style={{ marginBottom: 12 }}>
+                          <strong style={{ fontSize: 12, color: '#1e40af' }}>Path Descriptors:</strong>
+                          <div style={{ marginTop: 8, paddingLeft: 12, borderLeft: '3px solid #2563eb' }}>
+                            {descriptors.map((desc, idx) => (
+                              <div key={idx} style={{ 
+                                fontSize: 12, 
+                                color: '#374151', 
+                                marginBottom: 6,
+                                fontStyle: 'italic'
+                              }}>
+                                <span style={{ 
+                                  fontFamily: 'monospace', 
+                                  color: '#2563eb', 
+                                  fontWeight: 600,
+                                  fontStyle: 'normal',
+                                  marginRight: 8
+                                }}>
+                                  {viewingRawNote.path.segments[idx]}
+                                </span>
+                                → {desc}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
                   {viewingRawNote.path.references && viewingRawNote.path.references.length > 0 && (
                     <div style={{ fontSize: 12, color: '#7c3aed' }}>
                       <strong>References:</strong>
