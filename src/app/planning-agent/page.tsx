@@ -504,6 +504,8 @@ export default function PlanningAgentPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as StoredChatSession[];
         const hydrated = hydrateChats(parsed);
+        const totalNotes = hydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] Loaded', hydrated.length, 'chats with', totalNotes, 'total notes from localStorage');
         setChats(hydrated);
         setActiveChatId(hydrated[0]?.id ?? null);
       } else {
@@ -522,6 +524,8 @@ export default function PlanningAgentPage() {
   useEffect(() => {
     try {
       const dehydrated = dehydrateChats(chats);
+      const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+      console.log('[NOTES PERSISTENCE] Saving', chats.length, 'chats with', totalNotes, 'total notes to localStorage');
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
     } catch (e) {
       console.error('Failed to save chats to storage', e);
@@ -807,13 +811,20 @@ export default function PlanningAgentPage() {
   // Note management functions
   function addNote(note: Note) {
     if (!activeChat) return;
-    setChats((prev) =>
-      prev.map((c) => 
+    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id);
+    setChats((prev) => {
+      const updated = prev.map((c) => 
         c.id === activeChat.id 
           ? { ...c, notes: [...(c.notes || []), note], updatedAt: new Date().toISOString() } 
           : c
-      )
-    );
+      );
+      const updatedChat = updated.find(c => c.id === activeChat.id);
+      if (updatedChat) {
+        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes.length, 'notes');
+      }
+      // Force new array reference for React to detect change
+      return [...updated];
+    });
   }
 
   function updateNote(noteId: string, updates: Partial<Note>) {
