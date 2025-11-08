@@ -363,26 +363,70 @@ export default function PlanView() {
     setIsLoading(true);
 
     try {
-      // Call AI to process the plan request
+      // Build context-aware prompt
+      let systemPrompt = `You are a planning assistant helping users build hierarchical project plans.
+
+Current state:
+${plan ? `- Plan exists: "${plan.title}"
+- End Goal: ${plan.context.endGoal}
+- Starting Point: ${plan.context.startingPoint}
+- Current steps: ${plan.rootNodes.length} root nodes` : '- No plan created yet'}
+
+Your role:
+1. If no plan exists and user defines goal/starting point, create the plan
+2. If plan exists, suggest intermediate steps based on user's request
+3. Always respond conversationally AND provide structured data
+
+Format your response as:
+1. Natural language explanation
+2. A JSON block with structure:
+
+\`\`\`json
+{
+  "action": "create_plan" | "add_step" | "update_status",
+  "data": {
+    // For create_plan:
+    "title": "plan title",
+    "endGoal": "the end goal",
+    "startingPoint": "the starting point"
+    
+    // For add_step:
+    "title": "step title",
+    "description": "step description",
+    "parentId": null or "parent-node-id"
+    
+    // For update_status:
+    "nodeId": "node-id",
+    "status": "pending" | "in-progress" | "completed" | "blocked"
+  }
+}
+\`\`\`
+
+User request: ${userMessage.content}`;
+
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `You are a planning assistant. The user is building a hierarchical plan. ${plan ? `Current plan: ${JSON.stringify(serializePlan(plan))}` : 'No plan exists yet.'}\n\nUser request: ${userMessage.content}\n\nRespond with plan modifications in JSON format: {"action": "create_plan" | "add_step" | "modify_step" | "update_status", "data": {...}}`,
-          messages: messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp.toISOString() })),
+          message: systemPrompt,
+          messages: messages.slice(-5).map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp.toISOString() })),
           settings: {
             model: 'gpt-4o',
             maxIterations: 1,
-            contextWindowSize: 4000,
+            contextWindowSize: 8000,
           },
         }),
       });
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error (${response.status}): ${errorText || 'Unknown error'}`);
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = '';
+      let buffer = '';
 
       if (reader) {
         while (true) {
@@ -390,30 +434,92 @@ export default function PlanView() {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          buffer += chunk;
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
+          // Split by double newline to get complete SSE messages
+          const sseMessages = buffer.split('\n\n');
+          buffer = sseMessages.pop() || '';
 
-            try {
-              const data = JSON.parse(jsonStr);
-              if (data.type === 'output_text_delta' && data.data?.delta) {
-                assistantMessage += data.data.delta;
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMsg = newMessages[newMessages.length - 1];
-                  if (lastMsg && lastMsg.role === 'assistant') {
-                    newMessages[newMessages.length - 1] = { ...lastMsg, content: assistantMessage };
-                  } else {
-                    newMessages.push({ id: generateId(), role: 'assistant', content: assistantMessage, timestamp: new Date() });
-                  }
-                  return newMessages;
-                });
+          for (const sseMsg of sseMessages) {
+            const lines = sseMsg.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+
+              try {
+                const data = JSON.parse(jsonStr);
+                
+                // Handle error events from the stream
+                if (data.error || data.type === 'error') {
+                  const errorMsg = data.error || data.message || 'An error occurred';
+                  console.error('Stream error:', errorMsg);
+                  
+                  // Show error to user
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMsg = newMessages[newMessages.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { 
+                        ...lastMsg, 
+                        content: `⚠️ Error: ${errorMsg}\n\nPlease check that:\n1. OPENAI_API_KEY is set in your environment\n2. The API key is valid\n3. You have sufficient API credits` 
+                      };
+                    } else {
+                      newMessages.push({ 
+                        id: generateId(), 
+                        role: 'assistant', 
+                        content: `⚠️ Error: ${errorMsg}\n\nPlease check that:\n1. OPENAI_API_KEY is set in your environment\n2. The API key is valid\n3. You have sufficient API credits`,
+                        timestamp: new Date() 
+                      });
+                    }
+                    return newMessages;
+                  });
+                  setIsLoading(false);
+                  return; // Stop processing
+                }
+                
+                if (data.type === 'output_text_delta' && data.data?.delta) {
+                  assistantMessage += data.data.delta;
+                  
+                  // Update message display in real-time
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMsg = newMessages[newMessages.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...lastMsg, content: assistantMessage };
+                    } else {
+                      newMessages.push({ 
+                        id: generateId(), 
+                        role: 'assistant', 
+                        content: assistantMessage, 
+                        timestamp: new Date() 
+                      });
+                    }
+                    return newMessages;
+                  });
+                } else if (data.type === 'raw_model_stream_event' && data.data?.type === 'output_text_delta' && data.data.delta) {
+                  assistantMessage += data.data.delta;
+                  
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastMsg = newMessages[newMessages.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant') {
+                      newMessages[newMessages.length - 1] = { ...lastMsg, content: assistantMessage };
+                    } else {
+                      newMessages.push({ 
+                        id: generateId(), 
+                        role: 'assistant', 
+                        content: assistantMessage, 
+                        timestamp: new Date() 
+                      });
+                    }
+                    return newMessages;
+                  });
+                }
+              } catch (err) {
+                // Skip malformed JSON
+                console.warn('Skipped malformed JSON:', jsonStr.substring(0, 100));
               }
-            } catch (err) {
-              // Skip malformed JSON
             }
           }
         }
@@ -421,23 +527,47 @@ export default function PlanView() {
 
       // Parse AI response and update plan
       if (assistantMessage) {
-        // Try to extract JSON from the response
-        const jsonMatch = assistantMessage.match(/\{[\s\S]*"action"[\s\S]*\}/);
-        if (jsonMatch) {
+        // Extract JSON block from markdown code fence
+        const jsonBlockMatch = assistantMessage.match(/```json\s*([\s\S]*?)\s*```/);
+        let planUpdate = null;
+
+        if (jsonBlockMatch) {
           try {
-            const planUpdate = JSON.parse(jsonMatch[0]);
-            updatePlan(planUpdate);
+            planUpdate = JSON.parse(jsonBlockMatch[1]);
           } catch (e) {
-            console.error('Failed to parse plan update', e);
+            console.error('Failed to parse JSON block:', e);
           }
         }
 
-        // Finalize assistant message
+        // Fallback: try to find raw JSON object
+        if (!planUpdate) {
+          const jsonMatch = assistantMessage.match(/\{\s*"action"\s*:\s*"[^"]+"\s*,\s*"data"\s*:\s*\{[\s\S]*?\}\s*\}/);
+          if (jsonMatch) {
+            try {
+              planUpdate = JSON.parse(jsonMatch[0]);
+            } catch (e) {
+              console.error('Failed to parse raw JSON:', e);
+            }
+          }
+        }
+
+        // Apply plan update if found
+        if (planUpdate && planUpdate.action && planUpdate.data) {
+          console.log('Applying plan update:', planUpdate);
+          updatePlan(planUpdate);
+        }
+
+        // Ensure assistant message is finalized
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
           if (!lastMsg || lastMsg.role !== 'assistant') {
-            newMessages.push({ id: generateId(), role: 'assistant', content: assistantMessage, timestamp: new Date() });
+            newMessages.push({ 
+              id: generateId(), 
+              role: 'assistant', 
+              content: assistantMessage, 
+              timestamp: new Date() 
+            });
           }
           return newMessages;
         });
@@ -446,7 +576,12 @@ export default function PlanView() {
       console.error('Error:', error);
       setMessages((prev) => [
         ...prev,
-        { id: generateId(), role: 'assistant', content: `Error: ${error instanceof Error ? error.message : 'Failed to process request'}`, timestamp: new Date() },
+        { 
+          id: generateId(), 
+          role: 'assistant', 
+          content: `Error: ${error instanceof Error ? error.message : 'Failed to process request'}`, 
+          timestamp: new Date() 
+        },
       ]);
     } finally {
       setIsLoading(false);
