@@ -184,10 +184,9 @@ function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] }
 
   yOffset += 100;
 
-  // Add plan nodes
-  const addNodeToFlow = (planNode: PlanNode, depth: number, parentId: string) => {
-    const xOffset = 100 + depth * 50;
-    
+  // Improved node positioning that handles branches
+  let nodeCounter = 0;
+  const addNodeToFlow = (planNode: PlanNode, depth: number, parentId: string, siblingIndex: number, totalSiblings: number) => {
     const statusColors = {
       'pending': { bg: '#f3f4f6', border: '#9ca3af' },
       'in-progress': { bg: '#fef3c7', border: '#f59e0b' },
@@ -197,10 +196,22 @@ function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] }
 
     const colors = statusColors[planNode.status] || statusColors.pending;
 
+    // Calculate position based on depth and sibling index
+    // For branches (multiple siblings), spread them horizontally
+    let xOffset = 250; // Center by default
+    if (totalSiblings > 1) {
+      // Spread siblings horizontally
+      const spacing = 250;
+      const totalWidth = (totalSiblings - 1) * spacing;
+      xOffset = 250 - totalWidth / 2 + siblingIndex * spacing;
+    }
+
+    const yPos = yOffset + depth * 120;
+
     nodes.push({
       id: planNode.id,
       data: { label: planNode.title },
-      position: { x: xOffset, y: yOffset },
+      position: { x: xOffset, y: yPos },
       style: {
         background: colors.bg,
         border: `2px solid ${colors.border}`,
@@ -218,23 +229,34 @@ function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] }
       style: { stroke: colors.border },
     });
 
-    yOffset += 80;
-
-    planNode.children.forEach((child) => {
-      addNodeToFlow(child, depth + 1, planNode.id);
+    // Recursively add children
+    planNode.children.forEach((child, index) => {
+      addNodeToFlow(child, depth + 1, planNode.id, index, planNode.children.length);
     });
   };
 
-  plan.rootNodes.forEach((rootNode) => {
-    addNodeToFlow(rootNode, 0, 'start');
+  // Add all root nodes with proper sibling positioning
+  plan.rootNodes.forEach((rootNode, index) => {
+    addNodeToFlow(rootNode, 0, 'start', index, plan.rootNodes.length);
   });
+
+  // Calculate the final yOffset based on the deepest node
+  const calculateMaxDepth = (nodes: PlanNode[], depth: number = 0): number => {
+    if (nodes.length === 0) return depth;
+    return Math.max(...nodes.map(node => 
+      node.children.length > 0 ? calculateMaxDepth(node.children, depth + 1) : depth
+    ));
+  };
+
+  const maxDepth = plan.rootNodes.length > 0 ? calculateMaxDepth(plan.rootNodes) : 0;
+  const goalYOffset = yOffset + (maxDepth + 1) * 120 + 50;
 
   // Add end goal node
   nodes.push({
     id: 'goal',
     type: 'output',
     data: { label: plan.context.endGoal || 'End Goal' },
-    position: { x: 250, y: yOffset },
+    position: { x: 250, y: goalYOffset },
     style: {
       background: '#dbeafe',
       border: '2px solid #3b82f6',
@@ -365,44 +387,110 @@ export default function PlanView() {
     setIsLoading(true);
 
     try {
-      // Build context-aware prompt
+      // Build context-aware prompt with better instructions for multiple steps
       let systemPrompt = `You are a planning assistant helping users build hierarchical project plans.
 
 Current state:
 ${plan ? `- Plan exists: "${plan.title}"
 - End Goal: ${plan.context.endGoal}
 - Starting Point: ${plan.context.startingPoint}
-- Current steps: ${plan.rootNodes.length} root nodes` : '- No plan created yet'}
+- Current steps: ${plan.rootNodes.length} root nodes
+${plan.rootNodes.length > 0 ? `\nExisting nodes:\n${JSON.stringify(plan.rootNodes.map(n => ({ id: n.id, title: n.title, children: n.children.map(c => ({ id: c.id, title: c.title })) })), null, 2)}` : ''}` : '- No plan created yet'}
 
 Your role:
 1. If no plan exists and user defines goal/starting point, create the plan
 2. If plan exists, suggest intermediate steps based on user's request
-3. Always respond conversationally AND provide structured data
+3. When suggesting multiple steps, include ALL of them in a single response
+4. For parallel steps (branches), set the same parentId for all siblings
+5. Always respond conversationally AND provide structured data
 
 Format your response as:
-1. Natural language explanation
-2. A JSON block with structure:
+1. Natural language explanation of the steps
+2. A JSON block with one of these structures:
 
+**For creating a new plan:**
 \`\`\`json
 {
-  "action": "create_plan" | "add_step" | "update_status",
+  "action": "create_plan",
   "data": {
-    // For create_plan:
     "title": "plan title",
     "endGoal": "the end goal",
     "startingPoint": "the starting point"
-    
-    // For add_step:
+  }
+}
+\`\`\`
+
+**For adding ONE step:**
+\`\`\`json
+{
+  "action": "add_step",
+  "data": {
     "title": "step title",
     "description": "step description",
-    "parentId": null or "parent-node-id"
-    
-    // For update_status:
+    "parentId": null
+  }
+}
+\`\`\`
+
+**For adding MULTIPLE steps (use this when user asks for a plan with multiple steps):**
+\`\`\`json
+{
+  "action": "add_steps",
+  "data": {
+    "steps": [
+      {
+        "title": "First step",
+        "description": "Description",
+        "parentId": null
+      },
+      {
+        "title": "Second step",
+        "description": "Description",
+        "parentId": null
+      },
+      {
+        "title": "Third step",
+        "description": "Description",
+        "parentId": null
+      }
+    ]
+  }
+}
+\`\`\`
+
+**For creating branches (parallel steps from same parent):**
+\`\`\`json
+{
+  "action": "add_steps",
+  "data": {
+    "steps": [
+      {
+        "title": "Branch A",
+        "description": "First parallel path",
+        "parentId": "parent-node-id"
+      },
+      {
+        "title": "Branch B",
+        "description": "Second parallel path",
+        "parentId": "parent-node-id"
+      }
+    ]
+  }
+}
+\`\`\`
+
+**For updating status:**
+\`\`\`json
+{
+  "action": "update_status",
+  "data": {
     "nodeId": "node-id",
     "status": "pending" | "in-progress" | "completed" | "blocked"
   }
 }
 \`\`\`
+
+IMPORTANT: When the user asks for a plan or multiple steps, use "add_steps" (plural) with an array of steps, NOT multiple separate "add_step" calls.
 
 User request: ${userMessage.content}`;
 
@@ -610,6 +698,7 @@ User request: ${userMessage.content}`;
       };
       setPlan(newPlan);
     } else if (planUpdate.action === 'add_step' && planUpdate.data && plan) {
+      // Single step addition
       const newNode: PlanNode = {
         id: generateId(),
         title: planUpdate.data.title || 'New Step',
@@ -636,6 +725,55 @@ User request: ${userMessage.content}`;
         };
         setPlan({ ...plan, rootNodes: addToNode(plan.rootNodes), updatedAt: now });
       }
+    } else if (planUpdate.action === 'add_steps' && planUpdate.data?.steps && Array.isArray(planUpdate.data.steps) && plan) {
+      // Multiple steps addition - this is the new feature
+      const newNodes: PlanNode[] = planUpdate.data.steps.map((stepData: any) => ({
+        id: generateId(),
+        title: stepData.title || 'New Step',
+        description: stepData.description,
+        status: 'pending',
+        parentId: stepData.parentId || null,
+        children: [],
+        createdAt: now,
+        updatedAt: now,
+      }));
+
+      // Group nodes by parentId for efficient insertion
+      const rootNewNodes = newNodes.filter(n => !n.parentId);
+      const childNewNodes = newNodes.filter(n => n.parentId);
+
+      // Start with adding root nodes
+      let updatedRootNodes = [...plan.rootNodes, ...rootNewNodes];
+
+      // Add child nodes to their parents
+      if (childNewNodes.length > 0) {
+        const addChildrenToNode = (nodes: PlanNode[]): PlanNode[] => {
+          return nodes.map((node) => {
+            // Find children for this node
+            const childrenForThisNode = childNewNodes.filter(child => child.parentId === node.id);
+            
+            if (childrenForThisNode.length > 0) {
+              // Add the children to this node
+              return { 
+                ...node, 
+                children: [...node.children, ...childrenForThisNode],
+                updatedAt: now 
+              };
+            }
+            
+            // Recursively check this node's children
+            if (node.children.length > 0) {
+              return { ...node, children: addChildrenToNode(node.children) };
+            }
+            
+            return node;
+          });
+        };
+
+        updatedRootNodes = addChildrenToNode(updatedRootNodes);
+      }
+
+      setPlan({ ...plan, rootNodes: updatedRootNodes, updatedAt: now });
     } else if (planUpdate.action === 'update_status' && planUpdate.data && plan) {
       const updateNodeStatus = (nodes: PlanNode[]): PlanNode[] => {
         return nodes.map((node) => {
