@@ -127,7 +127,8 @@ function deserializeNode(stored: any): PlanNode {
 
 // Convert plan tree to React Flow nodes and edges
 function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] } {
-  if (!plan || plan.rootNodes.length === 0) {
+  if (!plan) {
+    // No plan exists yet - show placeholders
     return {
       nodes: [
         {
@@ -161,6 +162,7 @@ function planToFlowElements(plan: Plan | null): { nodes: Node[]; edges: Edge[] }
     };
   }
 
+  // Plan exists - show actual starting point and end goal
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   let yOffset = 50;
