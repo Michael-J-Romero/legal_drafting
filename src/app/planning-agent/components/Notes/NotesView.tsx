@@ -186,8 +186,8 @@ export default function NotesView({
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
-      <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -284,7 +284,7 @@ export default function NotesView({
 
       {/* Error Message */}
       {errorMessage && (
-        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444' }}>
+        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444', flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b' }}>
               ❌ Error: {errorMessage}
@@ -309,7 +309,7 @@ export default function NotesView({
 
       {/* Refinement Results */}
       {refinementResult && (
-        <div style={{ padding: 16, backgroundColor: '#dbeafe', borderBottom: '1px solid #3b82f6' }}>
+        <div style={{ padding: 16, backgroundColor: '#dbeafe', borderBottom: '1px solid #3b82f6', flexShrink: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af', marginBottom: 8 }}>
             ✨ Refinement Complete
           </div>
@@ -420,7 +420,7 @@ export default function NotesView({
 
       {/* Pending Notes (waiting for approval) */}
       {pendingNotes.length > 0 && (
-        <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7' }}>
+        <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7', flexShrink: 0 }}>
           <div style={{ padding: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#92400e', marginBottom: 12 }}>
               ⚠️ New Notes (Review & Accept)
