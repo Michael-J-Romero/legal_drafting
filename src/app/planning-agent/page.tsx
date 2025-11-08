@@ -522,6 +522,11 @@ export default function PlanningAgentPage() {
 
   // Persist to localStorage when chats change
   useEffect(() => {
+    if (chats.length === 0) {
+      console.log('[NOTES PERSISTENCE] Skipping save - no chats yet');
+      return;
+    }
+    
     try {
       const dehydrated = dehydrateChats(chats);
       const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
@@ -810,20 +815,35 @@ export default function PlanningAgentPage() {
 
   // Note management functions
   function addNote(note: Note) {
-    if (!activeChat) return;
-    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id);
+    if (!activeChat) {
+      console.warn('[NOTES PERSISTENCE] Cannot add note - no active chat');
+      return;
+    }
+    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'activeChat:', activeChat.id);
+    
     setChats((prev) => {
-      const updated = prev.map((c) => 
-        c.id === activeChat.id 
-          ? { ...c, notes: [...(c.notes || []), note], updatedAt: new Date().toISOString() } 
-          : c
-      );
+      const updated = prev.map((c) => {
+        if (c.id === activeChat.id) {
+          const newNotes = [...(c.notes || []), note];
+          console.log('[NOTES PERSISTENCE] Updating chat', c.id, 'from', (c.notes || []).length, 'to', newNotes.length, 'notes');
+          return { 
+            ...c, 
+            notes: newNotes, 
+            updatedAt: new Date().toISOString() 
+          };
+        }
+        return c;
+      });
+      
       const updatedChat = updated.find(c => c.id === activeChat.id);
       if (updatedChat) {
-        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes.length, 'notes');
+        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes?.length || 0, 'notes');
       }
+      
       // Force new array reference for React to detect change
-      return [...updated];
+      const newArray = [...updated];
+      console.log('[NOTES PERSISTENCE] Returning new chats array with length', newArray.length);
+      return newArray;
     });
   }
 
