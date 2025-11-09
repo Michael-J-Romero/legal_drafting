@@ -31,6 +31,42 @@ interface PathGraph {
  * - Maintains a persistent graph structure
  * - Intelligently restructures when needed
  */
+/**
+ * Helper function to find a note's path in the graph by searching all nodes
+ */
+function findNotePathInGraph(graph: any, noteId: string): any | null {
+  function searchNode(node: any): any | null {
+    // Check if this node contains the note
+    if (node.noteIds && node.noteIds.includes(noteId)) {
+      return {
+        path: node.path,
+        segments: node.segments || node.path.split('.'),
+        references: [] // Can be populated later if needed
+      };
+    }
+    
+    // Search children
+    if (node.children) {
+      for (const childKey of Object.keys(node.children)) {
+        const result = searchNode(node.children[childKey]);
+        if (result) return result;
+      }
+    }
+    
+    return null;
+  }
+  
+  // Search all top-level nodes
+  if (graph && graph.nodes) {
+    for (const nodeKey of Object.keys(graph.nodes)) {
+      const result = searchNode(graph.nodes[nodeKey]);
+      if (result) return result;
+    }
+  }
+  
+  return null;
+}
+
 export async function POST(request: Request) {
   try {
     const { action, notes, existingGraph, deletedNoteIds } = await request.json();
@@ -128,9 +164,28 @@ export async function POST(request: Request) {
         }
       }
 
+      // If AI didn't return updatedNotes, extract paths from graph
+      let updatedNotes = result.updatedNotes;
+      if (!updatedNotes || updatedNotes.length === 0) {
+        console.log('[PATH GRAPH] AI did not return updatedNotes, extracting from graph...');
+        updatedNotes = notes.map(note => {
+          // Find this note's path in the graph
+          const notePath = findNotePathInGraph(result.graph, note.id);
+          if (notePath) {
+            console.log(`[PATH GRAPH] Extracted path for note ${note.id}: ${notePath.path}`);
+            return {
+              ...note,
+              path: notePath
+            };
+          }
+          console.warn(`[PATH GRAPH] Could not find path for note ${note.id} in graph`);
+          return note;
+        });
+      }
+
       return NextResponse.json({
         graph: result.graph,
-        updatedNotes: result.updatedNotes || notes,
+        updatedNotes,
         restructured: result.restructured || false,
         migrations: result.migrations || [],
         success: true
