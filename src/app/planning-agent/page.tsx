@@ -815,15 +815,17 @@ export default function PlanningAgentPage() {
 
   // Note management functions
   function addNote(note: Note) {
-    if (!activeChat) {
-      console.warn('[NOTES PERSISTENCE] Cannot add note - no active chat');
+    if (!activeChatId) {
+      console.warn('[NOTES PERSISTENCE] Cannot add note - no active chat ID');
       return;
     }
-    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'activeChat:', activeChat.id);
+    
+    const chatId = activeChatId; // Capture at call time
+    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'chatId:', chatId);
     
     setChats((prev) => {
       const updated = prev.map((c) => {
-        if (c.id === activeChat.id) {
+        if (c.id === chatId) {
           const newNotes = [...(c.notes || []), note];
           console.log('[NOTES PERSISTENCE] Updating chat', c.id, 'from', (c.notes || []).length, 'to', newNotes.length, 'notes');
           return { 
@@ -835,7 +837,7 @@ export default function PlanningAgentPage() {
         return c;
       });
       
-      const updatedChat = updated.find(c => c.id === activeChat.id);
+      const updatedChat = updated.find(c => c.id === chatId);
       if (updatedChat) {
         console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes?.length || 0, 'notes');
       }
