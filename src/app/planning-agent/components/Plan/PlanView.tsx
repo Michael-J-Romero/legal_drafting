@@ -731,7 +731,15 @@ User request: ${userMessage.content}`;
         // Apply plan update if found
         if (planUpdate && planUpdate.action && planUpdate.data) {
           console.log('Applying plan update:', planUpdate);
-          updatePlan(planUpdate);
+          try {
+            console.log('About to call updatePlan function...');
+            updatePlan(planUpdate);
+            console.log('updatePlan function call completed');
+          } catch (error) {
+            console.error('ERROR in updatePlan:', error);
+          }
+        } else {
+          console.log('No plan update found in AI response. planUpdate:', planUpdate);
         }
 
         // Ensure assistant message is finalized
