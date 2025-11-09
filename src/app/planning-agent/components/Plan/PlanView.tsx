@@ -505,10 +505,33 @@ export default function PlanView() {
         };
         setPlan({ ...plan, rootNodes: addToNode(plan.rootNodes), updatedAt: now });
       }
-    } else if (planUpdate.action === 'add_steps' && planUpdate.data?.steps && Array.isArray(planUpdate.data.steps) && plan) {
+    } else if (planUpdate.action === 'add_steps' && planUpdate.data?.steps && Array.isArray(planUpdate.data.steps)) {
       console.log('=== ADD_STEPS ACTION ===');
       console.log('Number of steps to add:', planUpdate.data.steps.length);
       console.log('Steps data:', planUpdate.data.steps);
+      
+      // Create a plan if it doesn't exist yet
+      if (!plan) {
+        console.log('No plan exists, creating one automatically');
+        const newPlan: Plan = {
+          id: generateId(),
+          title: 'New Plan',
+          rootNodes: [],
+          context: {
+            currentNodeId: null,
+            endGoal: '',
+            startingPoint: '',
+            notes: undefined,
+            lastActivityAt: now,
+          },
+          createdAt: now,
+          updatedAt: now,
+        };
+        setPlan(newPlan);
+        // Use the new plan for adding steps
+        plan = newPlan;
+        console.log('Created plan for steps:', newPlan);
+      }
       
       // Multiple steps addition with ID mapping
       // Create a map from temporary IDs (from AI) to actual generated IDs
