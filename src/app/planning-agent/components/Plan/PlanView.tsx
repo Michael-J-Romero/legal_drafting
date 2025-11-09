@@ -453,6 +453,202 @@ export default function PlanView() {
     setEditingNode(null);
   };
 
+  // Define updatePlan BEFORE handleSendMessage so it's available when needed
+  const updatePlan = (planUpdate: any) => {
+    const now = new Date();
+    console.log('=== UPDATE PLAN CALLED ===');
+    console.log('Action:', planUpdate.action);
+    console.log('Current plan before update:', plan);
+
+    if (planUpdate.action === 'create_plan' && planUpdate.data) {
+      const newPlan: Plan = {
+        id: generateId(),
+        title: planUpdate.data.title || 'New Plan',
+        rootNodes: [],
+        context: {
+          currentNodeId: null,
+          endGoal: planUpdate.data.endGoal || '',
+          startingPoint: planUpdate.data.startingPoint || '',
+          notes: planUpdate.data.notes,
+          lastActivityAt: now,
+        },
+        createdAt: now,
+        updatedAt: now,
+      };
+      setPlan(newPlan);
+      console.log('Created new plan:', newPlan);
+    } else if (planUpdate.action === 'add_step' && planUpdate.data && plan) {
+      // Single step addition
+      const newNode: PlanNode = {
+        id: generateId(),
+        title: planUpdate.data.title || 'New Step',
+        description: planUpdate.data.description,
+        status: 'pending',
+        parentId: planUpdate.data.parentId || null,
+        children: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      if (!newNode.parentId) {
+        // Add as root node
+        setPlan({ ...plan, rootNodes: [...plan.rootNodes, newNode], updatedAt: now });
+      } else {
+        // Add as child to existing node
+        const addToNode = (nodes: PlanNode[]): PlanNode[] => {
+          return nodes.map((node) => {
+            if (node.id === newNode.parentId) {
+              return { ...node, children: [...node.children, newNode], updatedAt: now };
+            }
+            return { ...node, children: addToNode(node.children) };
+          });
+        };
+        setPlan({ ...plan, rootNodes: addToNode(plan.rootNodes), updatedAt: now });
+      }
+    } else if (planUpdate.action === 'add_steps' && planUpdate.data?.steps && Array.isArray(planUpdate.data.steps) && plan) {
+      console.log('=== ADD_STEPS ACTION ===');
+      console.log('Number of steps to add:', planUpdate.data.steps.length);
+      console.log('Steps data:', planUpdate.data.steps);
+      
+      // Multiple steps addition with ID mapping
+      // Create a map from temporary IDs (from AI) to actual generated IDs
+      const idMap: { [key: string]: string } = {};
+      
+      // First pass: create all nodes and build ID map
+      const newNodes: PlanNode[] = planUpdate.data.steps.map((stepData: any, index: number) => {
+        const actualId = generateId();
+        // If the step has a tempId or we can use index as temp ID
+        const tempId = stepData.tempId || stepData.id || `temp-${index}`;
+        idMap[tempId] = actualId;
+        
+        console.log(`Mapping tempId "${tempId}" -> actualId "${actualId}"`);
+        
+        return {
+          id: actualId,
+          title: stepData.title || 'New Step',
+          description: stepData.description,
+          status: 'pending',
+          parentId: stepData.parentId || null, // Will be remapped in second pass
+          children: [],
+          createdAt: now,
+          updatedAt: now,
+          tempId: tempId, // Keep track for second pass
+        } as PlanNode & { tempId: string };
+      });
+
+      console.log('ID Map:', idMap);
+      console.log('New nodes before parent remap:', newNodes.map(n => ({ id: n.id, title: n.title, parentId: (n as any).parentId })));
+
+      // Second pass: remap parentIds from temp IDs to actual IDs
+      newNodes.forEach((node: any) => {
+        if (node.parentId && idMap[node.parentId]) {
+          console.log(`Remapping parentId for "${node.title}": "${node.parentId}" -> "${idMap[node.parentId]}"`);
+          node.parentId = idMap[node.parentId];
+        } else if (node.parentId) {
+          console.log(`WARNING: Could not remap parentId "${node.parentId}" for "${node.title}" - not found in idMap`);
+        }
+        // Remove tempId as it's no longer needed
+        delete node.tempId;
+      });
+
+      console.log('New nodes after parent remap:', newNodes.map(n => ({ id: n.id, title: n.title, parentId: n.parentId })));
+
+      // Group nodes by parentId for efficient insertion
+      const rootNewNodes = newNodes.filter(n => !n.parentId);
+      const childNewNodes = newNodes.filter(n => n.parentId);
+
+      console.log(`Root nodes to add: ${rootNewNodes.length}`, rootNewNodes.map(n => n.title));
+      console.log(`Child nodes to add: ${childNewNodes.length}`, childNewNodes.map(n => ({ title: n.title, parentId: n.parentId })));
+
+      // Start with adding root nodes
+      let updatedRootNodes = [...plan.rootNodes, ...rootNewNodes];
+      console.log('After adding root nodes, total root nodes:', updatedRootNodes.length);
+
+      // Add child nodes to their parents (within newly created nodes)
+      if (childNewNodes.length > 0) {
+        console.log('Processing child nodes...');
+        // First, try to attach to newly created nodes
+        const attachToNewNodes = (nodes: PlanNode[]): PlanNode[] => {
+          return nodes.map((node) => {
+            const childrenForThisNode = childNewNodes.filter(child => child.parentId === node.id);
+            
+            if (childrenForThisNode.length > 0) {
+              console.log(`Attaching ${childrenForThisNode.length} children to node "${node.title}" (${node.id})`);
+              return { 
+                ...node, 
+                children: [...node.children, ...childrenForThisNode],
+                updatedAt: now 
+              };
+            }
+            
+            return node;
+          });
+        };
+
+        updatedRootNodes = attachToNewNodes(updatedRootNodes);
+        console.log('After attaching to new nodes');
+
+        // Then, try to attach remaining to existing nodes in the tree
+        const remainingChildren = childNewNodes.filter(child => {
+          // Check if this child was already attached
+          const findInNodes = (nodes: PlanNode[]): boolean => {
+            for (const node of nodes) {
+              if (node.children.some(c => c.id === child.id)) return true;
+              if (findInNodes(node.children)) return true;
+            }
+            return false;
+          };
+          return !findInNodes(updatedRootNodes);
+        });
+
+        console.log(`Remaining children not yet attached: ${remainingChildren.length}`, remainingChildren.map(n => n.title));
+
+        if (remainingChildren.length > 0) {
+          const addChildrenToExisting = (nodes: PlanNode[]): PlanNode[] => {
+            return nodes.map((node) => {
+              const childrenForThisNode = remainingChildren.filter(child => child.parentId === node.id);
+              
+              if (childrenForThisNode.length > 0) {
+                console.log(`Attaching ${childrenForThisNode.length} remaining children to existing node "${node.title}" (${node.id})`);
+                return { 
+                  ...node, 
+                  children: [...node.children, ...childrenForThisNode],
+                  updatedAt: now 
+                };
+              }
+              
+              if (node.children.length > 0) {
+                return { ...node, children: addChildrenToExisting(node.children) };
+              }
+              
+              return node;
+            });
+          };
+
+          updatedRootNodes = addChildrenToExisting(updatedRootNodes);
+        }
+      }
+
+      console.log('Final updated root nodes count:', updatedRootNodes.length);
+      console.log('Updated plan structure:', JSON.stringify(updatedRootNodes, null, 2));
+      
+      const updatedPlan = { ...plan, rootNodes: updatedRootNodes, updatedAt: now };
+      console.log('Setting plan with updated root nodes');
+      setPlan(updatedPlan);
+      console.log('=== ADD_STEPS COMPLETE ===');
+    } else if (planUpdate.action === 'update_status' && planUpdate.data && plan) {
+      const updateNodeStatus = (nodes: PlanNode[]): PlanNode[] => {
+        return nodes.map((node) => {
+          if (node.id === planUpdate.data.nodeId) {
+            return { ...node, status: planUpdate.data.status, updatedAt: now };
+          }
+          return { ...node, children: updateNodeStatus(node.children) };
+        });
+      };
+      setPlan({ ...plan, rootNodes: updateNodeStatus(plan.rootNodes), updatedAt: now });
+    }
+  };
+
   const handleCancelNodeEdit = () => {
     setEditingNode(null);
   };
@@ -770,201 +966,6 @@ User request: ${userMessage.content}`;
       ]);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const updatePlan = (planUpdate: any) => {
-    const now = new Date();
-    console.log('=== UPDATE PLAN CALLED ===');
-    console.log('Action:', planUpdate.action);
-    console.log('Current plan before update:', plan);
-
-    if (planUpdate.action === 'create_plan' && planUpdate.data) {
-      const newPlan: Plan = {
-        id: generateId(),
-        title: planUpdate.data.title || 'New Plan',
-        rootNodes: [],
-        context: {
-          currentNodeId: null,
-          endGoal: planUpdate.data.endGoal || '',
-          startingPoint: planUpdate.data.startingPoint || '',
-          notes: planUpdate.data.notes,
-          lastActivityAt: now,
-        },
-        createdAt: now,
-        updatedAt: now,
-      };
-      setPlan(newPlan);
-      console.log('Created new plan:', newPlan);
-    } else if (planUpdate.action === 'add_step' && planUpdate.data && plan) {
-      // Single step addition
-      const newNode: PlanNode = {
-        id: generateId(),
-        title: planUpdate.data.title || 'New Step',
-        description: planUpdate.data.description,
-        status: 'pending',
-        parentId: planUpdate.data.parentId || null,
-        children: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      if (!newNode.parentId) {
-        // Add as root node
-        setPlan({ ...plan, rootNodes: [...plan.rootNodes, newNode], updatedAt: now });
-      } else {
-        // Add as child to existing node
-        const addToNode = (nodes: PlanNode[]): PlanNode[] => {
-          return nodes.map((node) => {
-            if (node.id === newNode.parentId) {
-              return { ...node, children: [...node.children, newNode], updatedAt: now };
-            }
-            return { ...node, children: addToNode(node.children) };
-          });
-        };
-        setPlan({ ...plan, rootNodes: addToNode(plan.rootNodes), updatedAt: now });
-      }
-    } else if (planUpdate.action === 'add_steps' && planUpdate.data?.steps && Array.isArray(planUpdate.data.steps) && plan) {
-      console.log('=== ADD_STEPS ACTION ===');
-      console.log('Number of steps to add:', planUpdate.data.steps.length);
-      console.log('Steps data:', planUpdate.data.steps);
-      
-      // Multiple steps addition with ID mapping
-      // Create a map from temporary IDs (from AI) to actual generated IDs
-      const idMap: { [key: string]: string } = {};
-      
-      // First pass: create all nodes and build ID map
-      const newNodes: PlanNode[] = planUpdate.data.steps.map((stepData: any, index: number) => {
-        const actualId = generateId();
-        // If the step has a tempId or we can use index as temp ID
-        const tempId = stepData.tempId || stepData.id || `temp-${index}`;
-        idMap[tempId] = actualId;
-        
-        console.log(`Mapping tempId "${tempId}" -> actualId "${actualId}"`);
-        
-        return {
-          id: actualId,
-          title: stepData.title || 'New Step',
-          description: stepData.description,
-          status: 'pending',
-          parentId: stepData.parentId || null, // Will be remapped in second pass
-          children: [],
-          createdAt: now,
-          updatedAt: now,
-          tempId: tempId, // Keep track for second pass
-        } as PlanNode & { tempId: string };
-      });
-
-      console.log('ID Map:', idMap);
-      console.log('New nodes before parent remap:', newNodes.map(n => ({ id: n.id, title: n.title, parentId: (n as any).parentId })));
-
-      // Second pass: remap parentIds from temp IDs to actual IDs
-      newNodes.forEach((node: any) => {
-        if (node.parentId && idMap[node.parentId]) {
-          console.log(`Remapping parentId for "${node.title}": "${node.parentId}" -> "${idMap[node.parentId]}"`);
-          node.parentId = idMap[node.parentId];
-        } else if (node.parentId) {
-          console.log(`WARNING: Could not remap parentId "${node.parentId}" for "${node.title}" - not found in idMap`);
-        }
-        // Remove tempId as it's no longer needed
-        delete node.tempId;
-      });
-
-      console.log('New nodes after parent remap:', newNodes.map(n => ({ id: n.id, title: n.title, parentId: n.parentId })));
-
-      // Group nodes by parentId for efficient insertion
-      const rootNewNodes = newNodes.filter(n => !n.parentId);
-      const childNewNodes = newNodes.filter(n => n.parentId);
-
-      console.log(`Root nodes to add: ${rootNewNodes.length}`, rootNewNodes.map(n => n.title));
-      console.log(`Child nodes to add: ${childNewNodes.length}`, childNewNodes.map(n => ({ title: n.title, parentId: n.parentId })));
-
-      // Start with adding root nodes
-      let updatedRootNodes = [...plan.rootNodes, ...rootNewNodes];
-      console.log('After adding root nodes, total root nodes:', updatedRootNodes.length);
-
-      // Add child nodes to their parents (within newly created nodes)
-      if (childNewNodes.length > 0) {
-        console.log('Processing child nodes...');
-        // First, try to attach to newly created nodes
-        const attachToNewNodes = (nodes: PlanNode[]): PlanNode[] => {
-          return nodes.map((node) => {
-            const childrenForThisNode = childNewNodes.filter(child => child.parentId === node.id);
-            
-            if (childrenForThisNode.length > 0) {
-              console.log(`Attaching ${childrenForThisNode.length} children to node "${node.title}" (${node.id})`);
-              return { 
-                ...node, 
-                children: [...node.children, ...childrenForThisNode],
-                updatedAt: now 
-              };
-            }
-            
-            return node;
-          });
-        };
-
-        updatedRootNodes = attachToNewNodes(updatedRootNodes);
-        console.log('After attaching to new nodes');
-
-        // Then, try to attach remaining to existing nodes in the tree
-        const remainingChildren = childNewNodes.filter(child => {
-          // Check if this child was already attached
-          const findInNodes = (nodes: PlanNode[]): boolean => {
-            for (const node of nodes) {
-              if (node.children.some(c => c.id === child.id)) return true;
-              if (findInNodes(node.children)) return true;
-            }
-            return false;
-          };
-          return !findInNodes(updatedRootNodes);
-        });
-
-        console.log(`Remaining children not yet attached: ${remainingChildren.length}`, remainingChildren.map(n => n.title));
-
-        if (remainingChildren.length > 0) {
-          const addChildrenToExisting = (nodes: PlanNode[]): PlanNode[] => {
-            return nodes.map((node) => {
-              const childrenForThisNode = remainingChildren.filter(child => child.parentId === node.id);
-              
-              if (childrenForThisNode.length > 0) {
-                console.log(`Attaching ${childrenForThisNode.length} remaining children to existing node "${node.title}" (${node.id})`);
-                return { 
-                  ...node, 
-                  children: [...node.children, ...childrenForThisNode],
-                  updatedAt: now 
-                };
-              }
-              
-              if (node.children.length > 0) {
-                return { ...node, children: addChildrenToExisting(node.children) };
-              }
-              
-              return node;
-            });
-          };
-
-          updatedRootNodes = addChildrenToExisting(updatedRootNodes);
-        }
-      }
-
-      console.log('Final updated root nodes count:', updatedRootNodes.length);
-      console.log('Updated plan structure:', JSON.stringify(updatedRootNodes, null, 2));
-      
-      const updatedPlan = { ...plan, rootNodes: updatedRootNodes, updatedAt: now };
-      console.log('Setting plan with updated root nodes');
-      setPlan(updatedPlan);
-      console.log('=== ADD_STEPS COMPLETE ===');
-    } else if (planUpdate.action === 'update_status' && planUpdate.data && plan) {
-      const updateNodeStatus = (nodes: PlanNode[]): PlanNode[] => {
-        return nodes.map((node) => {
-          if (node.id === planUpdate.data.nodeId) {
-            return { ...node, status: planUpdate.data.status, updatedAt: now };
-          }
-          return { ...node, children: updateNodeStatus(node.children) };
-        });
-      };
-      setPlan({ ...plan, rootNodes: updateNodeStatus(plan.rootNodes), updatedAt: now });
     }
   };
 
