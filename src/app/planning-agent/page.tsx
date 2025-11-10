@@ -782,14 +782,13 @@ export default function PlanningAgentPage() {
         
         console.log('[Main Chat] Path graph assigned paths to', notesWithPaths.length, 'notes');
         
-        // Update notes with paths from graph and log with descriptors
-        return notes.map(note => {
-          const updatedNote = notesWithPaths.find((n: Note) => n.id === note.id);
-          if (updatedNote && updatedNote.path) {
-            console.log('[PATH GRAPH DATA] Note', note.id, 'has path:', updatedNote.path);
+        // CRITICAL FIX: Log and verify each note has a path
+        notesWithPaths.forEach((note: Note, idx: number) => {
+          if (note.path) {
+            console.log(`[PATH GRAPH DATA] Note ${idx + 1}/${notesWithPaths.length} (${note.id}) has path: ${note.path.path}`);
             
             // Extract and log descriptors for this path
-            const segments = updatedNote.path.path.split('.');
+            const segments = note.path.path.split('.');
             const descriptors: string[] = [];
             let currentNodes = pathGraph.nodes;
             
@@ -803,19 +802,19 @@ export default function PlanningAgentPage() {
             }
             
             if (descriptors.length > 0) {
-              console.log('[PATH GRAPH DATA] Path descriptors for', updatedNote.path.path);
+              console.log(`[PATH GRAPH DATA] Path descriptors for ${note.path.path}:`);
               descriptors.forEach((desc, idx) => {
                 console.log(`  ${segments[idx]} → ${desc}`);
               });
             }
-            
-            return { ...note, path: updatedNote.path };
+          } else {
+            console.warn(`[Main Chat] Note ${idx + 1}/${notesWithPaths.length} (${note.id}) MISSING PATH!`);
           }
-          
-          // If note still doesn't have a path, log warning and return as-is
-          console.warn('[Main Chat] Note', note.id, 'does not have a path assigned!');
-          return note;
         });
+        
+        // CRITICAL FIX: Return notesWithPaths directly, not mapped
+        // The API has already processed and assigned paths to these notes
+        return notesWithPaths;
       } else {
         console.error('[Main Chat] Path graph API returned failure');
       }
