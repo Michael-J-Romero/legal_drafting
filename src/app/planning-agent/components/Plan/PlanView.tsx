@@ -511,9 +511,10 @@ export default function PlanView() {
       console.log('Steps data:', planUpdate.data.steps);
       
       // Create a plan if it doesn't exist yet
-      if (!plan) {
+      let workingPlan = plan;
+      if (!workingPlan) {
         console.log('No plan exists, creating one automatically');
-        const newPlan: Plan = {
+        workingPlan = {
           id: generateId(),
           title: 'New Plan',
           rootNodes: [],
@@ -527,10 +528,7 @@ export default function PlanView() {
           createdAt: now,
           updatedAt: now,
         };
-        setPlan(newPlan);
-        // Use the new plan for adding steps
-        plan = newPlan;
-        console.log('Created plan for steps:', newPlan);
+        console.log('Created plan for steps:', workingPlan);
       }
       
       // Multiple steps addition with ID mapping
@@ -584,7 +582,7 @@ export default function PlanView() {
       console.log(`Child nodes to add: ${childNewNodes.length}`, childNewNodes.map(n => ({ title: n.title, parentId: n.parentId })));
 
       // Start with adding root nodes
-      let updatedRootNodes = [...plan.rootNodes, ...rootNewNodes];
+      let updatedRootNodes = [...workingPlan.rootNodes, ...rootNewNodes];
       console.log('After adding root nodes, total root nodes:', updatedRootNodes.length);
 
       // Add child nodes to their parents (within newly created nodes)
@@ -655,7 +653,7 @@ export default function PlanView() {
       console.log('Final updated root nodes count:', updatedRootNodes.length);
       console.log('Updated plan structure:', JSON.stringify(updatedRootNodes, null, 2));
       
-      const updatedPlan = { ...plan, rootNodes: updatedRootNodes, updatedAt: now };
+      const updatedPlan = { ...workingPlan, rootNodes: updatedRootNodes, updatedAt: now };
       console.log('Setting plan with updated root nodes');
       setPlan(updatedPlan);
       console.log('=== ADD_STEPS COMPLETE ===');
