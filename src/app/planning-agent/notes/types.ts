@@ -172,13 +172,21 @@ export interface StoredNote {
  * Helper to convert Note to StoredNote
  */
 export function serializeNote(note: Note): StoredNote {
+  // Defensive: ensure dates are valid Date objects
+  const now = new Date();
+  const createdAt = note.createdAt instanceof Date ? note.createdAt : now;
+  const updatedAt = note.updatedAt instanceof Date ? note.updatedAt : now;
+  const sourceTimestamp = note.source?.sourceTimestamp instanceof Date 
+    ? note.source.sourceTimestamp 
+    : now;
+  
   return {
     ...note,
-    createdAt: note.createdAt.toISOString(),
-    updatedAt: note.updatedAt.toISOString(),
+    createdAt: createdAt.toISOString(),
+    updatedAt: updatedAt.toISOString(),
     source: {
       ...note.source,
-      sourceTimestamp: note.source.sourceTimestamp.toISOString(),
+      sourceTimestamp: sourceTimestamp.toISOString(),
     },
     path: note.path,
   };
