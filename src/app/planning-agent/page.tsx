@@ -765,8 +765,9 @@ export default function PlanningAgentPage() {
     try {
       const pathGraphResult = await addNotesToPathGraph(notes);
       
-      if (pathGraphResult.success && pathGraphResult.updatedNotes) {
-        console.log('[Main Chat] Path graph assigned paths to', pathGraphResult.updatedNotes.length, 'notes');
+      if (pathGraphResult.success) {
+        console.log('[Main Chat] Path graph API returned successfully');
+        console.log('[Main Chat] updatedNotes from API:', pathGraphResult.updatedNotes?.length || 0, 'notes');
         
         // Log the path graph data for debugging
         const pathGraph = loadPathGraph();
@@ -774,11 +775,18 @@ export default function PlanningAgentPage() {
         console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
         console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
         
+        // Use updatedNotes from API if available, otherwise extract from graph ourselves
+        const notesWithPaths = pathGraphResult.updatedNotes && pathGraphResult.updatedNotes.length > 0
+          ? pathGraphResult.updatedNotes
+          : notes; // If API didn't return updatedNotes, the API should have extracted them from graph
+        
+        console.log('[Main Chat] Path graph assigned paths to', notesWithPaths.length, 'notes');
+        
         // Update notes with paths from graph and log with descriptors
         return notes.map(note => {
-          const updatedNote = pathGraphResult.updatedNotes.find((n: Note) => n.id === note.id);
+          const updatedNote = notesWithPaths.find((n: Note) => n.id === note.id);
           if (updatedNote && updatedNote.path) {
-            console.log('[PATH GRAPH DATA] Note path assigned:', updatedNote.path);
+            console.log('[PATH GRAPH DATA] Note', note.id, 'has path:', updatedNote.path);
             
             // Extract and log descriptors for this path
             const segments = updatedNote.path.path.split('.');
@@ -803,13 +811,20 @@ export default function PlanningAgentPage() {
             
             return { ...note, path: updatedNote.path };
           }
+          
+          // If note still doesn't have a path, log warning and return as-is
+          console.warn('[Main Chat] Note', note.id, 'does not have a path assigned!');
           return note;
         });
+      } else {
+        console.error('[Main Chat] Path graph API returned failure');
       }
     } catch (error) {
       console.error('[Main Chat] Error processing notes with path graph:', error);
     }
     
+    // Fallback: return original notes if everything failed
+    console.warn('[Main Chat] Returning original notes without path assignment');
     return notes;
   }
 
@@ -845,6 +860,66 @@ export default function PlanningAgentPage() {
       // Force new array reference for React to detect change
       const newArray = [...updated];
       console.log('[NOTES PERSISTENCE] Returning new chats array with length', newArray.length);
+      
+      // CRITICAL FIX: Immediately persist to localStorage with the updated data
+      // This ensures notes are saved synchronously as part of the state update
+      try {
+        const dehydrated = dehydrateChats(newArray);
+        const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE (singular):', newArray.length, 'chats with', totalNotes, 'total notes');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+      } catch (e) {
+        console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
+      }
+      
+      return newArray;
+    });
+  }
+
+  // Add multiple notes at once (more efficient than calling addNote multiple times)
+  function addNotes(notes: Note[]) {
+    if (!activeChatId || notes.length === 0) {
+      console.warn('[NOTES PERSISTENCE] Cannot add notes - no active chat ID or empty notes array');
+      return;
+    }
+    
+    const chatId = activeChatId; // Capture at call time
+    console.log('[NOTES PERSISTENCE] Adding', notes.length, 'notes to chat:', chatId);
+    
+    setChats((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === chatId) {
+          const newNotes = [...(c.notes || []), ...notes];
+          console.log('[NOTES PERSISTENCE] Batch updating chat', c.id, 'from', (c.notes || []).length, 'to', newNotes.length, 'notes');
+          return { 
+            ...c, 
+            notes: newNotes, 
+            updatedAt: new Date().toISOString() 
+          };
+        }
+        return c;
+      });
+      
+      const updatedChat = updated.find(c => c.id === chatId);
+      if (updatedChat) {
+        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes?.length || 0, 'notes after batch add');
+      }
+      
+      // Force new array reference for React to detect change
+      const newArray = [...updated];
+      console.log('[NOTES PERSISTENCE] Returning new chats array with length', newArray.length);
+      
+      // CRITICAL FIX: Immediately persist to localStorage with the updated data
+      // This ensures notes are saved synchronously as part of the state update
+      try {
+        const dehydrated = dehydrateChats(newArray);
+        const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE:', newArray.length, 'chats with', totalNotes, 'total notes');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+      } catch (e) {
+        console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
+      }
+      
       return newArray;
     });
   }
@@ -1028,9 +1103,8 @@ export default function PlanningAgentPage() {
           
           // Process through path graph to assign hierarchical paths
           const notesWithPaths = await processNotesWithPathGraph(cleanAutoAcceptedNotes);
-          notesWithPaths.forEach((note: Note) => {
-            addNote(note);
-          });
+          // Use batch add for efficiency and to ensure all notes are added in single state update
+          addNotes(notesWithPaths);
         }
 
         // Return only notes that need user review (filter out auto-rejected and auto-accepted)
