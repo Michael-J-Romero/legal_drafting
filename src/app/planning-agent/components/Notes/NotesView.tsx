@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Note } from '../../types';
+import { loadPathGraph, PathGraph, PathNode } from '../../pathGraph';
 
 interface NotesViewProps {
   notes: Note[];
@@ -12,6 +13,7 @@ interface NotesViewProps {
   setNotes?: (notes: Note[]) => void;
   notesGraph?: any;
   setNotesGraph?: (graph: any) => void;
+  onNoteClick?: (note: Note) => void; // Callback when a note is clicked
 }
 
 interface Contradiction {
@@ -59,12 +61,52 @@ export default function NotesView({
   setNotes,
   notesGraph,
   setNotesGraph,
+  onNoteClick,
 }: NotesViewProps) {
   const [isRefining, setIsRefining] = useState(false);
   const [isGraphing, setIsGraphing] = useState(false);
   const [refinementResult, setRefinementResult] = useState<RefinementResult | null>(null);
   const [showGraph, setShowGraph] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Filter states
+  const [filterSource, setFilterSource] = useState<string>('all');
+  const [filterContext, setFilterContext] = useState<string>('all');
+  
+  // Raw data view state
+  const [viewingRawNote, setViewingRawNote] = useState<Note | null>(null);
+  
+  // Path graph for descriptors
+  const [pathGraph, setPathGraph] = useState<PathGraph | null>(null);
+  
+  // Load path graph on mount
+  useEffect(() => {
+    const graph = loadPathGraph();
+    setPathGraph(graph);
+  }, [notes]); // Reload when notes change
+  
+  // Helper to get path descriptors from the graph
+  const getPathDescriptors = (path: string): string[] => {
+    if (!pathGraph || !path) return [];
+    
+    const segments = path.split('.');
+    const descriptors: string[] = [];
+    let currentNodes = pathGraph.nodes;
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const node = currentNodes[segment];
+      
+      if (node && node.descriptor) {
+        descriptors.push(node.descriptor);
+        currentNodes = node.children || {};
+      } else {
+        break;
+      }
+    }
+    
+    return descriptors;
+  };
 
   const handleRefineNotes = async () => {
     if (notes.length === 0) {
@@ -140,9 +182,45 @@ export default function NotesView({
     }
   };
 
+  // Filter notes based on selected filters
+  const filteredNotes = notes.filter((note) => {
+    // Source filter
+    if (filterSource !== 'all' && note.source.type !== filterSource) {
+      return false;
+    }
+    
+    // Context filter
+    if (filterContext !== 'all') {
+      const context = note.context;
+      switch (filterContext) {
+        case 'who':
+          return context.who && context.who.length > 0;
+        case 'what':
+          return context.what && context.what.trim().length > 0;
+        case 'when':
+          return context.when && context.when.trim().length > 0;
+        case 'where':
+          return context.where && context.where.trim().length > 0;
+        default:
+          return true;
+      }
+    }
+    
+    return true;
+  });
+
+  // Get unique source types from notes
+  const sourceTypes = Array.from(new Set(notes.map(n => n.source.type)));
+
+  // Handler for deleting a note
+  const handleDeleteNote = (e: React.MouseEvent, noteId: string) => {
+    e.stopPropagation();
+    deleteNote(noteId);
+  };
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}>
-      <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>📝 Notes & Goals</h2>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -182,14 +260,64 @@ export default function NotesView({
             </button>
           </div>
         </div>
-        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
+        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4, marginBottom: 12 }}>
           AI-extracted notes with full context from your conversations
         </p>
+        
+        {/* Filter Controls */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Filter by Source:</label>
+            <select
+              value={filterSource}
+              onChange={(e) => setFilterSource(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #d1d5db',
+                borderRadius: 6,
+                fontSize: 13,
+                backgroundColor: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Sources</option>
+              {sourceTypes.map((type) => (
+                <option key={type} value={type}>{formatSourceType(type)}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Filter by Context:</label>
+            <select
+              value={filterContext}
+              onChange={(e) => setFilterContext(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #d1d5db',
+                borderRadius: 6,
+                fontSize: 13,
+                backgroundColor: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Context</option>
+              <option value="who">Has Who</option>
+              <option value="what">Has What</option>
+              <option value="when">Has When</option>
+              <option value="where">Has Where</option>
+            </select>
+          </div>
+          
+          <div style={{ fontSize: 12, color: '#6b7280', marginLeft: 'auto' }}>
+            Showing {filteredNotes.length} of {notes.length} notes
+          </div>
+        </div>
       </div>
 
       {/* Error Message */}
       {errorMessage && (
-        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444' }}>
+        <div style={{ padding: 16, backgroundColor: '#fee2e2', borderBottom: '1px solid #ef4444', flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b' }}>
               ❌ Error: {errorMessage}
@@ -214,7 +342,7 @@ export default function NotesView({
 
       {/* Refinement Results */}
       {refinementResult && (
-        <div style={{ padding: 16, backgroundColor: '#dbeafe', borderBottom: '1px solid #3b82f6' }}>
+        <div style={{ padding: 16, backgroundColor: '#dbeafe', borderBottom: '1px solid #3b82f6', flexShrink: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af', marginBottom: 8 }}>
             ✨ Refinement Complete
           </div>
@@ -325,7 +453,7 @@ export default function NotesView({
 
       {/* Pending Notes (waiting for approval) */}
       {pendingNotes.length > 0 && (
-        <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7' }}>
+        <div style={{ borderBottom: '2px solid #fbbf24', backgroundColor: '#fef3c7', flexShrink: 0 }}>
           <div style={{ padding: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#92400e', marginBottom: 12 }}>
               ⚠️ New Notes (Review & Accept)
@@ -347,6 +475,18 @@ export default function NotesView({
                 <div style={{ fontSize: 14, color: '#111827', marginBottom: 10, lineHeight: 1.5 }}>
                   {note.content}
                 </div>
+                
+                {/* Hierarchical Path */}
+                {note.path && (
+                  <div style={{ fontSize: 11, color: '#2563eb', marginBottom: 8, padding: 6, backgroundColor: '#eff6ff', borderRadius: 4, fontFamily: 'monospace' }}>
+                    <strong>Path:</strong> {note.path.path}
+                    {note.path.references && note.path.references.length > 0 && (
+                      <div style={{ marginTop: 4, color: '#7c3aed' }}>
+                        <strong>References:</strong> {note.path.references.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 {/* Source Information */}
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
@@ -405,16 +545,25 @@ export default function NotesView({
 
       {/* Notes List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-        {notes.length === 0 ? (
+        {filteredNotes.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#9ca3af', padding: 40, fontSize: 14 }}>
-            <p style={{ fontSize: 16, marginBottom: 10 }}>No notes yet</p>
-            <p>The AI will create notes as you chat about dates, documents, goals, etc.</p>
+            {notes.length === 0 ? (
+              <>
+                <p style={{ fontSize: 16, marginBottom: 10 }}>No notes yet</p>
+                <p>The AI will create notes as you chat about dates, documents, goals, etc.</p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 16, marginBottom: 10 }}>No notes match the selected filters</p>
+                <p>Try adjusting your filters to see more notes</p>
+              </>
+            )}
           </div>
         ) : (
           <>
             {/* Group notes by category */}
             {['goals', 'dates', 'deadlines', 'documents', 'requirements', 'places', 'people', 'other'].map((category) => {
-              const categoryNotes = notes.filter((n) => n.category === category);
+              const categoryNotes = filteredNotes.filter((n) => n.category === category);
               if (categoryNotes.length === 0) return null;
 
               return (
@@ -432,6 +581,7 @@ export default function NotesView({
                   {categoryNotes.map((note) => (
                     <div
                       key={note.id}
+                      onClick={() => onNoteClick && onNoteClick(note)}
                       style={{
                         marginBottom: 10,
                         padding: 12,
@@ -440,13 +590,38 @@ export default function NotesView({
                         borderRadius: 6,
                         position: 'relative',
                         transition: 'all 0.3s ease',
+                        cursor: onNoteClick ? 'pointer' : 'default',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (onNoteClick) {
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.1)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (onNoteClick) {
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }
                       }}
                     >
                       <div style={{ fontSize: 14, color: '#111827', marginBottom: 6, lineHeight: 1.5 }}>
                         {note.content}
                       </div>
                       
-                      {/* Context Information */}
+                      {/* Hierarchical Path */}
+                      {note.path && (
+                        <div style={{ fontSize: 11, color: '#2563eb', marginBottom: 6, padding: 6, backgroundColor: '#eff6ff', borderRadius: 4, fontFamily: 'monospace' }}>
+                          <strong>Path:</strong> {note.path.path}
+                          {note.path.references && note.path.references.length > 0 && (
+                            <div style={{ marginTop: 4, color: '#7c3aed' }}>
+                              <strong>References:</strong> {note.path.references.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Context Information (legacy) */}
                       {(note.context.who || note.context.what || note.context.when || note.context.where) && (
                         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
                           {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}
@@ -456,24 +631,46 @@ export default function NotesView({
                         </div>
                       )}
                       
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ fontSize: 10, color: '#9ca3af' }}>
                           {formatSourceType(note.source.type)} • {new Date(note.updatedAt).toLocaleDateString()}
+                          {onNoteClick && <span style={{ marginLeft: 8, color: '#3b82f6' }}>→ Click to view source</span>}
                         </div>
-                        <button
-                          onClick={() => deleteNote(note.id)}
-                          style={{
-                            padding: '2px 8px',
-                            backgroundColor: 'transparent',
-                            color: '#ef4444',
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontSize: 13,
-                          }}
-                          title="Delete note"
-                        >
-                          🗑️
-                        </button>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewingRawNote(note);
+                            }}
+                            style={{
+                              padding: '4px 8px',
+                              backgroundColor: '#3b82f6',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              fontWeight: 600,
+                            }}
+                            title="View raw note data"
+                          >
+                            📊 Raw
+                          </button>
+                          <button
+                            onClick={(e) => handleDeleteNote(e, note.id)}
+                            style={{
+                              padding: '2px 8px',
+                              backgroundColor: 'transparent',
+                              color: '#ef4444',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: 13,
+                            }}
+                            title="Delete note"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -483,6 +680,160 @@ export default function NotesView({
           </>
         )}
       </div>
+
+      {/* Raw Data Modal */}
+      {viewingRawNote && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          right: 0, 
+          bottom: 0, 
+          backgroundColor: 'rgba(0,0,0,0.5)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          zIndex: 1000 
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: 8, 
+            padding: 24, 
+            maxWidth: '90%', 
+            maxHeight: '90%', 
+            overflow: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>📊 Raw Note Data</h3>
+              <button
+                onClick={() => setViewingRawNote(null)}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                Close
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Note Content
+              </div>
+              <div style={{ padding: 12, backgroundColor: '#f9fafb', borderRadius: 6, fontSize: 14, lineHeight: 1.5 }}>
+                {viewingRawNote.content}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Hierarchical Path
+              </div>
+              {viewingRawNote.path ? (
+                <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6 }}>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#2563eb', marginBottom: 12 }}>
+                    <strong>Full Path:</strong> {viewingRawNote.path.path}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 12 }}>
+                    <strong>Segments:</strong> {viewingRawNote.path.segments.join(' → ')}
+                  </div>
+                  
+                  {/* Display descriptors */}
+                  {(() => {
+                    const descriptors = getPathDescriptors(viewingRawNote.path.path);
+                    if (descriptors.length > 0) {
+                      return (
+                        <div style={{ marginBottom: 12 }}>
+                          <strong style={{ fontSize: 12, color: '#1e40af' }}>Path Descriptors:</strong>
+                          <div style={{ marginTop: 8, paddingLeft: 12, borderLeft: '3px solid #2563eb' }}>
+                            {descriptors.map((desc, idx) => (
+                              <div key={idx} style={{ 
+                                fontSize: 12, 
+                                color: '#374151', 
+                                marginBottom: 6,
+                                fontStyle: 'italic'
+                              }}>
+                                <span style={{ 
+                                  fontFamily: 'monospace', 
+                                  color: '#2563eb', 
+                                  fontWeight: 600,
+                                  fontStyle: 'normal',
+                                  marginRight: 8
+                                }}>
+                                  {viewingRawNote.path.segments[idx]}
+                                </span>
+                                → {desc}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
+                  {viewingRawNote.path.references && viewingRawNote.path.references.length > 0 && (
+                    <div style={{ fontSize: 12, color: '#7c3aed' }}>
+                      <strong>References:</strong>
+                      <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
+                        {viewingRawNote.path.references.map((ref, idx) => (
+                          <li key={idx}>{ref}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: 12, backgroundColor: '#fef3c7', borderRadius: 6, color: '#92400e', fontSize: 13 }}>
+                  No hierarchical path defined
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Complete JSON Data
+              </div>
+              <pre style={{ 
+                fontSize: 11, 
+                backgroundColor: '#1e293b', 
+                color: '#e2e8f0',
+                padding: 16, 
+                borderRadius: 6, 
+                overflow: 'auto',
+                maxHeight: '400px',
+                lineHeight: 1.5
+              }}>
+                {JSON.stringify(viewingRawNote, null, 2)}
+              </pre>
+            </div>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(viewingRawNote, null, 2));
+              }}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              📋 Copy JSON to Clipboard
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

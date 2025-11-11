@@ -3,7 +3,7 @@
  * All note-related operations are defined here
  */
 
-import { Note, NoteCategory, NoteSource, NoteContext, NoteSourceType } from './types';
+import { Note, NoteCategory, NoteSource, NoteContext, NoteSourceType, NotePath } from './types';
 
 /**
  * Generate a unique ID for a note
@@ -20,6 +20,7 @@ export function createNote(params: {
   category: NoteCategory;
   source: NoteSource;
   context?: Partial<NoteContext>;
+  path?: NotePath;
   tags?: string[];
   confidence?: number;
   isPending?: boolean;
@@ -33,6 +34,7 @@ export function createNote(params: {
     createdAt: now,
     updatedAt: now,
     source: params.source,
+    path: params.path,
     context: {
       who: params.context?.who,
       what: params.context?.what,

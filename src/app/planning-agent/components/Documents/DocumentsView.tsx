@@ -1,14 +1,38 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Document, StoredDocument, DocumentNote } from '../../types';
+import { Document, StoredDocument, Note } from '../../types';
 import { generateId, formatFileSize } from '../../utils/helpers';
+import { createNote, createDocumentSource, deserializeNote, serializeNote, validateCategory } from '../../notes';
+import { addNotesToPathGraph, loadPathGraph } from '../../pathGraph';
 
 const DOCUMENTS_STORAGE_KEY = 'planningAgentDocuments';
 
 interface ExtractedNote {
   content: string;
   category: string;
+  path?: {
+    path: string;
+    segments: string[];
+    references?: string[];
+  };
+  context?: {
+    who?: string[];
+    what?: string;
+    when?: string;
+    where?: string;
+    relatedTo?: string[];
+  };
+  confidence?: number;
+  source?: {
+    type: string;
+    url?: string;
+    documentName?: string;
+    originatingMessage?: string;
+    aiModel?: string;
+    sourceTimestamp: string;
+    metadata?: Record<string, any>;
+  };
 }
 
 function hydrateDocuments(stored: StoredDocument[]): Document[] {
@@ -16,11 +40,7 @@ function hydrateDocuments(stored: StoredDocument[]): Document[] {
     ...doc,
     uploadedAt: new Date(doc.uploadedAt),
     analyzedAt: doc.analyzedAt ? new Date(doc.analyzedAt) : undefined,
-    notes: doc.notes.map((n) => ({
-      ...n,
-      createdAt: new Date(n.createdAt),
-      updatedAt: new Date(n.updatedAt),
-    })),
+    notes: doc.notes.map((n) => deserializeNote(n)),
   }));
 }
 
@@ -29,14 +49,7 @@ function dehydrateDocuments(documents: Document[]): StoredDocument[] {
     ...doc,
     uploadedAt: doc.uploadedAt.toISOString(),
     analyzedAt: doc.analyzedAt?.toISOString(),
-    notes: doc.notes.map((n) => ({
-      id: n.id,
-      content: n.content,
-      category: n.category,
-      createdAt: n.createdAt.toISOString(),
-      updatedAt: n.updatedAt.toISOString(),
-      documentId: n.documentId,
-    })),
+    notes: doc.notes.map((n) => serializeNote(n)),
   }));
 }
 
@@ -67,6 +80,222 @@ export default function DocumentsView() {
   const [documentHasUnappliedEdits, setDocumentHasUnappliedEdits] = useState<{[docId: string]: boolean}>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Chunked extraction states
+  const [isExtractingChunked, setIsExtractingChunked] = useState(false);
+  const [extractionProgress, setExtractionProgress] = useState<{current: number, total: number} | null>(null);
+  const [accumulatedNotes, setAccumulatedNotes] = useState<Note[]>([]);
+  const [clarificationQuestions, setClarificationQuestions] = useState<Array<{question: string, context: string, relatedNotes: number[], answer?: string}>>([]);
+  const [showClarificationDialog, setShowClarificationDialog] = useState(false);
+  const [currentExtractionDocId, setCurrentExtractionDocId] = useState<string | null>(null);
+
+  // Helper function to process notes through path graph
+  const processNotesWithPathGraph = async (notes: Note[]): Promise<Note[]> => {
+    console.log('[DocumentsView] Sending', notes.length, 'notes to path graph API');
+    const pathGraphResult = await addNotesToPathGraph(notes);
+    
+    if (pathGraphResult.success && pathGraphResult.updatedNotes) {
+      console.log('[DocumentsView] Path graph assigned paths to', pathGraphResult.updatedNotes.length, 'notes');
+      
+      // Log the path graph data for debugging
+      const pathGraph = loadPathGraph();
+      console.log('[PATH GRAPH DATA] Current graph structure:', JSON.stringify(pathGraph, null, 2));
+      console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
+      console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
+      
+      // Update notes with paths from graph and log with descriptors
+      return notes.map(note => {
+        const updatedNote = pathGraphResult.updatedNotes.find(n => n.id === note.id);
+        if (updatedNote && updatedNote.path) {
+          console.log('[PATH GRAPH DATA] Note path assigned:', updatedNote.path);
+          
+          // Extract and log descriptors for this path
+          const segments = updatedNote.path.path.split('.');
+          const descriptors: string[] = [];
+          let currentNodes = pathGraph.nodes;
+          
+          for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            const node = currentNodes[segment];
+            if (node && node.descriptor) {
+              descriptors.push(node.descriptor);
+              currentNodes = node.children || {};
+            }
+          }
+          
+          if (descriptors.length > 0) {
+            console.log('[PATH GRAPH DATA] Path descriptors for', updatedNote.path.path);
+            descriptors.forEach((desc, idx) => {
+              console.log(`  ${segments[idx]} → ${desc}`);
+            });
+          }
+          
+          return { ...note, path: updatedNote.path };
+        }
+        return note;
+      });
+    } else {
+      console.warn('[DocumentsView] Path graph assignment failed:', pathGraphResult.error);
+      return notes;
+    }
+  };
+
+  // Chunked note extraction with progressive updates
+  const extractNotesChunked = async (documentId: string, text: string, fileName: string, fileType: string) => {
+    setIsExtractingChunked(true);
+    setCurrentExtractionDocId(documentId);
+    setAccumulatedNotes([]);
+    setClarificationQuestions([]);
+    
+    try {
+      let chunkIndex = 0;
+      let hasMoreChunks = true;
+      const allQuestions: any[] = [];
+      
+      console.log('[CHUNKED EXTRACTION] Starting extraction for document:', fileName);
+      
+      while (hasMoreChunks) {
+        setExtractionProgress({ current: chunkIndex + 1, total: -1 }); // -1 means unknown total
+        
+        console.log(`[CHUNKED EXTRACTION] Processing chunk ${chunkIndex + 1}...`);
+        
+        const response = await fetch('/api/extract-notes-chunked', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            fileName,
+            fileType,
+            chunkIndex,
+            mode: 'extract',
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Chunked extraction failed');
+        }
+        
+        const data = await response.json();
+        
+        // Update progress with actual total
+        setExtractionProgress({ current: chunkIndex + 1, total: data.totalChunks });
+        
+        // Process extracted notes from this chunk
+        if (data.notes && data.notes.length > 0) {
+          const chunkNotes: Note[] = data.notes.map((note: ExtractedNote) => {
+            const baseSource = note.source ? {
+              type: note.source.type as any,
+              documentName: note.source.documentName || fileName,
+              originatingMessage: note.source.originatingMessage || `Extracted from document: ${fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId },
+            } : createDocumentSource({
+              documentName: fileName,
+              originatingMessage: `Extracted from document: ${fileName}`,
+            });
+            
+            baseSource.metadata = { ...baseSource.metadata, documentId };
+            
+            return createNote({
+              path: note.path,
+              content: note.content,
+              category: validateCategory(note.category),
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
+          
+          // Process through path graph
+          const notesWithPaths = await processNotesWithPathGraph(chunkNotes);
+          
+          // Accumulate notes
+          setAccumulatedNotes(prev => {
+            const updated = [...prev, ...notesWithPaths];
+            
+            // Progressively update the document with accumulated notes
+            setDocuments(docs =>
+              docs.map(doc =>
+                doc.id === documentId
+                  ? { ...doc, notes: updated, analyzedAt: new Date() }
+                  : doc
+              )
+            );
+            
+            return updated;
+          });
+          
+          console.log(`[CHUNKED EXTRACTION] Chunk ${chunkIndex + 1}: Added ${notesWithPaths.length} notes (total: ${chunkNotes.length + (accumulatedNotes.length || 0)})`);
+        }
+        
+        // Collect clarification questions
+        if (data.clarificationQuestions && data.clarificationQuestions.length > 0) {
+          allQuestions.push(...data.clarificationQuestions);
+        }
+        
+        hasMoreChunks = data.hasMoreChunks;
+        chunkIndex++;
+      }
+      
+      console.log(`[CHUNKED EXTRACTION] Completed! Total notes: ${accumulatedNotes.length}, Questions: ${allQuestions.length}`);
+      
+      // Show clarification dialog AND add questions to chat
+      if (allQuestions.length > 0) {
+        setClarificationQuestions(allQuestions);
+        setShowClarificationDialog(true);
+        
+        // Add clarification questions to the chat
+        const questionsText = allQuestions.map((q, i) => 
+          `${i + 1}. ${q.question}\n   Context: ${q.context}`
+        ).join('\n\n');
+        
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `I've extracted ${accumulatedNotes.length} notes from the document. I have some clarifying questions to improve accuracy:\n\n${questionsText}\n\nPlease provide answers in the chat, or you can skip these questions.`,
+          timestamp: new Date()
+        }]);
+        
+        console.log('[CLARIFICATIONS] Added', allQuestions.length, 'questions to chat');
+      } else {
+        // No questions, we're done
+        setIsExtractingChunked(false);
+        setExtractionProgress(null);
+        setCurrentExtractionDocId(null);
+      }
+      
+    } catch (error) {
+      console.error('[CHUNKED EXTRACTION] Error:', error);
+      setError(error instanceof Error ? error.message : 'Extraction failed');
+      setIsExtractingChunked(false);
+      setExtractionProgress(null);
+      setCurrentExtractionDocId(null);
+    }
+  };
+
+  // Handle clarification answers
+  const handleClarificationSubmit = async () => {
+    if (!currentExtractionDocId) return;
+    
+    // For now, just close the dialog and finish
+    // In the future, we can send clarifications back to AI to update notes
+    setShowClarificationDialog(false);
+    setIsExtractingChunked(false);
+    setExtractionProgress(null);
+    setCurrentExtractionDocId(null);
+    
+    console.log('[CLARIFICATIONS] User provided clarifications:', clarificationQuestions.filter(q => q.answer));
+  };
+
+  // Skip clarifications
+  const handleSkipClarifications = () => {
+    setShowClarificationDialog(false);
+    setIsExtractingChunked(false);
+    setExtractionProgress(null);
+    setCurrentExtractionDocId(null);
+    
+    console.log('[CLARIFICATIONS] User skipped clarifications');
+  };
+
   // Load documents from localStorage on mount
   useEffect(() => {
     try {
@@ -75,7 +304,14 @@ export default function DocumentsView() {
         const parsed = JSON.parse(raw) as StoredDocument[];
         const hydrated = hydrateDocuments(parsed);
         setDocuments(hydrated);
-        if (hydrated.length > 0) {
+        
+        // Check if there's a selected document ID from navigation
+        const preSelectedId = typeof window !== 'undefined' ? localStorage.getItem('selectedDocumentId') : null;
+        if (preSelectedId && hydrated.some(d => d.id === preSelectedId)) {
+          setSelectedDocumentId(preSelectedId);
+          // Clear the stored ID after using it
+          localStorage.removeItem('selectedDocumentId');
+        } else if (hydrated.length > 0) {
           setSelectedDocumentId(hydrated[0].id);
         }
       }
@@ -89,11 +325,37 @@ export default function DocumentsView() {
     }
   }, []);
 
+  // Listen for document selection events from notes
+  useEffect(() => {
+    const handleSelectDocument = (event: CustomEvent) => {
+      const { documentId } = event.detail;
+      if (documentId && documents.some(d => d.id === documentId)) {
+        setSelectedDocumentId(documentId);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('selectDocument', handleSelectDocument as EventListener);
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('selectDocument', handleSelectDocument as EventListener);
+      }
+    };
+  }, [documents]);
+
   // Persist documents to localStorage when they change
   useEffect(() => {
     try {
       const dehydrated = dehydrateDocuments(documents);
       localStorage.setItem(DOCUMENTS_STORAGE_KEY, JSON.stringify(dehydrated));
+      
+      // Dispatch event to notify other components
+      if (typeof window !== 'undefined') {
+        console.log('[DocumentsView] Dispatching documentsUpdated event, documents:', documents.length);
+        window.dispatchEvent(new CustomEvent('documentsUpdated'));
+      }
     } catch (e) {
       console.error('Failed to save documents to storage', e);
     }
@@ -138,57 +400,20 @@ export default function DocumentsView() {
       // Add document to list
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
+      setIsUploading(false);
 
-      // Step 2: Analyze document (generate summary and notes)
-      setIsAnalyzing(true);
-      
-      const analyzeResponse = await fetch('/api/analyze-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: uploadData.text,
-          fileName: uploadData.fileName,
-          fileType: uploadData.fileType,
-        }),
-      });
-
-      const analyzeData = await analyzeResponse.json();
-
-      if (analyzeResponse.ok && analyzeData.summary) {
-        // Update document with summary and notes
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
-          .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
-
-        setDocuments((prev) =>
-          prev.map((doc) =>
-            doc.id === newDocument.id
-              ? {
-                  ...doc,
-                  summary: analyzeData.summary,
-                  notes: analyzedNotes,
-                  analyzedAt: new Date(),
-                }
-              : doc
-          )
-        );
-      } else {
-        console.warn('Document analysis failed:', analyzeData.error);
-      }
+      // Step 2: Extract notes using chunked extraction with clarifications
+      await extractNotesChunked(
+        newDocument.id,
+        uploadData.text,
+        uploadData.fileName,
+        uploadData.fileType
+      );
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during upload');
-    } finally {
       setIsUploading(false);
-      setIsAnalyzing(false);
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -216,11 +441,15 @@ export default function DocumentsView() {
         uploadedAt: new Date(),
       };
 
-      // Add document to list
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
 
-      // Analyze the pasted text
+      // Analyze the pasted text with timeout
+      console.log('[CREATE FROM TEXT] Starting analysis for pasted document');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -229,22 +458,56 @@ export default function DocumentsView() {
           fileName: newDocument.fileName,
           fileType: '.txt',
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[CREATE FROM TEXT] Analysis response:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any, // Type comes from API, needs runtime validation
+              url: note.source.url,
+              documentName: note.source.documentName || newDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Analyzed pasted document: ${newDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: newDocument.id },
+            } : createDocumentSource({
+              documentName: newDocument.fileName,
+              originatingMessage: `Analyzed pasted document: ${newDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id };
+            
+            return createNote({
+              path: note.path,
+              content: note.content,
+              category: validateCategory(note.category),
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -264,8 +527,21 @@ export default function DocumentsView() {
       setShowCreateDialog(false);
       setPastedText('');
       setDocumentName('');
+      
+      console.log('[CREATE FROM TEXT] Document created successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred while creating document');
+      console.error('[CREATE FROM TEXT] Error:', err);
+      
+      let errorMessage = 'An error occurred while creating document';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. Try with a shorter document.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsAnalyzing(false);
     }
@@ -370,8 +646,13 @@ export default function DocumentsView() {
       setDocuments((prev) => [newDocument, ...prev]);
       setSelectedDocumentId(newDocument.id);
 
-      // Analyze the generated document
+      // Analyze the generated document with timeout
+      console.log('[GENERATE DOCUMENT] Starting analysis for generated document');
       setIsAnalyzing(true);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -380,22 +661,56 @@ export default function DocumentsView() {
           fileName: newDocument.fileName,
           fileType: '.txt',
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[GENERATE DOCUMENT] Analysis response:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: newDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any, // Type comes from API, needs runtime validation
+              url: note.source.url,
+              documentName: note.source.documentName || newDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Analyzed AI-generated document: ${newDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: newDocument.id, aiGenerated: true },
+            } : createDocumentSource({
+              documentName: newDocument.fileName,
+              originatingMessage: `Analyzed AI-generated document: ${newDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: newDocument.id, aiGenerated: true };
+            
+            return createNote({
+              path: note.path,
+              content: note.content,
+              category: validateCategory(note.category),
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -409,6 +724,10 @@ export default function DocumentsView() {
               : doc
           )
         );
+        
+        console.log('[GENERATE DOCUMENT] Successfully created and analyzed document');
+      } else {
+        throw new Error('No summary returned from analysis API');
       }
 
       // Close dialog and reset
@@ -416,7 +735,18 @@ export default function DocumentsView() {
       setAiPrompt('');
       setDocumentName('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred while generating document');
+      console.error('[GENERATE DOCUMENT] Error:', err);
+      
+      let errorMessage = 'An error occurred while generating document';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. Try generating a shorter document.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsGenerating(false);
       setIsAnalyzing(false);
@@ -697,9 +1027,15 @@ IMPORTANT:
     if (!selectedDocument) return;
 
     setIsAnalyzing(true);
+    setError('');
+    
+    console.log('[REANALYZE] Starting re-analysis for document:', selectedDocument.fileName);
 
     try {
-      // Re-analyze the updated document
+      // Re-analyze the updated document with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      
       const analyzeResponse = await fetch('/api/analyze-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -708,22 +1044,56 @@ IMPORTANT:
           fileName: selectedDocument.fileName,
           fileType: selectedDocument.fileType,
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
+
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${analyzeResponse.status}`);
+      }
 
       const analyzeData = await analyzeResponse.json();
+      
+      console.log('[REANALYZE] Analysis response received:', {
+        hasSummary: !!analyzeData.summary,
+        notesCount: analyzeData.notes?.length || 0
+      });
 
       if (analyzeResponse.ok && analyzeData.summary) {
-        const validCategories = ['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'];
-        const analyzedNotes: DocumentNote[] = (analyzeData.notes || [])
+        let analyzedNotes: Note[] = (analyzeData.notes || [])
           .filter((note: ExtractedNote) => note.content && typeof note.content === 'string')
-          .map((note: ExtractedNote) => ({
-            id: generateId(),
-            content: note.content,
-            category: validCategories.includes(note.category) ? note.category : 'other',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            documentId: selectedDocument.id,
-          }));
+          .map((note: ExtractedNote) => {
+            // Use centralized note creation with full context
+            const baseSource = note.source ? {
+              type: note.source.type as any, // Type comes from API, needs runtime validation
+              url: note.source.url,
+              documentName: note.source.documentName || selectedDocument.fileName,
+              originatingMessage: note.source.originatingMessage || `Re-analyzed document: ${selectedDocument.fileName}`,
+              aiModel: note.source.aiModel || 'gpt-4o-mini',
+              sourceTimestamp: note.source.sourceTimestamp ? new Date(note.source.sourceTimestamp) : new Date(),
+              metadata: { documentId: selectedDocument.id, reanalyzed: true },
+            } : createDocumentSource({
+              documentName: selectedDocument.fileName,
+              originatingMessage: `Re-analyzed document: ${selectedDocument.fileName}`,
+            });
+            
+            // Ensure metadata is added
+            baseSource.metadata = { ...baseSource.metadata, documentId: selectedDocument.id, reanalyzed: true };
+            
+            return createNote({
+              path: note.path,
+              content: note.content,
+              category: validateCategory(note.category),
+              source: baseSource,
+              context: note.context || {},
+              confidence: note.confidence,
+            });
+          });
+
+        // Process notes through path graph to get hierarchical paths
+        analyzedNotes = await processNotesWithPathGraph(analyzedNotes);
 
         setDocuments((prev) =>
           prev.map((doc) =>
@@ -743,12 +1113,28 @@ IMPORTANT:
           ...prev,
           [selectedDocument.id]: false
         }));
+        
+        console.log('[REANALYZE] Successfully updated document with summary and', analyzedNotes.length, 'notes');
+      } else {
+        throw new Error('No summary returned from analysis API');
       }
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred during re-analysis');
+      console.error('[REANALYZE] Error:', err);
+      
+      let errorMessage = 'An error occurred during re-analysis';
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Analysis timed out after 60 seconds. The document may be too long. Try breaking it into smaller sections.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsAnalyzing(false);
+      console.log('[REANALYZE] Analysis complete, isAnalyzing set to false');
     }
   };
 
@@ -782,27 +1168,27 @@ IMPORTANT:
             {/* Primary Create Button */}
             <button
               onClick={() => setShowCreateDialog(true)}
-              disabled={isUploading || isAnalyzing || isGenerating}
+              disabled={isUploading || isAnalyzing || isGenerating || isExtractingChunked}
               style={{
                 width: '100%',
                 padding: '10px 16px',
-                backgroundColor: isUploading || isAnalyzing || isGenerating ? '#d1d5db' : '#10b981',
+                backgroundColor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? '#d1d5db' : '#10b981',
                 color: 'white',
                 border: 'none',
                 borderRadius: 6,
-                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? 'not-allowed' : 'pointer',
                 fontWeight: 600,
                 fontSize: 14,
                 marginBottom: 8,
               }}
             >
-              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : isGenerating ? '✨ Generating...' : '+ Create Document'}
+              {isUploading ? '⏳ Uploading...' : isAnalyzing ? '🔍 Analyzing...' : isGenerating ? '✨ Generating...' : isExtractingChunked ? '📝 Extracting...' : '+ Create Document'}
             </button>
             
             {/* Quick upload shortcut */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading || isAnalyzing || isGenerating}
+              disabled={isUploading || isAnalyzing || isGenerating || isExtractingChunked}
               style={{
                 width: '100%',
                 padding: '8px 12px',
@@ -810,7 +1196,7 @@ IMPORTANT:
                 color: '#6b7280',
                 border: '1px solid #d1d5db',
                 borderRadius: 6,
-                cursor: isUploading || isAnalyzing || isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isUploading || isAnalyzing || isGenerating || isExtractingChunked ? 'not-allowed' : 'pointer',
                 fontWeight: 500,
                 fontSize: 13,
               }}
@@ -1095,29 +1481,52 @@ IMPORTANT:
                                   backgroundColor: '#fff',
                                   border: '1px solid #e5e7eb',
                                   borderRadius: 6,
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'start',
-                                  gap: 12,
                                 }}
                               >
-                                <div style={{ flex: 1, fontSize: 14, color: '#111827', lineHeight: 1.5 }}>
-                                  {note.content}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12, marginBottom: 6 }}>
+                                  <div style={{ flex: 1, fontSize: 14, color: '#111827', lineHeight: 1.5 }}>
+                                    {note.content}
+                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteNote(note.id)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      backgroundColor: 'transparent',
+                                      color: '#ef4444',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      fontSize: 16,
+                                    }}
+                                    title="Delete note"
+                                  >
+                                    🗑️
+                                  </button>
                                 </div>
-                                <button
-                                  onClick={() => handleDeleteNote(note.id)}
-                                  style={{
-                                    padding: '2px 8px',
-                                    backgroundColor: 'transparent',
-                                    color: '#ef4444',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    fontSize: 16,
-                                  }}
-                                  title="Delete note"
-                                >
-                                  🗑️
-                                </button>
+                                
+                                {/* Context Information */}
+                                {(note.context?.who || note.context?.what || note.context?.when || note.context?.where) && (
+                                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
+                                    {note.context.who && note.context.who.length > 0 && (
+                                      <div><strong>Who:</strong> {note.context.who.join(', ')}</div>
+                                    )}
+                                    {note.context.what && (
+                                      <div><strong>What:</strong> {note.context.what}</div>
+                                    )}
+                                    {note.context.when && (
+                                      <div><strong>When:</strong> {note.context.when}</div>
+                                    )}
+                                    {note.context.where && (
+                                      <div><strong>Where:</strong> {note.context.where}</div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Source Information */}
+                                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                                  Source: {note.source.documentName || 'Document'} • 
+                                  {note.source.aiModel && ` AI: ${note.source.aiModel} • `}
+                                  {new Date(note.updatedAt).toLocaleDateString()}
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1690,6 +2099,178 @@ IMPORTANT:
                 }}
               >
                 ✅ Apply These Edits
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chunked Extraction Progress Indicator */}
+      {isExtractingChunked && extractionProgress && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            backgroundColor: '#fff',
+            borderRadius: 12,
+            padding: 20,
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+            minWidth: 300,
+            zIndex: 999,
+          }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              📝 Extracting Notes...
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>
+              {extractionProgress.total > 0
+                ? `Processing chunk ${extractionProgress.current} of ${extractionProgress.total}`
+                : `Processing chunk ${extractionProgress.current}...`}
+            </div>
+          </div>
+          <div style={{ 
+            height: 4, 
+            backgroundColor: '#e5e7eb', 
+            borderRadius: 2,
+            overflow: 'hidden',
+            marginBottom: 8,
+          }}>
+            <div
+              style={{
+                height: '100%',
+                backgroundColor: '#10b981',
+                width: extractionProgress.total > 0 
+                  ? `${(extractionProgress.current / extractionProgress.total) * 100}%`
+                  : '50%',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            {accumulatedNotes.length} notes extracted so far
+          </div>
+        </div>
+      )}
+
+      {/* Clarification Questions Dialog */}
+      {showClarificationDialog && clarificationQuestions.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleSkipClarifications();
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 700,
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+          >
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              ❓ Clarification Questions
+            </h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 20 }}>
+              The AI has some questions to better understand the document. Providing answers will improve note accuracy.
+            </p>
+
+            {clarificationQuestions.map((q, index) => (
+              <div
+                key={index}
+                style={{
+                  marginBottom: 20,
+                  padding: 16,
+                  backgroundColor: '#f9fafb',
+                  borderRadius: 8,
+                  border: '1px solid #e5e7eb',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+                  Question {index + 1}:
+                </div>
+                <div style={{ fontSize: 14, marginBottom: 12, color: '#374151' }}>
+                  {q.question}
+                </div>
+                {q.context && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12, fontStyle: 'italic' }}>
+                    Context: {q.context}
+                  </div>
+                )}
+                <textarea
+                  value={q.answer || ''}
+                  onChange={(e) => {
+                    const updated = [...clarificationQuestions];
+                    updated[index].answer = e.target.value;
+                    setClarificationQuestions(updated);
+                  }}
+                  placeholder="Your answer (optional)..."
+                  style={{
+                    width: '100%',
+                    minHeight: 60,
+                    padding: 10,
+                    border: '1px solid #d1d5db',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+              <button
+                onClick={handleSkipClarifications}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                Skip Questions
+              </button>
+              <button
+                onClick={handleClarificationSubmit}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 14,
+                }}
+              >
+                Submit Answers
               </button>
             </div>
           </div>
