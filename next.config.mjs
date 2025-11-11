@@ -7,7 +7,7 @@ const nextConfig = {
       '@langchain/core',
       '@langchain/openai', 
       '@langchain/textsplitters',
-      'tiktoken'
+      // 'tiktoken' // no longer used; switched to pure JS encoder
     ],
   },
   webpack: (config, { isServer }) => {

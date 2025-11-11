@@ -1,6 +1,6 @@
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { encoding_for_model } from 'tiktoken';
+import { encoding_for_model } from 'js-tiktoken';
 
 interface ConversationMessage {
   role: 'user' | 'assistant';
@@ -115,6 +115,7 @@ export class ContextManager {
    * Summarize conversation history efficiently
    */
   summarizeConversation(messages: ConversationMessage[]): string {
+    return messages
     // For very long conversations, only keep the last 2 messages
     const recentMessages = messages.slice(-2); // Reduced from 3 to 2
     

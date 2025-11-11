@@ -52,7 +52,7 @@
     "remove-markdown": "^0.6.2",
     "stripe": "^18.4.0",
     "three": "^0.179.1",
-    "tiktoken": "^1.0.22",
+  "js-tiktoken": "^1.0.21",
     "zod": "^3.25.76",
     "zustand": "^5.0.8"
   },
