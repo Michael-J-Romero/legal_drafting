@@ -18,6 +18,8 @@ import {
   validateCategory,
   NoteSourceType,
 } from './notes';
+import type { StoredDocument } from './types';
+import { addNotesToPathGraph, loadPathGraph } from './pathGraph';
 
 interface ModelConfig {
   name: string;
@@ -476,6 +478,7 @@ export default function PlanningAgentPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<Note[]>([]); // Notes waiting for user approval
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [documentNotes, setDocumentNotes] = useState<Note[]>([]); // Notes from documents
   const [editedContent, setEditedContent] = useState('');
   
   // Agent settings with defaults
@@ -501,6 +504,8 @@ export default function PlanningAgentPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as StoredChatSession[];
         const hydrated = hydrateChats(parsed);
+        const totalNotes = hydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] Loaded', hydrated.length, 'chats with', totalNotes, 'total notes from localStorage');
         setChats(hydrated);
         setActiveChatId(hydrated[0]?.id ?? null);
       } else {
@@ -517,8 +522,15 @@ export default function PlanningAgentPage() {
 
   // Persist to localStorage when chats change
   useEffect(() => {
+    if (chats.length === 0) {
+      console.log('[NOTES PERSISTENCE] Skipping save - no chats yet');
+      return;
+    }
+    
     try {
       const dehydrated = dehydrateChats(chats);
+      const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+      console.log('[NOTES PERSISTENCE] Saving', chats.length, 'chats with', totalNotes, 'total notes to localStorage');
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
     } catch (e) {
       console.error('Failed to save chats to storage', e);
@@ -554,9 +566,69 @@ export default function PlanningAgentPage() {
     return () => window.removeEventListener('click', handleWindowClick);
   }, []);
 
+  // Load document notes from localStorage
+  useEffect(() => {
+    const loadDocumentNotes = () => {
+      try {
+        const documentsRaw = typeof window !== 'undefined' ? localStorage.getItem('planningAgentDocuments') : null;
+        if (documentsRaw) {
+          const documents = JSON.parse(documentsRaw) as StoredDocument[];
+          const allDocNotes: Note[] = [];
+          
+          documents.forEach((doc) => {
+            if (doc.notes && Array.isArray(doc.notes)) {
+              doc.notes.forEach((storedNote) => {
+                allDocNotes.push(deserializeNote(storedNote));
+              });
+            }
+          });
+          
+          console.log('[NotesSync] Loaded document notes:', allDocNotes.length);
+          setDocumentNotes(allDocNotes);
+        } else {
+          console.log('[NotesSync] No documents found in localStorage');
+        }
+      } catch (e) {
+        console.error('[NotesSync] Failed to load document notes', e);
+      }
+    };
+
+    loadDocumentNotes();
+    
+    // Listen for document updates
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'planningAgentDocuments') {
+        console.log('[NotesSync] Storage change detected, reloading notes');
+        loadDocumentNotes();
+      }
+    };
+    
+    const handleDocumentsUpdated = () => {
+      console.log('[NotesSync] documentsUpdated event received');
+      loadDocumentNotes();
+    };
+    
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageChange);
+      // Also listen for custom event from DocumentsView
+      window.addEventListener('documentsUpdated', handleDocumentsUpdated as EventListener);
+      
+      return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('documentsUpdated', handleDocumentsUpdated as EventListener);
+      };
+    }
+  }, []);
+
   const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
   const messages = activeChat?.messages ?? [];
-  const notes = activeChat?.notes ?? [];
+  const chatNotes = activeChat?.notes ?? [];
+  // Aggregate notes from chat and documents
+  const notes = useMemo(() => {
+    const aggregated = [...chatNotes, ...documentNotes];
+    console.log('[NotesAggregation] Chat notes:', chatNotes.length, 'Document notes:', documentNotes.length, 'Total:', aggregated.length);
+    return aggregated;
+  }, [chatNotes, documentNotes]);
   const notesGraph = activeChat?.notesGraph ?? null;
 
   const totalUsage = useMemo(() => {
@@ -684,16 +756,171 @@ export default function PlanningAgentPage() {
     updateActiveChatMessages((prev) => prev.filter((_, idx) => idx !== index));
   }
 
+  // Helper function to process notes with path graph
+  async function processNotesWithPathGraph(notes: Note[]): Promise<Note[]> {
+    if (notes.length === 0) return notes;
+    
+    console.log('[Main Chat] Sending', notes.length, 'notes to path graph API');
+    
+    try {
+      const pathGraphResult = await addNotesToPathGraph(notes);
+      
+      if (pathGraphResult.success) {
+        console.log('[Main Chat] Path graph API returned successfully');
+        console.log('[Main Chat] updatedNotes from API:', pathGraphResult.updatedNotes?.length || 0, 'notes');
+        
+        // Log the path graph data for debugging
+        const pathGraph = loadPathGraph();
+        console.log('[PATH GRAPH DATA] Current graph structure:', JSON.stringify(pathGraph, null, 2));
+        console.log('[PATH GRAPH DATA] Top-level paths:', Object.keys(pathGraph.nodes));
+        console.log('[PATH GRAPH DATA] Total paths count:', Object.keys(pathGraph.nodes).length);
+        
+        // Use updatedNotes from API if available, otherwise extract from graph ourselves
+        const notesWithPaths = pathGraphResult.updatedNotes && pathGraphResult.updatedNotes.length > 0
+          ? pathGraphResult.updatedNotes
+          : notes; // If API didn't return updatedNotes, the API should have extracted them from graph
+        
+        console.log('[Main Chat] Path graph assigned paths to', notesWithPaths.length, 'notes');
+        
+        // CRITICAL FIX: Log and verify each note has a path
+        notesWithPaths.forEach((note: Note, idx: number) => {
+          if (note.path) {
+            console.log(`[PATH GRAPH DATA] Note ${idx + 1}/${notesWithPaths.length} (${note.id}) has path: ${note.path.path}`);
+            
+            // Extract and log descriptors for this path
+            const segments = note.path.path.split('.');
+            const descriptors: string[] = [];
+            let currentNodes = pathGraph.nodes;
+            
+            for (let i = 0; i < segments.length; i++) {
+              const segment = segments[i];
+              const node = currentNodes[segment];
+              if (node && node.descriptor) {
+                descriptors.push(node.descriptor);
+                currentNodes = node.children || {};
+              }
+            }
+            
+            if (descriptors.length > 0) {
+              console.log(`[PATH GRAPH DATA] Path descriptors for ${note.path.path}:`);
+              descriptors.forEach((desc, idx) => {
+                console.log(`  ${segments[idx]} → ${desc}`);
+              });
+            }
+          } else {
+            console.warn(`[Main Chat] Note ${idx + 1}/${notesWithPaths.length} (${note.id}) MISSING PATH!`);
+          }
+        });
+        
+        // CRITICAL FIX: Return notesWithPaths directly, not mapped
+        // The API has already processed and assigned paths to these notes
+        return notesWithPaths;
+      } else {
+        console.error('[Main Chat] Path graph API returned failure');
+      }
+    } catch (error) {
+      console.error('[Main Chat] Error processing notes with path graph:', error);
+    }
+    
+    // Fallback: return original notes if everything failed
+    console.warn('[Main Chat] Returning original notes without path assignment');
+    return notes;
+  }
+
   // Note management functions
   function addNote(note: Note) {
-    if (!activeChat) return;
-    setChats((prev) =>
-      prev.map((c) => 
-        c.id === activeChat.id 
-          ? { ...c, notes: [...(c.notes || []), note], updatedAt: new Date().toISOString() } 
-          : c
-      )
-    );
+    if (!activeChatId) {
+      console.warn('[NOTES PERSISTENCE] Cannot add note - no active chat ID');
+      return;
+    }
+    
+    const chatId = activeChatId; // Capture at call time
+    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'chatId:', chatId);
+    
+    setChats((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === chatId) {
+          const newNotes = [...(c.notes || []), note];
+          console.log('[NOTES PERSISTENCE] Updating chat', c.id, 'from', (c.notes || []).length, 'to', newNotes.length, 'notes');
+          return { 
+            ...c, 
+            notes: newNotes, 
+            updatedAt: new Date().toISOString() 
+          };
+        }
+        return c;
+      });
+      
+      const updatedChat = updated.find(c => c.id === chatId);
+      if (updatedChat) {
+        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes?.length || 0, 'notes');
+      }
+      
+      // Force new array reference for React to detect change
+      const newArray = [...updated];
+      console.log('[NOTES PERSISTENCE] Returning new chats array with length', newArray.length);
+      
+      // CRITICAL FIX: Immediately persist to localStorage with the updated data
+      // This ensures notes are saved synchronously as part of the state update
+      try {
+        const dehydrated = dehydrateChats(newArray);
+        const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE (singular):', newArray.length, 'chats with', totalNotes, 'total notes');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+      } catch (e) {
+        console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
+      }
+      
+      return newArray;
+    });
+  }
+
+  // Add multiple notes at once (more efficient than calling addNote multiple times)
+  function addNotes(notes: Note[]) {
+    if (!activeChatId || notes.length === 0) {
+      console.warn('[NOTES PERSISTENCE] Cannot add notes - no active chat ID or empty notes array');
+      return;
+    }
+    
+    const chatId = activeChatId; // Capture at call time
+    console.log('[NOTES PERSISTENCE] Adding', notes.length, 'notes to chat:', chatId);
+    
+    setChats((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === chatId) {
+          const newNotes = [...(c.notes || []), ...notes];
+          console.log('[NOTES PERSISTENCE] Batch updating chat', c.id, 'from', (c.notes || []).length, 'to', newNotes.length, 'notes');
+          return { 
+            ...c, 
+            notes: newNotes, 
+            updatedAt: new Date().toISOString() 
+          };
+        }
+        return c;
+      });
+      
+      const updatedChat = updated.find(c => c.id === chatId);
+      if (updatedChat) {
+        console.log('[NOTES PERSISTENCE] Chat now has', updatedChat.notes?.length || 0, 'notes after batch add');
+      }
+      
+      // Force new array reference for React to detect change
+      const newArray = [...updated];
+      console.log('[NOTES PERSISTENCE] Returning new chats array with length', newArray.length);
+      
+      // CRITICAL FIX: Immediately persist to localStorage with the updated data
+      // This ensures notes are saved synchronously as part of the state update
+      try {
+        const dehydrated = dehydrateChats(newArray);
+        const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
+        console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE:', newArray.length, 'chats with', totalNotes, 'total notes');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+      } catch (e) {
+        console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
+      }
+      
+      return newArray;
+    });
   }
 
   function updateNote(noteId: string, updates: Partial<Note>) {
@@ -724,13 +951,19 @@ export default function PlanningAgentPage() {
     );
   }
 
-  function acceptPendingNote(noteId: string) {
+  async function acceptPendingNote(noteId: string) {
     const pendingNote = pendingNotes.find((n) => n.id === noteId);
     if (!pendingNote) return;
     
-    // Remove isPending flag and add to chat notes
+    // Remove isPending flag
     const acceptedNote: Note = { ...pendingNote, isPending: false, isNew: true };
-    addNote(acceptedNote);
+    
+    // Process through path graph to assign hierarchical path
+    const notesWithPaths = await processNotesWithPathGraph([acceptedNote]);
+    const noteWithPath = notesWithPaths[0] || acceptedNote;
+    
+    // Add to chat notes
+    addNote(noteWithPath);
     
     // Remove from pending
     setPendingNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -765,6 +998,31 @@ export default function PlanningAgentPage() {
           : c
       )
     );
+  }
+
+  // Handle note click - navigate to the source
+  function handleNoteClick(note: Note) {
+    const sourceType = note.source.type;
+    const metadata = note.source.metadata;
+    
+    if (sourceType === 'document' && metadata?.documentId) {
+      // Navigate to documents tab and select the document
+      setActiveTab('documents');
+      // The DocumentsView will need to receive the documentId to select
+      // For now, we'll store it in a way DocumentsView can access
+      // We'll use localStorage or a ref to pass this information
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('selectedDocumentId', metadata.documentId as string);
+        // Trigger a custom event to notify DocumentsView
+        window.dispatchEvent(new CustomEvent('selectDocument', { detail: { documentId: metadata.documentId } }));
+      }
+    } else if (sourceType === 'agent_ai' || sourceType === 'user_prompt' || sourceType === 'conversation') {
+      // Navigate back to main chat
+      setActiveTab('main-chat');
+    } else if (sourceType === 'website' && note.source.url) {
+      // Open the URL in a new tab
+      window.open(note.source.url, '_blank');
+    }
   }
 
   // Intelligent note extraction using AI analysis with enhanced context
@@ -834,16 +1092,22 @@ export default function PlanningAgentPage() {
           };
         });
 
-        // Automatically accept high-confidence notes
+        // Automatically accept high-confidence notes - process through path graph first
         const autoAcceptedNotes = allNotes.filter((n: any) => n.autoAccept);
         if (autoAcceptedNotes.length > 0) {
-          autoAcceptedNotes.forEach((note: any) => {
+          const cleanAutoAcceptedNotes = autoAcceptedNotes.map((note: any) => {
             const { autoAccept, needsReview, autoReject, ...cleanNote } = note;
-            addNote({ ...cleanNote, isPending: false });
+            return { ...cleanNote, isPending: false };
           });
+          
+          // Process through path graph to assign hierarchical paths
+          const notesWithPaths = await processNotesWithPathGraph(cleanAutoAcceptedNotes);
+          // Use batch add for efficiency and to ensure all notes are added in single state update
+          addNotes(notesWithPaths);
         }
 
         // Return only notes that need user review (filter out auto-rejected and auto-accepted)
+        // These will also be processed through path graph when accepted
         return allNotes
           .filter((n: any) => n.needsReview)
           .map((n: any) => {
@@ -2045,6 +2309,7 @@ export default function PlanningAgentPage() {
           setNotes={setActiveChatNotes}
           notesGraph={notesGraph}
           setNotesGraph={setActiveChatGraph}
+          onNoteClick={handleNoteClick}
         />
       )}
 

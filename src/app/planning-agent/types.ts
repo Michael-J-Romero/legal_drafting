@@ -41,25 +41,7 @@ export interface StoredUploadedFile {
   uploadedAt: string;
 }
 
-// Simplified note interface for documents (doesn't require full source/context)
-export interface DocumentNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: Date;
-  updatedAt: Date;
-  documentId?: string;
-}
-
-export interface StoredDocumentNote {
-  id: string;
-  content: string;
-  category: string;
-  createdAt: string;
-  updatedAt: string;
-  documentId?: string;
-}
-
+// Documents now use the enhanced Note type for consistency
 export interface Document {
   id: string;
   fileName: string;
@@ -67,7 +49,7 @@ export interface Document {
   size: number;
   text: string;
   summary?: string;
-  notes: DocumentNote[];
+  notes: Note[];
   uploadedAt: Date;
   analyzedAt?: Date;
 }
@@ -79,7 +61,7 @@ export interface StoredDocument {
   size: number;
   text: string;
   summary?: string;
-  notes: StoredDocumentNote[];
+  notes: StoredNote[];
   uploadedAt: string;
   analyzedAt?: string;
 }

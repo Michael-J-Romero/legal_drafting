@@ -53,7 +53,32 @@ export interface NoteSource {
 }
 
 /**
+ * Hierarchical path for precise note location
+ * Example: "case.jurisdiction.court.location.address"
+ * Example: "case.parties.plaintiff.name"
+ * Example: "case.events.hearings.motion_to_compel.title"
+ * Example: "document.motion_to_compel.date_filed"
+ * Example: "evidence.bank_statements.date"
+ */
+export interface NotePath {
+  // Full hierarchical path (e.g., "case.parties.plaintiff.name")
+  path: string;
+  
+  // Path segments as an array for easier traversal
+  // Example: ["case", "parties", "plaintiff", "name"]
+  segments: string[];
+  
+  // References to other notes by their paths
+  // Example: evidence.bank_statements.belongs_to -> ["case.parties.plaintiff"]
+  references?: string[];
+}
+
+/**
  * Contextual information (who, what, when, where)
+ * @deprecated Since v2.0 - Use NotePath for more precise location tracking
+ * Migration: Gradually migrate existing notes to use path-based tracking.
+ * The context field will be maintained for backward compatibility but new notes
+ * should prioritize using the path field for hierarchical organization.
  */
 export interface NoteContext {
   // Who: People, organizations involved
@@ -89,7 +114,11 @@ export interface Note {
   // Source information - where did this note come from?
   source: NoteSource;
   
-  // Contextual information - who/what/when/where
+  // Hierarchical path for precise location tracking
+  path?: NotePath;
+  
+  // Legacy contextual information - kept for backward compatibility
+  // @deprecated Use path for more precise location tracking
   context: NoteContext;
   
   // UI state flags
@@ -121,6 +150,11 @@ export interface StoredNote {
     sourceTimestamp: string;  // ISO string
     metadata?: Record<string, any>;
   };
+  path?: {
+    path: string;
+    segments: string[];
+    references?: string[];
+  };
   context: {
     who?: string[];
     what?: string;
@@ -138,14 +172,23 @@ export interface StoredNote {
  * Helper to convert Note to StoredNote
  */
 export function serializeNote(note: Note): StoredNote {
+  // Defensive: ensure dates are valid Date objects
+  const now = new Date();
+  const createdAt = note.createdAt instanceof Date ? note.createdAt : now;
+  const updatedAt = note.updatedAt instanceof Date ? note.updatedAt : now;
+  const sourceTimestamp = note.source?.sourceTimestamp instanceof Date 
+    ? note.source.sourceTimestamp 
+    : now;
+  
   return {
     ...note,
-    createdAt: note.createdAt.toISOString(),
-    updatedAt: note.updatedAt.toISOString(),
+    createdAt: createdAt.toISOString(),
+    updatedAt: updatedAt.toISOString(),
     source: {
       ...note.source,
-      sourceTimestamp: note.source.sourceTimestamp.toISOString(),
+      sourceTimestamp: sourceTimestamp.toISOString(),
     },
+    path: note.path,
   };
 }
 
@@ -179,10 +222,24 @@ export function deserializeNote(stored: StoredNote | any): Note {
       ...source,
       sourceTimestamp: new Date(source.sourceTimestamp),
     },
+    path: stored.path,
     context,
     isNew: stored.isNew,
     isPending: stored.isPending,
     tags: stored.tags,
     confidence: stored.confidence,
+  };
+}
+
+/**
+ * Create a hierarchical path for a note
+ * @param pathString Dot-separated path (e.g., "case.parties.plaintiff.name")
+ * @param references Optional references to other note paths
+ */
+export function createNotePath(pathString: string, references?: string[]): NotePath {
+  return {
+    path: pathString,
+    segments: pathString.split('.'),
+    references,
   };
 }
