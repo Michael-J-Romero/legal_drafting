@@ -38,7 +38,7 @@
     "openai": "^5.12.2",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
-    "pdfjs-dist": "^5.4.296",
+  "pdfjs-dist": "3.10.111",
     "persistent-history": "file:libs/persistent-history",
     "pusher-js": "^8.4.0",
     "react": "18.2.0",
@@ -52,14 +52,14 @@
     "remove-markdown": "^0.6.2",
     "stripe": "^18.4.0",
     "three": "^0.179.1",
-  "js-tiktoken": "^1.0.21",
+    "tiktoken": "^1.0.22",
     "zod": "^3.25.76",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@types/pdf-parse": "^1.1.4",
     "@types/react": "^19.1.15",
-    "eslint": "^9.36.0",
+    "eslint": "^8.57.0",
     "prisma": "^6.18.0",
     "typescript": "^5.9.2"
   },

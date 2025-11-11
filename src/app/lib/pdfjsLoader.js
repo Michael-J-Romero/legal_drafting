@@ -84,9 +84,11 @@ async function loadPdfjsFromCdn(version = '3.10.111') {
 }
 
 export async function loadPdfjs() {
+  // Try modern ESM entry first (pdfjs-dist v4/v5), then classic build as a fallback.
+  // Avoid importing non-existent paths (e.g., legacy) to prevent compile-time failures in Next/Webpack.
   const attempts = [
-    { label: 'legacy/cjs', loader: async () => import('pdfjs-dist/legacy/build/pdf') },
-    { label: 'build/cjs', loader: async () => import('pdfjs-dist/build/pdf') },
+    { label: 'esm-main', loader: async () => import('pdfjs-dist') },
+    { label: 'build', loader: async () => import('pdfjs-dist/build/pdf') },
   ];
   const errors = [];
   pushPdfjsLog('loadPdfjs.start', { attempts: attempts.map((a) => a.label) });
@@ -101,6 +103,17 @@ export async function loadPdfjs() {
       const candidate = mod && (mod.getDocument ? mod : mod.default);
       pushPdfjsLog('loadPdfjs.loaded', { attempt: attempt.label, isEsModule, modKeys, hasDefault, defaultKeys, hasGetDoc: !!(candidate && candidate.getDocument) });
       if (candidate && typeof candidate.getDocument === 'function') {
+        // Try to configure worker source for bundlers (Webpack 5 / Next.js) when using local dist.
+        try {
+          if (candidate.GlobalWorkerOptions && !candidate.GlobalWorkerOptions.workerSrc) {
+            // Use a stable CDN worker URL compatible with v3 to avoid bundler resolution issues.
+            const workerUrl = 'https://unpkg.com/pdfjs-dist@3.10.111/build/pdf.worker.min.js';
+            candidate.GlobalWorkerOptions.workerSrc = workerUrl;
+            pushPdfjsLog('loadPdfjs.setWorker', { attempt: attempt.label, workerSrc: workerUrl });
+          }
+        } catch (e) {
+          pushPdfjsLog('loadPdfjs.setWorkerError', { message: String(e && e.message ? e.message : e) });
+        }
         pushPdfjsLog('loadPdfjs.success', { attempt: attempt.label });
         return candidate;
       }
