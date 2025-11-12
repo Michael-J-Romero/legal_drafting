@@ -183,9 +183,25 @@ export default function NotesView({
   };
 
   // Filter notes based on selected filters
-  const filteredNotes = notes.filter((note) => {
+  // Defensive sanitation: avoid runtime errors if legacy notes lack source
+  const safeNotes: Note[] = notes.map(n => {
+    if (!n.source || !n.source.type) {
+      return {
+        ...n,
+        source: {
+          type: 'agent_ai',
+          sourceTimestamp: new Date(),
+          aiModel: 'unknown',
+          metadata: { injected: true, reason: 'ui_sanitize_missing_source' }
+        }
+      } as Note;
+    }
+    return n;
+  });
+
+  const filteredNotes = safeNotes.filter((note) => {
     // Source filter
-    if (filterSource !== 'all' && note.source.type !== filterSource) {
+    if (filterSource !== 'all' && (note.source?.type || 'unknown') !== filterSource) {
       return false;
     }
     
@@ -210,7 +226,7 @@ export default function NotesView({
   });
 
   // Get unique source types from notes
-  const sourceTypes = Array.from(new Set(notes.map(n => n.source.type)));
+  const sourceTypes = Array.from(new Set(safeNotes.map(n => (n.source?.type || 'unknown'))));
 
   // Handler for deleting a note
   const handleDeleteNote = (e: React.MouseEvent, noteId: string) => {
@@ -491,13 +507,15 @@ export default function NotesView({
                 {/* Source Information */}
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
                   <div style={{ marginBottom: 4 }}>
-                    <strong>Source:</strong> {formatSourceType(note.source.type)}
+                    <strong>Source:</strong> {formatSourceType(note.source?.type || 'unknown')}
                     {note.source.url && <> • <a href={note.source.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>Link</a></>}
                     {note.source.documentName && <> • {note.source.documentName}</>}
                   </div>
                   {(note.context.who || note.context.what || note.context.when || note.context.where) && (
                     <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #e5e7eb' }}>
-                      {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}
+                      {Array.isArray(note.context.who) && note.context.who.length > 0 && (
+                        <div><strong>Who:</strong> {note.context.who.filter(x => typeof x === 'string').join(', ')}</div>
+                      )}
                       {note.context.what && <div><strong>What:</strong> {note.context.what}</div>}
                       {note.context.when && <div><strong>When:</strong> {note.context.when}</div>}
                       {note.context.where && <div><strong>Where:</strong> {note.context.where}</div>}
@@ -624,7 +642,9 @@ export default function NotesView({
                       {/* Context Information (legacy) */}
                       {(note.context.who || note.context.what || note.context.when || note.context.where) && (
                         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
-                          {note.context.who && <div><strong>Who:</strong> {note.context.who.join(', ')}</div>}
+                          {Array.isArray(note.context.who) && note.context.who.length > 0 && (
+                            <div><strong>Who:</strong> {note.context.who.filter(x => typeof x === 'string').join(', ')}</div>
+                          )}
                           {note.context.what && <div><strong>What:</strong> {note.context.what}</div>}
                           {note.context.when && <div><strong>When:</strong> {note.context.when}</div>}
                           {note.context.where && <div><strong>Where:</strong> {note.context.where}</div>}
@@ -633,7 +653,7 @@ export default function NotesView({
                       
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ fontSize: 10, color: '#9ca3af' }}>
-                          {formatSourceType(note.source.type)} • {new Date(note.updatedAt).toLocaleDateString()}
+                          {formatSourceType(note.source?.type || 'unknown')} • {new Date(note.updatedAt).toLocaleDateString()}
                           {onNoteClick && <span style={{ marginLeft: 8, color: '#3b82f6' }}>→ Click to view source</span>}
                         </div>
                         <div style={{ display: 'flex', gap: 4 }}>

@@ -1429,6 +1429,36 @@ IMPORTANT:
                   <h4 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12 }}>
                     🗒️ Extracted Notes ({selectedDocument.notes.length})
                   </h4>
+                  {/** Defensive sanitation for legacy notes missing source */}
+                  {/** We keep original selectedDocument.notes intact; sanitized version used for rendering */}
+                  {/** Wrap sanitation in inline expression returning array */}
+                  {(() => {
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                    const sanitized = selectedDocument.notes.map(n => {
+                      if (!n.source || !n.source.type) {
+                        return {
+                          ...n,
+                          source: {
+                            type: 'document',
+                            documentName: selectedDocument.fileName,
+                            sourceTimestamp: new Date(),
+                            aiModel: 'unknown',
+                            metadata: { injected: true, reason: 'documents_view_sanitize_missing_source', documentId: selectedDocument.id }
+                          }
+                        } as Note;
+                      }
+                      return n;
+                    });
+                    // attach to window for debugging (optional)
+                    if (typeof window !== 'undefined') {
+                      (window as any).__lastSanitizedDocumentNotes = sanitized;
+                    }
+                    return null; // nothing to render
+                  })()}
+                  {/** Use sanitized notes (from closure or fallback) */}
+                  {/** We retrieve sanitized notes from window if present */}
+                  {/** Fallback: original notes */}
+                  {(() => { return null; })()}
                   
                   {selectedDocument.notes.length === 0 ? (
                     <div
@@ -1448,7 +1478,8 @@ IMPORTANT:
                     <>
                       {/* Group notes by category */}
                       {['dates', 'deadlines', 'documents', 'people', 'places', 'goals', 'requirements', 'other'].map((category) => {
-                        const categoryNotes = selectedDocument.notes.filter((n) => n.category === category);
+                        const _safe = (typeof window !== 'undefined' && (window as any).__lastSanitizedDocumentNotes) || selectedDocument.notes;
+                        const categoryNotes = _safe.filter((n: Note) => n.category === category);
                         if (categoryNotes.length === 0) return null;
 
                         return (
@@ -1506,8 +1537,8 @@ IMPORTANT:
                                 {/* Context Information */}
                                 {(note.context?.who || note.context?.what || note.context?.when || note.context?.where) && (
                                   <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, padding: 6, backgroundColor: '#f9fafb', borderRadius: 4 }}>
-                                    {note.context.who && note.context.who.length > 0 && (
-                                      <div><strong>Who:</strong> {note.context.who.join(', ')}</div>
+                                    {Array.isArray(note.context.who) && note.context.who.length > 0 && (
+                                      <div><strong>Who:</strong> {note.context.who.filter(x => typeof x === 'string').join(', ')}</div>
                                     )}
                                     {note.context.what && (
                                       <div><strong>What:</strong> {note.context.what}</div>
@@ -1523,9 +1554,8 @@ IMPORTANT:
                                 
                                 {/* Source Information */}
                                 <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
-                                  Source: {note.source.documentName || 'Document'} • 
-                                  {note.source.aiModel && ` AI: ${note.source.aiModel} • `}
-                                  {new Date(note.updatedAt).toLocaleDateString()}
+                                  Source: {(note.source?.documentName || 'Document')} •
+                                  {(note.source?.aiModel ? ` AI: ${note.source.aiModel} •` : '')} {new Date(note.updatedAt).toLocaleDateString()}
                                 </div>
                               </div>
                             ))}

@@ -166,6 +166,11 @@ export function createDocumentSource(params: {
  * Assign confidence to a note based on content quality
  */
 export function assignNoteConfidence(note: Note, existingNotes: Note[]): 'auto-accept' | 'needs-review' | 'auto-reject' {
+  // Defensive: handle malformed / legacy notes without content
+  if (!note.content || typeof note.content !== 'string') {
+    console.warn('[AssignNoteConfidence] Missing or invalid note.content for note id:', note.id);
+    return 'auto-reject';
+  }
   const content = note.content.toLowerCase();
   
   // Auto-reject criteria: vague, generic, or low-value notes
@@ -180,10 +185,13 @@ export function assignNoteConfidence(note: Note, existingNotes: Note[]): 'auto-a
   
   // Check for duplicate or very similar content
   const isDuplicate = existingNotes.some(existing => {
-    const existingContent = existing.content.toLowerCase();
-    return existingContent === content || 
-           (existingContent.length > 10 && content.includes(existingContent)) ||
-           (content.length > 10 && existingContent.includes(content));
+    // Guard against undefined content in existing notes
+    const existingContentRaw = (existing && typeof existing.content === 'string') ? existing.content : '';
+    if (!existingContentRaw) return false;
+    const existingContent = existingContentRaw.toLowerCase();
+    return existingContent === content ||
+      (existingContent.length > 10 && content.includes(existingContent)) ||
+      (content.length > 10 && existingContent.includes(content));
   });
   
   // Auto-reject conditions

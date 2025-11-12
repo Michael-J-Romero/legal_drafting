@@ -187,6 +187,7 @@ interface StoredChatSession {
 
 const STORAGE_KEY = 'planningAgentChats';
 const SETTINGS_STORAGE_KEY = 'planningAgentSettings';
+const ACTIVE_CHAT_KEY = 'planningAgentActiveChatId';
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -506,14 +507,24 @@ export default function PlanningAgentPage() {
         const hydrated = hydrateChats(parsed);
         const totalNotes = hydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
         console.log('[NOTES PERSISTENCE] Loaded', hydrated.length, 'chats with', totalNotes, 'total notes from localStorage');
+        // Log hydrated note IDs per chat for debugging
+        const hydratedSnapshot = hydrated.map(c => ({ chatId: c.id, noteIds: (c.notes || []).map(n => n.id) }));
+        console.log('[NOTES PERSISTENCE][HYDRATE SNAPSHOT] Chats:', hydratedSnapshot);
         setChats(hydrated);
-        setActiveChatId(hydrated[0]?.id ?? null);
+        // Restore previously active chat if available
+        const savedActiveId = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_CHAT_KEY) : null;
+        const fallbackId = hydrated[0]?.id ?? null;
+        const targetId = savedActiveId && hydrated.find(c => c.id === savedActiveId) ? savedActiveId : fallbackId;
+        setActiveChatId(targetId);
+        console.log('[NOTES PERSISTENCE] Active chat restored to:', targetId);
       } else {
         const id = generateId();
         const now = new Date().toISOString();
         const initial: ChatSession = { id, title: 'New chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
         setChats([initial]);
         setActiveChatId(id);
+        // Persist initial active chat id
+        try { localStorage.setItem(ACTIVE_CHAT_KEY, id); } catch {}
       }
     } catch (e) {
       console.error('Failed to load chats from storage', e);
@@ -532,10 +543,23 @@ export default function PlanningAgentPage() {
       const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
       console.log('[NOTES PERSISTENCE] Saving', chats.length, 'chats with', totalNotes, 'total notes to localStorage');
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+      // Snapshot after save
+      const ids = dehydrated.map(c => ({ chatId: c.id, noteIds: (c.notes || []).map(n => n.id) }));
+      console.log('[NOTES PERSISTENCE][SNAPSHOT AFTER SAVE] Chats:', ids);
     } catch (e) {
       console.error('Failed to save chats to storage', e);
     }
   }, [chats]);
+
+  // Persist active chat id whenever it changes
+  useEffect(() => {
+    try {
+      if (activeChatId) {
+        localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+        console.log('[NOTES PERSISTENCE] Active chat persisted:', activeChatId);
+      }
+    } catch {}
+  }, [activeChatId]);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -812,9 +836,24 @@ export default function PlanningAgentPage() {
           }
         });
         
-        // CRITICAL FIX: Return notesWithPaths directly, not mapped
-        // The API has already processed and assigned paths to these notes
-        return notesWithPaths;
+        // Sanitize: ensure every note has a source object with a type
+        const sanitized = notesWithPaths.map((note: Note) => {
+          if (!note.source || !note.source.type) {
+            console.warn('[PATH GRAPH DATA] Injecting missing source for note', note.id);
+            return {
+              ...note,
+              source: note.source && note.source.type ? note.source : {
+                type: 'agent_ai',
+                sourceTimestamp: new Date(),
+                aiModel: 'unknown',
+                metadata: { injected: true }
+              }
+            } as Note;
+          }
+          return note;
+        });
+        // Return sanitized notes so downstream UI never crashes on missing source.type
+        return sanitized;
       } else {
         console.error('[Main Chat] Path graph API returned failure');
       }
@@ -824,18 +863,44 @@ export default function PlanningAgentPage() {
     
     // Fallback: return original notes if everything failed
     console.warn('[Main Chat] Returning original notes without path assignment');
-    return notes;
+    // Also sanitize fallback
+    return notes.map(n => (!n.source || !n.source.type) ? {
+      ...n,
+      source: {
+        type: 'agent_ai',
+        sourceTimestamp: new Date(),
+        aiModel: 'unknown',
+        metadata: { injected: true, reason: 'fallback_no_path_graph' }
+      }
+    } : n);
   }
 
   // Note management functions
   function addNote(note: Note) {
-    if (!activeChatId) {
-      console.warn('[NOTES PERSISTENCE] Cannot add note - no active chat ID');
+    // Ensure we have a valid target chat id without overwriting existing chats
+    let targetChatId = activeChatId;
+    if (!targetChatId) {
+      if (chats.length > 0) {
+        targetChatId = chats[0].id;
+      } else {
+        console.warn('[NOTES PERSISTENCE] No chats exist; creating a new chat for note.');
+        const newId = generateId();
+        const now = new Date().toISOString();
+        const fresh: ChatSession = { id: newId, title: 'Auto chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
+        setChats([fresh]);
+        setActiveChatId(newId);
+        try { localStorage.setItem(ACTIVE_CHAT_KEY, newId); } catch {}
+        targetChatId = newId;
+      }
+    }
+
+    if (!targetChatId) {
+      console.error('[NOTES PERSISTENCE] Still no target chat after fallback; aborting addNote');
       return;
     }
-    
-    const chatId = activeChatId; // Capture at call time
-    console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'chatId:', chatId);
+
+    const chatId = targetChatId; // Capture at call time
+  console.log('[NOTES PERSISTENCE] Adding note to chat:', note.id, 'chatId:', chatId);
     
     setChats((prev) => {
       const updated = prev.map((c) => {
@@ -867,6 +932,13 @@ export default function PlanningAgentPage() {
         const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
         console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE (singular):', newArray.length, 'chats with', totalNotes, 'total notes');
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+        // Debug snapshot
+        const storedRaw = localStorage.getItem(STORAGE_KEY);
+        if (storedRaw) {
+          const parsed = JSON.parse(storedRaw) as StoredChatSession[];
+          const ids = parsed.map(p => ({ chatId: p.id, noteIds: (p.notes || []).map(n => n.id) }));
+          console.log('[NOTES PERSISTENCE][SNAPSHOT AFTER ADD] Chats:', ids);
+        }
       } catch (e) {
         console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
       }
@@ -877,12 +949,31 @@ export default function PlanningAgentPage() {
 
   // Add multiple notes at once (more efficient than calling addNote multiple times)
   function addNotes(notes: Note[]) {
-    if (!activeChatId || notes.length === 0) {
-      console.warn('[NOTES PERSISTENCE] Cannot add notes - no active chat ID or empty notes array');
+    if (notes.length === 0) {
+      console.warn('[NOTES PERSISTENCE] Empty notes array provided to addNotes');
       return;
     }
-    
-    const chatId = activeChatId; // Capture at call time
+    let targetChatId = activeChatId;
+    if (!targetChatId) {
+      if (chats.length > 0) {
+        targetChatId = chats[0].id;
+      } else {
+        console.warn('[NOTES PERSISTENCE] No chats exist; creating a new chat for batch notes.');
+        const newId = generateId();
+        const now = new Date().toISOString();
+        const fresh: ChatSession = { id: newId, title: 'Auto chat', createdAt: now, updatedAt: now, messages: [], notes: [] };
+        setChats([fresh]);
+        setActiveChatId(newId);
+        try { localStorage.setItem(ACTIVE_CHAT_KEY, newId); } catch {}
+        targetChatId = newId;
+      }
+    }
+    if (!targetChatId) {
+      console.error('[NOTES PERSISTENCE] Still no target chat after fallback; aborting addNotes');
+      return;
+    }
+
+    const chatId = targetChatId; // Capture at call time
     console.log('[NOTES PERSISTENCE] Adding', notes.length, 'notes to chat:', chatId);
     
     setChats((prev) => {
@@ -915,6 +1006,13 @@ export default function PlanningAgentPage() {
         const totalNotes = dehydrated.reduce((sum, c) => sum + (c.notes?.length || 0), 0);
         console.log('[NOTES PERSISTENCE] IMMEDIATE SAVE:', newArray.length, 'chats with', totalNotes, 'total notes');
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dehydrated));
+        // Debug snapshot
+        const storedRaw = localStorage.getItem(STORAGE_KEY);
+        if (storedRaw) {
+          const parsed = JSON.parse(storedRaw) as StoredChatSession[];
+            const ids = parsed.map(p => ({ chatId: p.id, noteIds: (p.notes || []).map(n => n.id) }));
+            console.log('[NOTES PERSISTENCE][SNAPSHOT AFTER BATCH ADD] Chats:', ids);
+        }
       } catch (e) {
         console.error('[NOTES PERSISTENCE] IMMEDIATE SAVE FAILED:', e);
       }
@@ -1029,7 +1127,10 @@ export default function PlanningAgentPage() {
   async function intelligentNoteExtraction(assistantResponse: string, existingNotes: Note[], userMessage?: string): Promise<Note[]> {
     try {
       // Build existing notes context
-      const existingNotesContext = existingNotes.map(n => `${n.category}: ${n.content}`).join('\n');
+      const existingNotesContext = existingNotes
+        .filter(n => n && typeof n.content === 'string' && typeof n.category === 'string')
+        .map(n => `${n.category}: ${n.content}`)
+        .join('\n');
 
       // Determine the effective model for note extraction (always use quick model for this lightweight task)
       const effectiveModel = getEffectiveModel('extract-notes');
