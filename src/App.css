@@ -197,6 +197,7 @@ body {
   /* padding: 24px; */
   flex: 1;
   min-height: 0; /* allow children to scroll */
+  height: 100%;
   overflow: hidden; /* contain scroll to children */
 }
 
