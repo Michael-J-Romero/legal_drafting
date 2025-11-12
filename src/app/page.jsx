@@ -62,6 +62,9 @@ function MainMenu({ onSelectTool }) {
           <Link href="/planning-agent" className="menu-button">
             Planner agent
           </Link>
+          <Link href="/settings" className="menu-button">
+            Settings
+          </Link>
         </div>
       </div>
     </div>

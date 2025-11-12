@@ -56,6 +56,7 @@ Tools for legal document drafting and management.
 - **[Planning Agent Setup Guide](./PLANNING_AGENT_SETUP.md)** - Installation and configuration
 - **[Agent Reasoning Guide](./AGENT_REASONING_GUIDE.md)** - How to use the deep reasoning features
 - **[Implementation Summary](./IMPLEMENTATION_SUMMARY.md)** - Technical details for developers
+- **[Model Routing Guide](./docs/MODEL_ROUTING.md)** - OpenAI Responses API and GPT-5 model routing
 
 ## Usage Examples
 
