@@ -46,6 +46,7 @@ export function createInitialDocState(defaults) {
     defendantName,
     courtTitle,
     showPageNumbers: true,
+    pageNumberPlacement: 'right',
     fragments: [
       {
         id: createFragmentId(),

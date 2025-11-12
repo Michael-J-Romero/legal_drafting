@@ -20,6 +20,8 @@ export default function EditorPanel({
   courtTitle,
   showPageNumbers,
   setShowPageNumbers,
+  pageNumberPlacement,
+  setPageNumberPlacement,
   onAddLeftField,
   onLeftFieldChange,
   onRemoveLeftField,
@@ -134,6 +136,24 @@ export default function EditorPanel({
             </label>
             <div className="help-text" style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>
               Applies to on-screen preview, printing, and the compiled PDF.
+            </div>
+          </div>
+
+          <div className="card">
+            <label htmlFor="page-number-placement">Page number placement</label>
+            <select
+              id="page-number-placement"
+              className="heading-input"
+              value={pageNumberPlacement || 'right'}
+              onChange={(e) => setPageNumberPlacement && setPageNumberPlacement(e.target.value)}
+              disabled={showPageNumbers === false}
+            >
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+            </select>
+            <div className="help-text" style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>
+              Choose where page numbers appear in the footer.
             </div>
           </div>
 

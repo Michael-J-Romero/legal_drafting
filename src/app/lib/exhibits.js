@@ -1,7 +1,8 @@
 'use client';
 
 // Group exhibits by group headers when present, otherwise by legacy parent+compound run.
-export function groupExhibits(exhibits = []) {
+// startingLetter: optional single letter (e.g., 'A', 'B', 'C') to start the sequence from
+export function groupExhibits(exhibits = [], startingLetter = 'A') {
   const list = Array.isArray(exhibits) ? exhibits : [];
   const groups = [];
   let idx = 0;
@@ -23,8 +24,11 @@ export function groupExhibits(exhibits = []) {
     }
     groups.push(group);
   }
-  // assign letters sequentially per group
-  groups.forEach((g, gi) => { g.letter = String.fromCharCode(65 + gi); });
+  // assign letters sequentially per group, starting from the specified letter
+  const startCharCode = typeof startingLetter === 'string' && startingLetter.length > 0 
+    ? startingLetter.toUpperCase().charCodeAt(0) 
+    : 65; // Default to 'A'
+  groups.forEach((g, gi) => { g.letter = String.fromCharCode(startCharCode + gi); });
 
   // Build mapping index -> label (A for parent, A1, A2 for children)
   const indexToLabel = {};

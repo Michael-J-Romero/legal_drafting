@@ -78,6 +78,12 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
     onChange && onChange(fragment.id, { exhibits: list });
   };
 
+  const updatePageNumberPlacement = (index, placement) => {
+    const list = Array.isArray(fragment.exhibits) ? [...fragment.exhibits] : [];
+    list[index] = { ...list[index], pageNumberPlacement: placement };
+    onChange && onChange(fragment.id, { exhibits: list });
+  };
+
   const updateCompound = (index, makeCompound) => {
     const list = Array.isArray(fragment.exhibits) ? [...fragment.exhibits] : [];
     if (makeCompound) {
@@ -136,8 +142,14 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
     onChange && onChange(fragment.id, { captions });
   };
 
+  const updateStartingLetter = (letter) => {
+    // Validate that it's a single letter A-Z
+    const sanitized = letter.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+    onChange && onChange(fragment.id, { startingLetter: sanitized || 'A' });
+  };
+
   // Compute grouping and letters: prefer explicit group headers; fallback to legacy grouping
-  const computeGroups = (list) => {
+  const computeGroups = (list, startingLetter = 'A') => {
     const groups = [];
     const indexToLabel = {};
     let idx = 0;
@@ -161,9 +173,12 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
       }
       groups.push(group);
     }
-    // assign letters sequentially by group order
+    // assign letters sequentially by group order, starting from the specified letter
+    const startCharCode = typeof startingLetter === 'string' && startingLetter.length > 0 
+      ? startingLetter.toUpperCase().charCodeAt(0) 
+      : 65; // Default to 'A'
     groups.forEach((g, gi) => {
-      const letter = String.fromCharCode(65 + gi);
+      const letter = String.fromCharCode(startCharCode + gi);
       indexToLabel[g.parentIndex] = letter;
       g.children.forEach((idx, cIdx) => {
         indexToLabel[idx] = `${letter}${cIdx + 1}`;
@@ -174,7 +189,7 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
     return { groups, indexToLabel, parentHasChildren };
   };
 
-  const { indexToLabel, parentHasChildren } = computeGroups(exhibits);
+  const { indexToLabel, parentHasChildren } = computeGroups(exhibits, fragment.startingLetter || 'A');
 
   return (
     <div className="card editor-inline">
@@ -203,6 +218,24 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
               </div>
             ))}
             <button type="button" className="ghost" onClick={addCaptionLine}>+ Add caption line</button>
+          </div>
+        </div>
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h4 style={{ marginTop: 0 }}>Exhibit Numbering</h4>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={{ fontSize: 14 }}>Starting Letter:</label>
+            <input
+              type="text"
+              className="heading-input"
+              placeholder="A"
+              value={fragment.startingLetter || 'A'}
+              onChange={(e) => updateStartingLetter(e.target.value)}
+              style={{ width: 60, textAlign: 'center', textTransform: 'uppercase' }}
+              maxLength={1}
+            />
+            <span style={{ fontSize: 12, color: '#666' }}>
+              (Exhibits will be labeled starting from this letter)
+            </span>
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
@@ -358,6 +391,21 @@ export default function ExhibitsEditorPanel({ fragment, onCancel, onChange, onDe
                     rows={3}
                     style={{ width: '100%' }}
                   />
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: '#555', marginBottom: 4 }}>Page Number Placement</label>
+                  <select
+                    className="heading-input"
+                    value={ex.pageNumberPlacement || 'default'}
+                    onChange={(e) => updatePageNumberPlacement(index, e.target.value)}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="default">Default (follow document setting)</option>
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                    <option value="none">None (hide page numbers)</option>
+                  </select>
                 </div>
               </div>
             );

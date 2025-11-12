@@ -38,6 +38,7 @@ function ensureFragment(fragment) {
         fileId: ensureString(obj.fileId),
         isCompound: Boolean(obj.isCompound),
         isGroupHeader: Boolean(obj.isGroupHeader),
+        pageNumberPlacement: ensureString(obj.pageNumberPlacement, ''),
         // Back-compat inline data if present
         data: 'data' in obj ? obj.data ?? undefined : undefined,
       };
@@ -69,6 +70,8 @@ export function ensureSnapshot(snapshot, fallback = {}) {
     plaintiffName: ensureString(base.plaintiffName, fallback.plaintiffName),
     defendantName: ensureString(base.defendantName, fallback.defendantName),
     courtTitle: ensureString(base.courtTitle, fallback.courtTitle),
+    showPageNumbers: typeof base.showPageNumbers === 'boolean' ? base.showPageNumbers : (typeof fallback.showPageNumbers === 'boolean' ? fallback.showPageNumbers : true),
+    pageNumberPlacement: ensureString(base.pageNumberPlacement, fallback.pageNumberPlacement || 'right'),
     fragments: ensureArray(base.fragments, fallbackFragments).map(ensureFragment),
   };
 }
@@ -77,6 +80,8 @@ export function snapshotForStorage(snapshot) {
   const safe = ensureSnapshot(snapshot);
   return {
     ...safe,
+    showPageNumbers: safe.showPageNumbers,
+    pageNumberPlacement: safe.pageNumberPlacement,
     fragments: safe.fragments.map((fragment) => (
       fragment.type === 'pdf'
         ? { id: fragment.id, type: 'pdf', name: fragment.name, fileId: ensureString(fragment.fileId) }
@@ -95,6 +100,7 @@ export function snapshotForStorage(snapshot) {
                 fileId: ensureString(ex.fileId),
                 isCompound: Boolean(ex.isCompound),
                 isGroupHeader: Boolean(ex.isGroupHeader),
+                pageNumberPlacement: ensureString(ex.pageNumberPlacement, ''),
               })),
             }
           : { id: fragment.id, type: 'markdown', title: fragment.title, content: fragment.content, signatureType: ensureString(fragment.signatureType) }

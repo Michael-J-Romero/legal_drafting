@@ -40,6 +40,7 @@ export default function PaginatedMarkdown({
   onPageCount,
   disableSignature = false,
   showPageNumbers = true,
+  pageNumberPlacement = 'right',
 }) {
   const measurerRef = useRef(null);
   const sourceBodyRef = useRef(null);
@@ -872,6 +873,7 @@ export default function PaginatedMarkdown({
             suppressTitlePlaceholder={suppressTitlePlaceholder}
             showSignature={false}
             showPageNumbers={showPageNumbers}
+            pageNumberPlacement={pageNumberPlacement}
           >
             <div ref={sourceBodyRef} data-measure-source>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
@@ -894,6 +896,7 @@ export default function PaginatedMarkdown({
             suppressTitlePlaceholder={suppressTitlePlaceholder}
             showSignature={false}
             showPageNumbers={showPageNumbers}
+            pageNumberPlacement={pageNumberPlacement}
           >
             <div />
           </PleadingPage>
@@ -923,6 +926,7 @@ export default function PaginatedMarkdown({
             showSignature={disableSignature ? false : pageIndex === pages.length - 1}
             debugLayout={debugEnabled}
             showPageNumbers={showPageNumbers}
+            pageNumberPlacement={pageNumberPlacement}
           >
             <div
               className="pleading-rendered-markdown"

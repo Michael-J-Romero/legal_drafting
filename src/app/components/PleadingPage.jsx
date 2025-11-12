@@ -6,7 +6,7 @@ import { formatDisplayDate } from '../lib/date';
 // Local constant for visual line numbers on pleading paper
 const PLEADING_LINE_COUNT = 28;
 
-export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, signatureType = 'default', hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null, debugLayout = false, showPageNumbers = true }) {
+export default function PleadingPage({ heading, title, children, pageNumber, totalPages, firstPage = false, docDate, signatureType = 'default', hideHeaderBlocks = false, preTitleCaptions = [], suppressTitlePlaceholder = false, showSignature = null, debugLayout = false, showPageNumbers = true, pageNumberPlacement = 'right' }) {
   const {
     leftFields = [],
     rightFields = [],
@@ -156,7 +156,11 @@ export default function PleadingPage({ heading, title, children, pageNumber, tot
               )}
             </>
           )}
-          <div className="page-footer" aria-hidden style={debugFooterStyle}>
+          <div 
+            className={`page-footer page-footer-${pageNumberPlacement || 'right'}`} 
+            aria-hidden 
+            style={debugFooterStyle}
+          >
             {showPageNumbers ? (
               <span>
                 Page {pageNumber} of {totalPages}

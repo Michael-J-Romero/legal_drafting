@@ -753,6 +753,31 @@ button:not(:disabled):active {
   pointer-events: none;
 }
 
+/* Page number placement variants */
+.page-footer-left {
+  justify-content: flex-start;
+  /* Account for page padding (0.5in) + line number column (0.55in) + gap (0.2in) = 1.25in */
+  padding-left: 1.25in;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.page-footer-center {
+  justify-content: center;
+  /* Center within the content area, accounting for asymmetric margins */
+  /* Left: 1.25in total, Right: 1in total */
+  padding-left: 1.25in;
+  padding-right: 1in;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.page-footer-right {
+  justify-content: flex-end;
+  margin-left: 0;
+  margin-right: 1in; /* align with right edge of content area */
+}
+
 .pleading-paper::after {
   content: '';
   position: absolute;

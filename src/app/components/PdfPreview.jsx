@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { loadPdfjs, pushPdfjsLog } from '../lib/pdfjsLoader';
 
-export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageNumbers = true }) {
+export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageNumbers = true, pageNumberPlacement = 'right' }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -53,7 +53,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
           // Add consistent footer overlay when totalPages is provided
           if (typeof totalPages === 'number' && Number.isFinite(totalPages)) {
             const footer = document.createElement('div');
-            footer.className = 'page-footer';
+            footer.className = `page-footer page-footer-${pageNumberPlacement || 'right'}`;
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + pageNum;
             footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
@@ -84,7 +84,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
           content.appendChild(iframe);
           if (typeof totalPages === 'number' && Number.isFinite(totalPages)) {
             const footer = document.createElement('div');
-            footer.className = 'page-footer';
+            footer.className = `page-footer page-footer-${pageNumberPlacement || 'right'}`;
             footer.setAttribute('aria-hidden', 'true');
             const number = pageOffset + 1; // best-effort for fallback
             footer.innerHTML = showPageNumbers ? `<span>Page ${number} of ${totalPages}</span>` : '';
@@ -110,7 +110,7 @@ export default function PdfPreview({ data, pageOffset = 0, totalPages, showPageN
         try { URL.revokeObjectURL(objectUrl); } catch (_) {}
       }
     };
-  }, [data, pageOffset, totalPages, showPageNumbers]);
+  }, [data, pageOffset, totalPages, showPageNumbers, pageNumberPlacement]);
 
   return <div ref={containerRef} className="pdf-document" />;
 }

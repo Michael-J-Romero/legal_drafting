@@ -87,6 +87,7 @@ export default function useDocumentEditor() {
     defendantName,
     courtTitle,
     showPageNumbers,
+    pageNumberPlacement,
     fragments,
   } = docState;
 
@@ -165,6 +166,17 @@ export default function useDocumentEditor() {
       });
     },
     [maybeMark, updatePresent],
+  );
+
+  const setPageNumberPlacement = useCallback(
+    (valueOrUpdater) => {
+      mark();
+      updatePresent((current) => {
+        const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(current.pageNumberPlacement || 'right') : valueOrUpdater;
+        return { ...current, pageNumberPlacement: nextValue };
+      });
+    },
+    [mark, updatePresent],
   );
 
   const handleAddLeftField = useCallback(() => {
@@ -443,6 +455,7 @@ export default function useDocumentEditor() {
         defendantName: doc.defendantName || '',
         courtTitle: doc.courtTitle || '',
         showPageNumbers: typeof doc.showPageNumbers === 'boolean' ? doc.showPageNumbers : true,
+        pageNumberPlacement: doc.pageNumberPlacement || 'right',
         fragments: Array.isArray(doc.fragments) ? doc.fragments : [],
       };
       safeDoc.fragments = safeDoc.fragments.map((f) => {
@@ -528,6 +541,7 @@ export default function useDocumentEditor() {
           defendantName: doc.defendantName || '',
           courtTitle: doc.courtTitle || '',
           showPageNumbers: typeof doc.showPageNumbers === 'boolean' ? doc.showPageNumbers : true,
+          pageNumberPlacement: doc.pageNumberPlacement || 'right',
           fragments: Array.isArray(doc.fragments) ? doc.fragments : [],
         };
 
@@ -678,12 +692,23 @@ export default function useDocumentEditor() {
     if (showPageNumbers !== false) {
       const footerFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const totalPages = pdfDoc.getPageCount();
+      const placement = pageNumberPlacement || 'right';
       for (let i = 0; i < totalPages; i += 1) {
         const page = pdfDoc.getPage(i);
         const label = `Page ${i + 1} of ${totalPages}`;
         const size = 10;
         const textWidth = footerFont.widthOfTextAtSize(label, size);
-        const x = (LETTER_WIDTH - textWidth) / 2;
+        
+        // Calculate x position based on placement
+        let x;
+        if (placement === 'left') {
+          x = 72; // 1 inch from left (align with left content margin)
+        } else if (placement === 'center') {
+          x = (LETTER_WIDTH - textWidth) / 2;
+        } else { // 'right' is default
+          x = LETTER_WIDTH - textWidth - 72; // 1 inch from right (align with right content margin)
+        }
+        
         const y = 18;
         page.drawText(label, { x, y, size, font: footerFont, color: rgb(0.28, 0.32, 0.37) });
       }
@@ -698,7 +723,7 @@ export default function useDocumentEditor() {
     anchor.download = COMPILED_PDF_DOWNLOAD_NAME;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [fragments, headingSettings, docDate, showPageNumbers]);
+  }, [fragments, headingSettings, docDate, showPageNumbers, pageNumberPlacement]);
 
   useEffect(() => {
     syncFragmentCounterFromList(fragments);
@@ -749,6 +774,8 @@ export default function useDocumentEditor() {
       courtTitle,
       showPageNumbers: showPageNumbers !== false,
       setShowPageNumbers,
+      pageNumberPlacement: pageNumberPlacement || 'right',
+      setPageNumberPlacement,
       onAddLeftField: handleAddLeftField,
       onLeftFieldChange: handleLeftFieldChange,
       onRemoveLeftField: handleRemoveLeftField,
@@ -777,6 +804,7 @@ export default function useDocumentEditor() {
       headingSettings,
       docDate,
       showPageNumbers: showPageNumbers !== false,
+      pageNumberPlacement: pageNumberPlacement || 'right',
       onPrint: handlePrint,
       onCompilePdf: handleCompilePdf,
       onClearAll: handleClearAll,

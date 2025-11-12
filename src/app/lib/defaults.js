@@ -36,3 +36,4 @@ export const PRINT_DOCUMENT_TITLE = 'legal-drafting-preview';
 export const COMPILED_PDF_DOWNLOAD_NAME = 'combined.pdf';
 export const CONFIRM_DELETE_MESSAGE = 'Delete this section? This cannot be undone.';
 export const UNDO_THROTTLE_MS = 800;
+export const DEFAULT_PAGE_NUMBER_PLACEMENT = 'right'; // Options: 'left', 'center', 'right'

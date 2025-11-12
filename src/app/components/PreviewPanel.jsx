@@ -14,6 +14,7 @@ export default function PreviewPanel({
   headingSettings,
   docDate,
   showPageNumbers = true,
+  pageNumberPlacement = 'right',
   onPrint,
   onCompilePdf,
   onClearAll,
@@ -46,7 +47,7 @@ export default function PreviewPanel({
     }
   }
 
-  function PdfByRef({ fileId, dataBase64, pageOffset = 0, totalPages }) {
+  function PdfByRef({ fileId, dataBase64, pageOffset = 0, totalPages, showPageNumbers = true, pageNumberPlacement = 'right' }) {
     const [bytes, setBytes] = useState(null);
     useEffect(() => {
       let cancelled = false;
@@ -63,10 +64,10 @@ export default function PreviewPanel({
       })();
       return () => { cancelled = true; };
     }, [fileId, dataBase64]);
-    return bytes ? <PdfPreview data={bytes} pageOffset={pageOffset} totalPages={totalPages} showPageNumbers={showPageNumbers} /> : null;
+    return bytes ? <PdfPreview data={bytes} pageOffset={pageOffset} totalPages={totalPages} showPageNumbers={showPageNumbers} pageNumberPlacement={pageNumberPlacement} /> : null;
   }
 
-  function ExhibitTextPage({ captions = [], content = '', pageNumber, totalPages, title = '', coverCentered = false }) {
+  function ExhibitTextPage({ captions = [], content = '', pageNumber, totalPages, title = '', coverCentered = false, showPageNumbers = true, pageNumberPlacement = 'right' }) {
     // Avoid wrapping PaginatedMarkdown in a .pdf-page to prevent duplicate page-breaks in print.
     // For cover pages, render a single Pleading-style page with a centered overlay.
     if (coverCentered) {
@@ -104,7 +105,7 @@ export default function PreviewPanel({
               </div>
               {/* Footer page number to match pleading pages (anchor to .pleading-paper for consistent position) */}
               {typeof pageNumber === 'number' && typeof totalPages === 'number' && (
-                <div className="page-footer" aria-hidden>
+                <div className={`page-footer page-footer-${pageNumberPlacement || 'right'}`} aria-hidden>
                   {showPageNumbers ? <span>Page {pageNumber} of {totalPages}</span> : null}
                 </div>
               )}
@@ -127,11 +128,12 @@ export default function PreviewPanel({
         suppressTitlePlaceholder={false}
         disableSignature
         showPageNumbers={showPageNumbers}
+        pageNumberPlacement={pageNumberPlacement}
       />
     );
   }
 
-  function ImageByRef({ fileId, dataBase64, mimeType, alt, pageNumber, totalPages }) {
+  function ImageByRef({ fileId, dataBase64, mimeType, alt, pageNumber, totalPages, showPageNumbers = true, pageNumberPlacement = 'right' }) {
     const [url, setUrl] = useState(null);
     const canvasRef = React.useRef(null);
     useEffect(() => {
@@ -206,7 +208,7 @@ export default function PreviewPanel({
         <div className="pdf-content">
           <canvas ref={canvasRef} aria-label={alt || 'Exhibit'} />
           {(typeof pageNumber === 'number' && typeof totalPages === 'number') ? (
-            <div className="page-footer" aria-hidden>
+            <div className={`page-footer page-footer-${pageNumberPlacement || 'right'}`} aria-hidden>
               {showPageNumbers ? <span>Page {pageNumber} of {totalPages}</span> : null}
             </div>
           ) : null}
@@ -248,7 +250,7 @@ export default function PreviewPanel({
           }
           if (fragment.type !== 'exhibits') return;
           const exhibits = Array.isArray(fragment.exhibits) ? fragment.exhibits : [];
-          const { groups } = groupExhibits(exhibits);
+          const { groups } = groupExhibits(exhibits, fragment.startingLetter || 'A');
           const pdfItems = flattenPdfExhibitsWithLabels(groups);
           pdfItems.forEach(({ exhibit }) => {
             const key = exhibit.fileId || (exhibit.data ? `data:${(exhibit.data || '').slice(0,64)}` : null);
@@ -287,10 +289,12 @@ export default function PreviewPanel({
         total += count;
       } else if (fragment.type === 'exhibits') {
         const exhibits = Array.isArray(fragment.exhibits) ? fragment.exhibits : [];
-        const { groups } = groupExhibits(exhibits);
+        const { groups } = groupExhibits(exhibits, fragment.startingLetter || 'A');
         const imageItems = flattenImageExhibitsWithLabels(groups);
-        total += (imageItems.length * 2) + 1; // image pairs + index
         const pdfItems = flattenPdfExhibitsWithLabels(groups);
+        const totalExhibits = imageItems.length + pdfItems.length;
+        // Only add index page if more than 1 exhibit
+        total += (imageItems.length * 2) + (totalExhibits > 1 ? 1 : 0); // image pairs + index (if > 1 exhibit)
         pdfItems.forEach(({ exhibit }) => {
           const key = exhibit.fileId || (exhibit.data ? `data:${(exhibit.data || '').slice(0,64)}` : null);
           const count = (key && pdfCounts[key]) ? pdfCounts[key] : 1;
@@ -302,6 +306,19 @@ export default function PreviewPanel({
   }, [fragments, mdCounts, pdfCounts]);
 
   const previewFragments = useMemo(() => {
+    // Helper to determine effective page number settings for an exhibit
+    const getExhibitPageNumberSettings = (exhibit) => {
+      const placement = exhibit.pageNumberPlacement || 'default';
+      if (placement === 'none') {
+        return { showPageNumbers: false, pageNumberPlacement: pageNumberPlacement || 'right' };
+      }
+      if (placement === 'default') {
+        return { showPageNumbers, pageNumberPlacement: pageNumberPlacement || 'right' };
+      }
+      // Specific placement: left, center, right
+      return { showPageNumbers: true, pageNumberPlacement: placement };
+    };
+
     const items = [];
     let cursor = 0; // 0-based page offset across the entire document
     fragments.forEach((fragment) => {
@@ -329,6 +346,7 @@ export default function PreviewPanel({
                 pageOffset={cursor}
                 totalOverride={globalTotalPages}
                 showPageNumbers={showPageNumbers}
+                pageNumberPlacement={pageNumberPlacement}
                 onPageCount={(n) => setMdCounts((prev) => (prev[fragment.id] === n ? prev : { ...prev, [fragment.id]: n }))}
               />
             </div>
@@ -346,16 +364,20 @@ export default function PreviewPanel({
         cursor += pdfCount;
       } else if (fragment.type === 'exhibits') {
         const exhibits = Array.isArray(fragment.exhibits) ? fragment.exhibits : [];
-        const { groups } = groupExhibits(exhibits);
+        const { groups } = groupExhibits(exhibits, fragment.startingLetter || 'A');
 
         // Compute starting page number for each exhibit label based on the render order below
         const imageItems = flattenImageExhibitsWithLabels(groups);
         const pdfItems = flattenPdfExhibitsWithLabels(groups);
+        const totalExhibits = imageItems.length + pdfItems.length;
+        const hasIndex = totalExhibits > 1;
+        
   const labelStartPage = {}; // e.g., { 'A': 5, 'A1': 7 }
-  // The index itself consumes one page. Covers start on the next page.
+  // The index itself consumes one page (if more than 1 exhibit). Covers start on the next page.
   // cursor is the 0-based offset to the index page; visible page numbers are 1-based.
   // After rendering the index (Page cursor+1), the first cover is Page cursor+2.
-  let simCursor = cursor + 2; // first exhibit cover page number
+  // If no index (only 1 exhibit), first cover starts at cursor+1.
+  let simCursor = hasIndex ? cursor + 2 : cursor + 1; // first exhibit cover page number
         // Images render first: each image exhibit = cover (1) + image page (1)
         imageItems.forEach(({ label }) => {
           labelStartPage[label] = simCursor; // cover page is the start of the exhibit
@@ -369,41 +391,49 @@ export default function PreviewPanel({
           simCursor += 1 + count;
         });
 
-        // Build nested markdown bullets for the index including starting page numbers
-        const bullets = groups.map((g) => {
-          const parentTitle = g.parent.data.title || g.parent.data.name || '';
-          const parentDesc = (g.parent.data.description || '').trim();
-          const parentLabel = g.letter;
-          const parentPage = labelStartPage[parentLabel];
-          const parentSuffix = (typeof parentPage === 'number') ? ` [page ${parentPage}]` : '';
-          const parentLine = `- **Exhibit ${parentLabel.toUpperCase()} - ${parentTitle}**${parentDesc ? `: ${parentDesc}` : ''}${parentSuffix}`;
-
-          const childLines = g.children.map((c, idx) => {
-            const t = c.data.title || c.data.name || '';
-            const d = (c.data.description || '').trim();
-            const lbl = `${g.letter}${idx + 1}`;
-            const p = labelStartPage[lbl];
-            const suf = (typeof p === 'number') ? ` [page ${p}]` : '';
-            return `  - **Exhibit ${lbl.toUpperCase()} - ${t}**${d ? `: ${d}` : ''}${suf}`;
-          });
-          return [parentLine, ...childLines].join('\n');
-        }).join('\n');
-
         const captions = Array.isArray(fragment.captions) ? fragment.captions : [];
-        items.push(
-          <ExhibitTextPage
-            key={`${fragment.id}-index`}
-            captions={captions}
-            content={bullets}
-            pageNumber={cursor + 1}
-            totalPages={globalTotalPages}
-            title={'Exhibit Index'}
-          />
-        );
-        cursor += 1; // after index
+        
+        // Only render index if more than 1 exhibit
+        if (hasIndex) {
+          // Build nested markdown bullets for the index including starting page numbers
+          const bullets = groups.map((g) => {
+            const parentTitle = g.parent.data.title || g.parent.data.name || '';
+            const parentDesc = (g.parent.data.description || '').trim();
+            const parentLabel = g.letter;
+            const parentPage = labelStartPage[parentLabel];
+            const parentSuffix = (typeof parentPage === 'number') ? ` [page ${parentPage}]` : '';
+            const parentLine = `- **Exhibit ${parentLabel.toUpperCase()} - ${parentTitle}**${parentDesc ? `: ${parentDesc}` : ''}${parentSuffix}`;
+
+            const childLines = g.children.map((c, idx) => {
+              const t = c.data.title || c.data.name || '';
+              const d = (c.data.description || '').trim();
+              const lbl = `${g.letter}${idx + 1}`;
+              const p = labelStartPage[lbl];
+              const suf = (typeof p === 'number') ? ` [page ${p}]` : '';
+              return `  - **Exhibit ${lbl.toUpperCase()} - ${t}**${d ? `: ${d}` : ''}${suf}`;
+            });
+            return [parentLine, ...childLines].join('\n');
+          }).join('\n');
+
+          // Exhibit index always uses global settings
+          items.push(
+            <ExhibitTextPage
+              key={`${fragment.id}-index`}
+              captions={captions}
+              content={bullets}
+              pageNumber={cursor + 1}
+              totalPages={globalTotalPages}
+              title={'Exhibit Index'}
+              showPageNumbers={showPageNumbers}
+              pageNumberPlacement={pageNumberPlacement}
+            />
+          );
+          cursor += 1; // after index
+        }
         imageItems.forEach(({ label, exhibit }, idx) => {
           const titleLine = `exhibit ${label.toLowerCase()} - ${exhibit.title || exhibit.name || ''}`;
-          // Do not include title in captions; large title only
+          const { showPageNumbers: exShowPageNumbers, pageNumberPlacement: exPlacement } = getExhibitPageNumberSettings(exhibit);
+          // Cover page always uses global settings
           items.push(
             <ExhibitTextPage
               key={`${fragment.id}-ex-${idx}-cover`}
@@ -413,8 +443,11 @@ export default function PreviewPanel({
               totalPages={globalTotalPages}
               title={titleLine}
               coverCentered
+              showPageNumbers={showPageNumbers}
+              pageNumberPlacement={pageNumberPlacement}
             />
           );
+          // Actual exhibit content uses per-exhibit settings
           items.push(
             <ImageByRef
               key={`${fragment.id}-ex-${idx}`}
@@ -424,6 +457,8 @@ export default function PreviewPanel({
               alt={exhibit.title || exhibit.name || 'Exhibit'}
               pageNumber={cursor + 2}
               totalPages={globalTotalPages}
+              showPageNumbers={exShowPageNumbers}
+              pageNumberPlacement={exPlacement}
             />
           );
           cursor += 2;
@@ -431,6 +466,8 @@ export default function PreviewPanel({
         // Render PDF exhibits with a cover page, then the PDF content
         pdfItems.forEach(({ label, exhibit }, pidx) => {
           const titleLine = `exhibit ${label.toLowerCase()} - ${exhibit.title || exhibit.name || ''}`;
+          const { showPageNumbers: exShowPageNumbers, pageNumberPlacement: exPlacement } = getExhibitPageNumberSettings(exhibit);
+          // Cover page always uses global settings
           items.push(
             <ExhibitTextPage
               key={`${fragment.id}-pdf-${pidx}-cover`}
@@ -440,12 +477,14 @@ export default function PreviewPanel({
               totalPages={globalTotalPages}
               title={titleLine}
               coverCentered
+              showPageNumbers={showPageNumbers}
+              pageNumberPlacement={pageNumberPlacement}
             />
           );
           // advance cursor by cover + actual pdf page count (or 1 until known)
           const key = exhibit.fileId || (exhibit.data ? `data:${(exhibit.data || '').slice(0,64)}` : null);
           const pdfCount = key && pdfCounts[key] ? pdfCounts[key] : 1;
-          // PDF content pages will render with their own page footers using the offset below
+          // PDF content pages use per-exhibit settings
           items.push(
             <PdfByRef
               key={`${fragment.id}-pdf-${pidx}`}
@@ -453,6 +492,8 @@ export default function PreviewPanel({
               dataBase64={exhibit.data}
               pageOffset={cursor + 1}
               totalPages={globalTotalPages}
+              showPageNumbers={exShowPageNumbers}
+              pageNumberPlacement={exPlacement}
             />
           );
           cursor += (1 + pdfCount);
@@ -460,7 +501,7 @@ export default function PreviewPanel({
       }
     });
     return items;
-  }, [fragments, headingSettings, docDate, setFullscreenFragmentId, pdfCounts, mdCounts, globalTotalPages, showPageNumbers]);
+  }, [fragments, headingSettings, docDate, setFullscreenFragmentId, pdfCounts, mdCounts, globalTotalPages, showPageNumbers, pageNumberPlacement]);
 
   // Fit-to-width scaling: compute scale based on available width vs 8.5in
   useEffect(() => {
@@ -516,10 +557,11 @@ export default function PreviewPanel({
                 overlayOffset += (k && pdfCounts[k]) ? pdfCounts[k] : 1;
               } else if (f.type === 'exhibits') {
                 const exhibits = Array.isArray(f.exhibits) ? f.exhibits : [];
-                const { groups } = groupExhibits(exhibits);
+                const { groups } = groupExhibits(exhibits, f.startingLetter || 'A');
                 const imgs = flattenImageExhibitsWithLabels(groups);
-                overlayOffset += (imgs.length * 2) + 1; // images + index
                 const pdfs = flattenPdfExhibitsWithLabels(groups);
+                const totalExhibits = imgs.length + pdfs.length;
+                overlayOffset += (imgs.length * 2) + (totalExhibits > 1 ? 1 : 0); // images + index (if > 1 exhibit)
                 pdfs.forEach(({ exhibit }) => {
                   const kk = exhibit.fileId || (exhibit.data ? `data:${(exhibit.data || '').slice(0,64)}` : null);
                   overlayOffset += 1 + ((kk && pdfCounts[kk]) ? pdfCounts[kk] : 1);
@@ -537,6 +579,7 @@ export default function PreviewPanel({
                   pageOffset={overlayOffset}
                   totalOverride={globalTotalPages}
                   showPageNumbers={showPageNumbers}
+                  pageNumberPlacement={pageNumberPlacement}
                   onPageCount={(n) => setMdCounts((prev) => (prev[frag.id] === n ? prev : { ...prev, [frag.id]: n }))}
                 />
               </div>
